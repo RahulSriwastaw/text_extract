@@ -28,6 +28,8 @@ const PdfConverter: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
+  const [mcqMode, setMcqMode] = useState(true);
+  const [autoProofread, setAutoProofread] = useState(false);
 
   // Load history on mount
   useEffect(() => {
@@ -250,7 +252,7 @@ const PdfConverter: React.FC = () => {
             if (criticalErrorOccurred) return;
 
             try {
-                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual);
+                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
                 
                 // Process images & tables: Crop them from the original page
                 const processedElements = await Promise.all(elements.map(async (el) => {
@@ -317,7 +319,7 @@ const PdfConverter: React.FC = () => {
     setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined } : p));
 
     try {
-      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual);
+      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
       
       const processedElements = await Promise.all(elements.map(async (el) => {
           if (includeImages && (el.type === 'image' || el.type === 'table') && el.bbox) {
@@ -504,20 +506,6 @@ const PdfConverter: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsMcqSidebarOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-md text-xs font-semibold text-orange-700 hover:bg-orange-100 transition-all shadow-sm"
-            >
-              <ListChecks className="w-3.5 h-3.5" />
-              MCQ Bank
-            </button>
-            <button
-              onClick={() => setIsHistoryOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
-            >
-              <Clock className="w-3.5 h-3.5" />
-              History
-            </button>
             {pages.length > 0 && (
               <button 
                 onClick={reset}
@@ -558,39 +546,36 @@ const PdfConverter: React.FC = () => {
                animate={{ opacity: 1, y: 0 }}
                className="space-y-6"
              >
-                {/* Action Bar - More Compact & Responsive */}
-                <div className="bg-white/90 backdrop-blur-xl p-2 rounded-xl border border-slate-200 shadow-sm flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-2 sticky top-4 z-30">
+                {/* Action Bar - Reorganized for better accessibility */}
+                <div className="bg-white/95 backdrop-blur-xl p-3 rounded-2xl border border-slate-200 shadow-lg flex flex-col gap-4 sticky top-4 z-30">
                    
-                   <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                        <div className="flex items-center gap-1.5">
-                             <div className="px-1.5 py-0.5 bg-slate-100 rounded-md text-[10px] font-semibold text-slate-700">
-                                {selectedCount} / {totalCount}
+                   {/* Top Row: Selection & Main Actions */}
+                   <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="flex items-center gap-3">
+                             <div className="flex items-center gap-2 px-2 py-1 bg-slate-100 rounded-lg">
+                                <span className="text-xs font-bold text-slate-600">{selectedCount}/{totalCount}</span>
+                                <div className="flex gap-1">
+                                    <button 
+                                        onClick={() => toggleAllSelection(true)}
+                                        className="text-[10px] font-bold text-slate-700 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
+                                    >
+                                        ALL
+                                    </button>
+                                    <button 
+                                        onClick={() => toggleAllSelection(false)}
+                                        className="text-[10px] font-bold text-slate-400 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
+                                    >
+                                        NONE
+                                    </button>
+                                </div>
                              </div>
-                             <div className="flex gap-0.5">
-                                <button 
-                                    onClick={() => toggleAllSelection(true)}
-                                    className="text-[9px] font-bold text-slate-700 hover:bg-slate-100 px-1.5 py-0.5 rounded transition-colors"
-                                >
-                                    ALL
-                                </button>
-                                <button 
-                                    onClick={() => toggleAllSelection(false)}
-                                    className="text-[9px] font-bold text-slate-400 hover:bg-slate-50 px-1.5 py-0.5 rounded transition-colors"
-                                >
-                                    NONE
-                                </button>
-                            </div>
-                        </div>
 
-                        <div className="h-4 w-px bg-slate-200 hidden sm:block" />
-
-                        <div className="flex items-center gap-1.5">
                              <div className="relative">
-                                <Filter className="w-3 h-3 text-slate-400 absolute left-1.5 top-1/2 -translate-y-1/2" />
+                                <Filter className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
                                 <input 
                                     type="text" 
-                                    placeholder="Range (1-5)" 
-                                    className="pl-5 pr-1.5 py-0.5 text-[10px] bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400 transition-all w-20"
+                                    placeholder="Range (e.g. 1-5)" 
+                                    className="pl-6 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all w-28"
                                     value={rangeInput}
                                     onChange={(e) => setRangeInput(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
@@ -598,127 +583,174 @@ const PdfConverter: React.FC = () => {
                              </div>
                         </div>
 
-                        <div className="h-4 w-px bg-slate-200 hidden lg:block" />
+                        <div className="flex items-center gap-2 w-full md:w-auto">
+                            {hasCompletedPages && (
+                                <div className="flex gap-2 mr-2">
+                                    <button 
+                                        onClick={copyAllText}
+                                        className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+                                        title="Copy All"
+                                    >
+                                        {copySuccess ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                                    </button>
+                                    <button 
+                                        onClick={downloadDocx}
+                                        className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-md"
+                                    >
+                                        <FileDown className="w-4 h-4" />
+                                        DOCX
+                                    </button>
+                                </div>
+                            )}
 
-                        <div className="flex items-center gap-1.5">
-                             <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">Pattern</span>
-                             <select 
+                            {appState !== AppState.ANALYZING ? (
+                                <div className="flex gap-2 flex-1 md:flex-none">
+                                    <label className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                                        <Plus className="w-4 h-4" />
+                                        ADD
+                                        <input 
+                                            type="file" 
+                                            className="hidden" 
+                                            accept=".pdf,.jpg,.jpeg,.png" 
+                                            multiple 
+                                            onChange={(e) => handleFilesSelected(e.target.files, true)} 
+                                        />
+                                    </label>
+                                    <button
+                                        onClick={startExtraction}
+                                        disabled={selectedPendingCount === 0 && !hasErrorPages}
+                                        className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold transition-all ${
+                                            selectedPendingCount === 0 && !hasErrorPages
+                                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                : 'bg-orange-500 text-white hover:bg-orange-600 shadow-md shadow-orange-100'
+                                        }`}
+                                    >
+                                        <Wand2 className="w-4 h-4" /> 
+                                        {hasErrorPages && selectedPendingCount === 0 
+                                            ? 'RETRY' 
+                                            : `CONVERT (${selectedPendingCount})`
+                                        }
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex-1 md:flex-none px-6 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    PROCESSING...
+                                </div>
+                            )}
+                        </div>
+                   </div>
+
+                   {/* Bottom Row: Tools & Settings Grid */}
+                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 pt-3 border-t border-slate-100">
+                        {/* MCQ Mode */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-orange-50/50 border border-orange-100">
+                            <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">MCQ Mode</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-orange-700/70 font-medium">{mcqMode ? 'Active' : 'Disabled'}</span>
+                                <button
+                                    onClick={() => setMcqMode(!mcqMode)}
+                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${mcqMode ? 'bg-orange-500' : 'bg-slate-300'}`}
+                                >
+                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Auto Proofread */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-purple-50/50 border border-purple-100">
+                            <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">Proofread</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-purple-700/70 font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
+                                <button
+                                    onClick={() => setAutoProofread(!autoProofread)}
+                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoProofread ? 'bg-purple-500' : 'bg-slate-300'}`}
+                                >
+                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoProofread ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Numbering Style */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-blue-50/50 border border-blue-100">
+                            <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Pattern</span>
+                            <select 
                                 value={numberingStyle}
                                 onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
-                                className="text-[10px] font-semibold bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-slate-400 focus:border-slate-400 transition-all text-slate-700"
-                             >
+                                className="text-[10px] font-bold bg-transparent border-none p-0 focus:ring-0 text-blue-800 cursor-pointer"
+                            >
                                 <option value={NumberingStyle.Q_DOT}>Q1.</option>
                                 <option value={NumberingStyle.HASH}>#1.</option>
                                 <option value={NumberingStyle.QUESTION_DOT}>Question 1.</option>
                                 <option value={NumberingStyle.NUMBER_DOT}>1.</option>
-                             </select>
+                            </select>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Bilingual</span>
-                             <button
-                                onClick={() => setIsBilingual(!isBilingual)}
-                                className={`w-7 h-3.5 rounded-full transition-colors flex items-center px-0.5 ${isBilingual ? 'bg-slate-800' : 'bg-slate-300'}`}
-                             >
-                                <div className={`w-2.5 h-2.5 rounded-full bg-white transition-transform ${isBilingual ? 'translate-x-3.5' : 'translate-x-0'}`} />
-                             </button>
-                        </div>
-
-                        <div className="h-4 w-px bg-slate-200 hidden lg:block" />
-
-                        <div className="flex items-center gap-2">
-                             <label className="flex items-center gap-1 cursor-pointer group">
-                                <div className="relative flex items-center">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={autoDownload}
-                                        onChange={(e) => setAutoDownload(e.target.checked)}
-                                        className="peer sr-only"
-                                    />
-                                    <div className="w-6 h-3 bg-slate-200 rounded-full peer peer-checked:bg-slate-800 transition-colors" />
-                                    <div className="absolute left-0.5 top-0.5 w-2 h-2 bg-white rounded-full transition-transform peer-checked:translate-x-3" />
-                                </div>
-                                <span className="text-[8px] font-bold text-slate-500 group-hover:text-slate-700 transition-colors uppercase tracking-wider">Save</span>
-                             </label>
-
-                             <label className="flex items-center gap-1 cursor-pointer group">
-                                <div className="relative flex items-center">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={includeImages}
-                                        onChange={(e) => setIncludeImages(e.target.checked)}
-                                        className="peer sr-only"
-                                    />
-                                    <div className="w-6 h-3 bg-slate-200 rounded-full peer peer-checked:bg-slate-800 transition-colors" />
-                                    <div className="absolute left-0.5 top-0.5 w-2 h-2 bg-white rounded-full transition-transform peer-checked:translate-x-3" />
-                                </div>
-                                <span className="text-[8px] font-bold text-slate-500 group-hover:text-slate-700 transition-colors uppercase tracking-wider">Images</span>
-                             </label>
-                        </div>
-                   </div>
-                   
-                   <div className="flex items-center gap-2 w-full lg:w-auto">
-                        {hasCompletedPages && (
-                            <div className="flex gap-1.5 flex-1 lg:flex-none">
-                                <button 
-                                    onClick={copyAllText}
-                                    className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-md transition-colors"
-                                    title="Copy All"
-                                >
-                                    {copySuccess ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                                </button>
-                                <button 
-                                    onClick={copyAsMarkdown}
-                                    className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-md transition-colors"
-                                    title="Copy All as Markdown"
-                                >
-                                    <FileText className="w-4 h-4" />
-                                </button>
-                                <button 
-                                    onClick={downloadDocx}
-                                    className="flex-1 lg:flex-none px-3 py-1.5 bg-slate-900 text-white rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-slate-800 transition-all shadow-sm"
-                                >
-                                    <FileDown className="w-3.5 h-3.5" />
-                                    DOCX
-                                </button>
-                            </div>
-                        )}
-
-                        {appState !== AppState.ANALYZING ? (
-                            <div className="flex gap-2 flex-1 lg:flex-none">
-                                <label className="px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-sm">
-                                    <Plus className="w-3.5 h-3.5" />
-                                    <span className="hidden sm:inline">ADD</span>
-                                    <input 
-                                        type="file" 
-                                        className="hidden" 
-                                        accept=".pdf,.jpg,.jpeg,.png" 
-                                        multiple 
-                                        onChange={(e) => handleFilesSelected(e.target.files, true)} 
-                                    />
-                                </label>
+                        {/* Bilingual */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-emerald-50/50 border border-emerald-100">
+                            <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Bilingual</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-emerald-700/70 font-medium">{isBilingual ? 'On' : 'Off'}</span>
                                 <button
-                                    onClick={startExtraction}
-                                    disabled={selectedPendingCount === 0 && !hasErrorPages}
-                                    className={`px-4 py-1.5 rounded-md flex items-center justify-center gap-1.5 text-xs font-semibold transition-all ${
-                                        selectedPendingCount === 0 && !hasErrorPages
-                                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                            : 'bg-slate-900 text-white hover:bg-slate-800 shadow-sm'
-                                    }`}
+                                    onClick={() => setIsBilingual(!isBilingual)}
+                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${isBilingual ? 'bg-emerald-500' : 'bg-slate-300'}`}
                                 >
-                                    <Wand2 className="w-3.5 h-3.5" /> 
-                                    {hasErrorPages && selectedPendingCount === 0 
-                                        ? 'RETRY' 
-                                        : `CONVERT (${selectedPendingCount})`
-                                    }
+                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${isBilingual ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </button>
                             </div>
-                        ) : (
-                            <div className="flex-1 lg:flex-none px-4 py-1.5 bg-slate-100 text-slate-600 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5">
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                BUSY...
+                        </div>
+
+                        {/* Images */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Images</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-slate-500 font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
+                                <button
+                                    onClick={() => setIncludeImages(!includeImages)}
+                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${includeImages ? 'bg-slate-800' : 'bg-slate-300'}`}
+                                >
+                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${includeImages ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
                             </div>
-                        )}
+                        </div>
+
+                        {/* Auto Save */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Auto Save</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-slate-500 font-medium">{autoDownload ? 'On' : 'Off'}</span>
+                                <button
+                                    onClick={() => setAutoDownload(!autoDownload)}
+                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoDownload ? 'bg-slate-800' : 'bg-slate-300'}`}
+                                >
+                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoDownload ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* History */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">History</span>
+                            <button
+                                onClick={() => setIsHistoryOpen(true)}
+                                className="flex items-center justify-between text-slate-700 hover:text-slate-900 transition-colors"
+                            >
+                                <span className="text-[10px] font-medium">View Past</span>
+                                <Clock className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+
+                        {/* MCQ Bank */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-orange-50/50 border border-orange-100">
+                            <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">MCQ Bank</span>
+                            <button
+                                onClick={() => setIsMcqSidebarOpen(true)}
+                                className="flex items-center justify-between text-orange-700 hover:text-orange-900 transition-colors"
+                            >
+                                <span className="text-[10px] font-medium">Open Bank</span>
+                                <ListChecks className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
                    </div>
                 </div>
 
@@ -765,6 +797,8 @@ const PdfConverter: React.FC = () => {
           isOpen={isMcqSidebarOpen}
           onClose={() => setIsMcqSidebarOpen(false)}
           pages={pages}
+          mcqMode={mcqMode}
+          autoProofread={autoProofread}
         />
       </div>
     </div>

@@ -23,13 +23,17 @@ interface McqSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   pages: ScannedPage[];
+  mcqMode: boolean;
+  autoProofread: boolean;
 }
 
-const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages }) => {
+const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread }) => {
   const [isProofreading, setIsProofreading] = useState(false);
   const [manualMcqs, setManualMcqs] = useState<McqItem[] | null>(null);
+  const [lastProcessedPageCount, setLastProcessedPageCount] = useState(0);
   
   const autoMcqs = useMemo(() => {
+    if (!mcqMode) return [];
     const extracted: McqItem[] = [];
     let currentQuestion: Partial<McqItem> | null = null;
 
@@ -94,9 +98,20 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages }) => {
     }
     
     return extracted;
-  }, [pages]);
+  }, [pages, mcqMode]);
 
   const mcqs = manualMcqs || autoMcqs;
+
+  // Auto-proofread effect
+  React.useEffect(() => {
+    if (!autoProofread || !mcqMode || isProofreading) return;
+    
+    const donePages = pages.filter(p => p.status === 'done');
+    if (donePages.length > lastProcessedPageCount && donePages.length > 0) {
+      setLastProcessedPageCount(donePages.length);
+      handleProofread();
+    }
+  }, [pages, autoProofread, mcqMode]);
 
   const handleProofread = async () => {
     if (autoMcqs.length === 0) return;
@@ -292,7 +307,13 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages }) => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {mcqs.length === 0 ? (
+              {!mcqMode ? (
+                <div className="text-center py-12 text-slate-500">
+                  <BookOpen className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                  <p className="font-bold">MCQ Mode is Disabled</p>
+                  <p className="text-sm mt-1">Enable MCQ Mode from the top bar to extract questions.</p>
+                </div>
+              ) : mcqs.length === 0 ? (
                 <div className="text-center py-12 text-slate-500">
                   <BookOpen className="w-12 h-12 mx-auto mb-3 text-slate-300" />
                   <p>No MCQs found yet.</p>

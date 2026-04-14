@@ -17,6 +17,7 @@ export const extractLayoutFromImage = async (
   numberingStyle: NumberingStyle = NumberingStyle.HASH,
   includeImages: boolean = true,
   isBilingual: boolean = false,
+  mcqMode: boolean = true,
   retryCount = 0
 ): Promise<ExtractedElement[]> => {
   const MAX_RETRIES = 5; // Increased from 3 to 5
@@ -68,6 +69,15 @@ export const extractLayoutFromImage = async (
     : `2. **Image Elements**:
    - **STRICTLY IGNORE**: Do not extract any image elements.`;
 
+  const mcqInstruction = mcqMode 
+    ? `**MCQ EXTRACTION MODE**:
+- This document is primarily an MCQ paper.
+- Ensure every question is followed by its options (A, B, C, D, etc.).
+- If options are in a grid (e.g., A and B on one line, C and D on another), extract them in order.
+- Maintain the relationship between questions and their options.`
+    : `**GENERAL DOCUMENT MODE**:
+- Extract text as it appears. Maintain paragraphs and structure.`;
+
   try {
     const response = await client.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -80,6 +90,8 @@ export const extractLayoutFromImage = async (
         },
         {
           text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
+
+${mcqInstruction}
 
 **CRITICAL RULE: COMPLETE EXTRACTION**:
 - You MUST read the ENTIRE page from top to bottom.
@@ -226,7 +238,7 @@ Return the data as a JSON object with an 'elements' array.`
       const waitTime = Math.pow(2, retryCount) * 15000 + Math.random() * 5000; 
       console.warn(`Quota exceeded. Retrying in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
-      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, retryCount + 1);
+      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, retryCount + 1);
     }
     throw error;
   }

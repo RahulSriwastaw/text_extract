@@ -28,6 +28,7 @@ export interface ExtractedElement {
 
 export enum AppState {
   IDLE = 'IDLE',
+  UPLOAD = 'UPLOAD',
   PROCESSING_PDF = 'PROCESSING_PDF', // Converting PDF to images
   ANALYZING = 'ANALYZING', // Sending to Gemini
   CROPPING = 'CROPPING', // Extracting image regions

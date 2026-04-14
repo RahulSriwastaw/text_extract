@@ -23,8 +23,8 @@ export const convertPdfToImages = async (file: File): Promise<string[]> => {
     for (let i = 1; i <= pageCount; i++) {
       const page = await pdf.getPage(i);
       
-      // Set scale to 3.0 for high resolution OCR (vital for math denominators)
-      const viewport = page.getViewport({ scale: 3.0 });
+      // Set scale to 4.0 for higher resolution OCR (vital for small fonts and math denominators)
+      const viewport = page.getViewport({ scale: 4.0 });
       
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');

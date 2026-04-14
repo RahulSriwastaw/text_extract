@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { FileDown, RefreshCw, Wand2, AlertTriangle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus } from 'lucide-react';
+import { FileDown, RefreshCw, Wand2, AlertTriangle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
 import HistorySidebar from './HistorySidebar';
+import McqSidebar from './McqSidebar';
 import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem } from '../types';
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
@@ -26,6 +27,7 @@ const PdfConverter: React.FC = () => {
   const [optionArrangement, setOptionArrangement] = useState<OptionArrangement>(OptionArrangement.VERTICAL);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
 
   // Load history on mount
   useEffect(() => {
@@ -286,9 +288,8 @@ const PdfConverter: React.FC = () => {
                 setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error' } : p));
 
                 if (isAuthOrQuota) {
-                    setErrorMsg("API Quota Exhausted: Please wait a minute or check your Gemini API billing details."); 
-                    criticalErrorOccurred = true;
-                    setAppState(AppState.ERROR);
+                    setErrorMsg("API Rate Limit Reached: The AI is busy processing your pages. It will automatically retry with a delay. Please wait a moment."); 
+                    criticalErrorOccurred = false; // Don't stop everything, let the internal retry handle it
                 }
             }
         }));
@@ -503,6 +504,13 @@ const PdfConverter: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsMcqSidebarOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-md text-xs font-semibold text-orange-700 hover:bg-orange-100 transition-all shadow-sm"
+            >
+              <ListChecks className="w-3.5 h-3.5" />
+              MCQ Bank
+            </button>
             <button
               onClick={() => setIsHistoryOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
@@ -751,6 +759,12 @@ const PdfConverter: React.FC = () => {
           onSelectItem={handleSelectHistoryItem}
           onDeleteItem={handleDeleteHistoryItem}
           onClearAll={() => setHistory([])}
+        />
+
+        <McqSidebar 
+          isOpen={isMcqSidebarOpen}
+          onClose={() => setIsMcqSidebarOpen(false)}
+          pages={pages}
         />
       </div>
     </div>

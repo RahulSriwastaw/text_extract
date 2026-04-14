@@ -50,6 +50,8 @@ const LATEX_SYMBOLS: Record<string, string> = {
     'forall': '∀', 'exists': '∃', 'in': '∈', 'notin': '∉', 'subset': '⊂', 'subseteq': '⊆',
     'cup': '∪', 'cap': '∩', 'vee': '∨', 'wedge': '∧',
     'rightarrow': '→', 'leftarrow': '←', 'Rightarrow': '⇒', 'Leftarrow': '⇐',
+    'to': '→', 'gets': '←', 'iff': '⇔', 'implies': '⇒', 'mapsto': '↦', 'longleftrightarrow': '↔',
+    'sim': '∼', 'simeq': '≃', 'll': '≪', 'gg': '≫', 'empty': '∅', 'emptyset': '∅',
     'partial': '∂', 'nabla': '∇', 'sum': '∑', 'prod': '∏', 'int': '∫', 'oint': '∮',
     'therefore': '∴', 'because': '∵', 'angle': '∠', 'perp': '⊥', 'prime': '′',
     'ell': 'ℓ', 'Re': 'ℜ', 'Im': 'ℑ', 'aleph': 'ℵ', 'hbar': 'ℏ',
@@ -268,10 +270,23 @@ function parseLatex(latex: string): any[] {
                      // Keep the delimiter character
                      while(i < processedLatex.length && /\s/.test(processedLatex[i])) i++;
                      if (i < processedLatex.length) {
-                         nodes.push(new MathRun(processedLatex[i]));
+                         const delim = processedLatex[i];
+                         if (delim !== '.') { // \left. and \right. are invisible delimiters
+                             nodes.push(new MathRun(delim));
+                         }
                          i++;
                      }
                  }
+                 continue;
+             }
+
+             // 1.5 Handle Environments (begin/end)
+             if (remainder.startsWith('begin') || remainder.startsWith('end')) {
+                 const isBegin = remainder.startsWith('begin');
+                 i += isBegin ? 5 : 3;
+                 const [env, nextI] = extractArg(processedLatex, i);
+                 i = nextI;
+                 nodes.push(new MathRun(isBegin ? " [" : "] "));
                  continue;
              }
 
@@ -384,6 +399,40 @@ function parseLatex(latex: string): any[] {
                  if (MATH_FUNCTIONS.includes(cmd)) {
                      nodes.push(new MathRun(cmd));
                      i += 1 + cmd.length;
+                     continue;
+                 }
+
+                 // 5.5 Handle Accents and Decorations
+                 const accentMap: Record<string, string> = {
+                     'vec': '\u20D7', 'hat': '\u0302', 'bar': '\u0304',
+                     'overline': '\u0305', 'underline': '\u0332',
+                     'dot': '\u0307', 'ddot': '\u0308', 'tilde': '\u0303'
+                 };
+                 if (accentMap[cmd]) {
+                     i += 1 + cmd.length;
+                     const [arg, nextI] = extractArg(processedLatex, i);
+                     i = nextI;
+                     const combiningChar = accentMap[cmd];
+                     
+                     if (cmd === 'overline' || cmd === 'underline') {
+                         if (/^[a-zA-Z0-9]+$/.test(arg)) {
+                             let modifiedArg = "";
+                             for (let c of arg) modifiedArg += c + combiningChar;
+                             nodes.push(new MathRun(modifiedArg));
+                         } else {
+                             nodes.push(new MathRun(`${cmd}(`));
+                             nodes.push(...parseLatex(arg));
+                             nodes.push(new MathRun(`)`));
+                         }
+                     } else {
+                         if (/^[a-zA-Z0-9]$/.test(arg)) {
+                             nodes.push(new MathRun(arg + combiningChar));
+                         } else {
+                             nodes.push(new MathRun(`${cmd}(`));
+                             nodes.push(...parseLatex(arg));
+                             nodes.push(new MathRun(`)`));
+                         }
+                     }
                      continue;
                  }
 

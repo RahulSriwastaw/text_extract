@@ -70,17 +70,21 @@ export const extractLayoutFromImage = async (
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview', // Switched from pro to flash for higher rate limits
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: 'image/png',
-              data: cleanBase64
-            }
-          },
-          {
-            text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
+      model: 'gemini-3-flash-preview',
+      contents: [
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            data: cleanBase64
+          }
+        },
+        {
+          text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
+
+**CRITICAL RULE: COMPLETE EXTRACTION**:
+- You MUST read the ENTIRE page from top to bottom.
+- Do NOT skip any questions, options, paragraphs, or text, no matter how small the font is or where it is located on the page.
+- Ensure every single question and its options are extracted.
 
 **OCR CONTEXT**:
 Here is the raw text extracted by OCR:
@@ -114,10 +118,11 @@ ${imageInstruction}
    - Use Markdown for bold (**text**) and headers.
    - ${numberingInstruction}
    - Use LaTeX inside $$ ... $$ for all mathematical formulas and symbols.
-   - **MATH FUNCTIONS**: Use standard LaTeX for functions like \\sin, \\cos, \\tan, \\cosec, \\sec, \\cot. If you see "cosec", use \\cosec or \\operatorname{cosec}.
-   - **FRACTIONS**: Use \\frac{numerator}{denominator} for fractions.
-   - **BAR/OVERLINE**: For equations or symbols with a bar over them (e.g., bar(x), overline(AB)), use the LaTeX command \overline{...}.
-   - **CHEMISTRY**: If you detect chemical formulas or reactions, use the \`\\ce{...}\` command (e.g., \`\\ce{H2O}\`, \`\\ce{2H2 + O2 -> 2H2O}\`).
+   - **CRITICAL: JSON ESCAPING**: You are generating JSON. You MUST double-escape all LaTeX backslashes. For example, output \\\\frac instead of \\frac, \\\\sin instead of \\sin, \\\\underline instead of \\underline.
+   - **MATH FUNCTIONS**: Use standard LaTeX for functions like \\\\sin, \\\\cos, \\\\tan, \\\\cosec, \\\\sec, \\\\cot. If you see "cosec", use \\\\cosec or \\\\operatorname{cosec}.
+   - **FRACTIONS**: Use \\\\frac{numerator}{denominator} for fractions.
+   - **BAR/OVERLINE**: For equations or symbols with a bar over them (e.g., bar(x), overline(AB)), use the LaTeX command \\\\overline{...}.
+   - **CHEMISTRY**: If you detect chemical formulas or reactions, use the \`\\\\ce{...}\` command (e.g., \`\\\\ce{H2O}\`, \`\\\\ce{2H2 + O2 -> 2H2O}\`).
    - **CLEANUP**: Remove stray artifacts (noise) but NEVER remove valid question numbers, option labels (A, B, C, D, E), or mathematical symbols.
    - **ACCURACY**: If a technical term or formula is unclear, you may use Google Search to verify the correct notation or spelling.
 ${imageFormattingInstruction}
@@ -131,9 +136,8 @@ ${imageFormattingInstruction}
 - Coordinates are [ymin, xmin, ymax, xmax] normalized to 1000.
 
 Return the data as a JSON object with an 'elements' array.`
-          }
-        ]
-      },
+        }
+      ],
       config: {
         responseMimeType: "application/json",
         tools: [{ googleSearch: {} }],
@@ -174,7 +178,37 @@ Return the data as a JSON object with an 'elements' array.`
       }
     });
 
-    const result = JSON.parse(response.text || '{"elements": []}');
+    let result;
+    let rawText = response.text || '{"elements": []}';
+    
+    // Clean up markdown code blocks if present
+    rawText = rawText.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
+    
+    try {
+      result = JSON.parse(rawText);
+    } catch (parseError) {
+      console.warn("Initial JSON parse failed, attempting to fix escaped characters...", parseError);
+      
+      let fixedText = rawText
+        // Fix unescaped \u (e.g. \underline, \uparrow)
+        .replace(/\\u(?![0-9a-fA-F]{4})/g, '\\\\u')
+        // Fix unescaped characters that are invalid in JSON
+        .replace(/\\([^"\\/bfnrtu])/g, '\\\\$1')
+        // Fix common LaTeX commands that start with valid JSON escape characters
+        .replace(/\\f(?=rac)/g, '\\\\f')
+        .replace(/\\b(?=egin|oldsymbol|f|ar)/g, '\\\\b')
+        .replace(/\\n(?=ew|abla|o|eq)/g, '\\\\n')
+        .replace(/\\r(?=ight|m)/g, '\\\\r')
+        .replace(/\\t(?=ext|heta|imes|riangle)/g, '\\\\t');
+
+      try {
+        result = JSON.parse(fixedText);
+      } catch (e2) {
+        console.error("Failed to parse JSON even after fixing escapes", e2);
+        throw new Error("Failed to parse AI response due to complex formatting. Please try again.");
+      }
+    }
+
     const elements = result?.elements || [];
     return elements.map((el: any, index: number) => ({
       ...el,
@@ -188,8 +222,8 @@ Return the data as a JSON object with an 'elements' array.`
                          errorStr.includes("limit");
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
-      // Exponential backoff: 10s, 20s, 40s, 80s, 160s + jitter
-      const waitTime = Math.pow(2, retryCount) * 10000 + Math.random() * 5000; 
+      // Exponential backoff: 15s, 30s, 60s, 120s, 240s + jitter
+      const waitTime = Math.pow(2, retryCount) * 15000 + Math.random() * 5000; 
       console.warn(`Quota exceeded. Retrying in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
       return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, retryCount + 1);
@@ -204,4 +238,77 @@ export const extractTextFromImage = async (base64Image: string, numberingStyle: 
   return elements
     .map(el => el.type === 'text' || el.type === 'table' ? (el.content || '') : `[Image: ${el.content || ''}]`)
     .join('\n\n');
+};
+
+export const proofreadMcqs = async (rawText: string): Promise<any[]> => {
+  const client = getGeminiClient();
+
+  const prompt = `
+    You are an expert Exam Paper Editor. I will provide you with raw text extracted from an exam paper.
+    Your task is to identify and extract all Multiple Choice Questions (MCQs) from this text.
+    
+    For each MCQ:
+    1. Extract the question text clearly.
+    2. Extract all options (A, B, C, D, etc.).
+    3. Clean up any OCR errors, typos, or stray characters.
+    4. Ensure the question is complete and logical.
+    5. Remove any junk text that is not part of the question or options (e.g., page numbers, headers, footers).
+    
+    RAW TEXT:
+    "${rawText}"
+    
+    Return the result as a JSON object with a 'questions' array. Each item should have:
+    - questionText: string
+    - options: array of {label: string, text: string}
+    
+    If no MCQs are found, return {"questions": []}.
+  `;
+
+  try {
+    const response = await client.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            questions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  questionText: { type: Type.STRING },
+                  options: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        label: { type: Type.STRING },
+                        text: { type: Type.STRING }
+                      },
+                      required: ["label", "text"]
+                    }
+                  }
+                },
+                required: ["questionText", "options"]
+              }
+            }
+          },
+          required: ["questions"]
+        }
+      }
+    });
+    
+    let text = response.text || '{"questions": []}';
+    
+    // Clean up markdown code blocks
+    text = text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
+    
+    const data = JSON.parse(text);
+    return data.questions || [];
+  } catch (error) {
+    console.error("Proofreading failed:", error);
+    return [];
+  }
 };

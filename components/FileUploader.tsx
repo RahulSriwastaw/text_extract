@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, FileText, Image as ImageIcon, Plus, ClipboardPaste } from 'lucide-react';
+import { Upload, FileText, Image as ImageIcon, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface FileUploaderProps {
@@ -71,46 +71,6 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
     }
   }, [isLoading, onFilesSelected]);
 
-  const handlePasteButtonClick = useCallback(async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isLoading) return;
-    try {
-      const clipboardItems = await navigator.clipboard.read();
-      const files: File[] = [];
-      
-      let fileIndex = 0;
-      for (const clipboardItem of clipboardItems) {
-        for (const type of clipboardItem.types) {
-          if (type.startsWith('image/') || type === 'application/pdf') {
-            const blob = await clipboardItem.getType(type);
-            const extension = type === 'application/pdf' ? 'pdf' : type.split('/')[1];
-            const file = new File([blob], `pasted-file-${Date.now()}-${fileIndex++}.${extension}`, { type });
-            files.push(file);
-            break; // Only process the first valid type per item
-          }
-        }
-      }
-      
-      if (files.length > 0) {
-        if (validateFiles(files)) {
-          const dataTransfer = new DataTransfer();
-          files.forEach(file => dataTransfer.items.add(file));
-          onFilesSelected(dataTransfer.files);
-        }
-      } else {
-        alert("No valid image or PDF found in clipboard.");
-      }
-    } catch (err: any) {
-      console.error("Failed to read clipboard contents: ", err);
-      if (err.name === 'NotAllowedError') {
-        alert("Clipboard access denied. Please click the lock icon in your browser's address bar and allow clipboard access, or use Ctrl+V / Cmd+V directly on this page.");
-      } else {
-        alert("Failed to read clipboard. Please try using Ctrl+V / Cmd+V directly on this page.");
-      }
-    }
-  }, [isLoading, onFilesSelected]);
-
   return (
     <div className="w-full max-w-3xl mx-auto" onPaste={handlePaste}>
       <motion.div
@@ -149,16 +109,9 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
             <p className="text-slate-500 text-sm md:text-base">
               or <span className="text-slate-800 font-medium hover:underline">browse your files</span>
             </p>
-            <div className="pt-2">
-              <button 
-                type="button" 
-                onClick={handlePasteButtonClick}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors shadow-sm text-sm"
-              >
-                <ClipboardPaste className="w-4 h-4" />
-                Paste from Clipboard
-              </button>
-            </div>
+            <p className="text-slate-400 text-xs mt-2">
+              You can also press <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded-md text-slate-600 font-mono text-[10px]">Ctrl+V</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded-md text-slate-600 font-mono text-[10px]">Cmd+V</kbd> to paste images
+            </p>
           </div>
 
           <div className="flex items-center gap-3 pt-3">

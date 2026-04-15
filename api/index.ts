@@ -11,23 +11,29 @@ app.get('/api/config', (req, res) => {
   res.json({ keyCount: keys.length });
 });
 
-let currentKeyIndex = 0;
-
-const getGeminiClient = () => {
+const getGeminiClient = (excludeKeys: string[] = []) => {
   const keysString = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY;
   if (!keysString) {
     throw new Error("API Key is missing. Please set the GEMINI_API_KEYS environment variable.");
   }
   
-  const keys = keysString.split(',').map(k => k.trim()).filter(k => k);
+  let keys = keysString.split(',').map(k => k.trim()).filter(k => k);
   if (keys.length === 0) {
     throw new Error("No valid API keys found.");
   }
 
-  const apiKey = keys[currentKeyIndex % keys.length];
-  currentKeyIndex++;
+  // Filter out keys that have already failed in this retry chain,
+  // unless all keys have failed (in which case we try them all again)
+  let availableKeys = keys.filter(k => !excludeKeys.includes(k));
+  if (availableKeys.length === 0) {
+    availableKeys = keys;
+  }
 
-  return new GoogleGenAI({ apiKey });
+  // Select a completely random key from the available pool
+  const randomIndex = Math.floor(Math.random() * availableKeys.length);
+  const apiKey = availableKeys[randomIndex];
+
+  return { client: new GoogleGenAI({ apiKey }), key: apiKey };
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -39,10 +45,11 @@ const extractLayoutWithRetry = async (
   includeImages: boolean,
   isBilingual: boolean,
   mcqMode: boolean,
-  retryCount = 0
+  retryCount = 0,
+  failedKeys: string[] = []
 ): Promise<any> => {
   const MAX_RETRIES = 5;
-  const client = getGeminiClient();
+  const { client, key: currentKey } = getGeminiClient(failedKeys);
   
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
@@ -188,18 +195,18 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
                          errorStr.includes("limit");
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
-      const waitTime = Math.pow(2, retryCount) * 15000 + Math.random() * 5000; 
-      console.warn(`Quota exceeded. Retrying in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      const waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
+      console.warn(`Quota exceeded. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
-      return extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, retryCount + 1);
+      return extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, retryCount + 1, [...failedKeys, currentKey]);
     }
     throw error;
   }
 };
 
-const proofreadWithRetry = async (rawText: string, retryCount = 0): Promise<any> => {
+const proofreadWithRetry = async (rawText: string, retryCount = 0, failedKeys: string[] = []): Promise<any> => {
   const MAX_RETRIES = 5;
-  const client = getGeminiClient();
+  const { client, key: currentKey } = getGeminiClient(failedKeys);
 
   const prompt = `
     You are an expert Exam Paper Editor. I will provide you with raw text extracted from an exam paper.
@@ -248,10 +255,10 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0): Promise<any>
                          errorStr.includes("limit");
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
-      const waitTime = Math.pow(2, retryCount) * 15000 + Math.random() * 5000; 
-      console.warn(`Quota exceeded. Retrying in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      const waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
+      console.warn(`Quota exceeded. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
-      return proofreadWithRetry(rawText, retryCount + 1);
+      return proofreadWithRetry(rawText, retryCount + 1, [...failedKeys, currentKey]);
     }
     throw error;
   }

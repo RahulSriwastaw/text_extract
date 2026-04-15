@@ -219,6 +219,18 @@ const PdfConverter: React.FC = () => {
     setAppState(AppState.ANALYZING);
     setErrorMsg(null);
     
+    // Fetch config to know how many keys we have
+    let keyCount = 1;
+    try {
+      const res = await fetch('/api/config');
+      if (res.ok) {
+        const data = await res.json();
+        keyCount = data.keyCount || 1;
+      }
+    } catch (e) {
+      console.warn("Could not fetch config", e);
+    }
+
     // 1. Visually mark ALL selected pages as 'processing' immediately.
     setPages(prev => prev.map(p => 
       (p.isSelected && p.status !== 'done') 
@@ -229,8 +241,9 @@ const PdfConverter: React.FC = () => {
     // Identify pages to process
     const pagesToProcess = pages.filter(p => p.isSelected && p.status !== 'done');
     
-    // Batch configuration: Process 10 pages in parallel
-    const BATCH_SIZE = 10;
+    // Batch configuration: Process up to 10 pages, but limited by the number of API keys available
+    // This ensures that exactly 1 key is used per page in a batch, preventing rate limits.
+    const BATCH_SIZE = Math.max(1, Math.min(10, keyCount));
     let criticalErrorOccurred = false;
 
     for (let i = 0; i < pagesToProcess.length; i += BATCH_SIZE) {
@@ -238,9 +251,12 @@ const PdfConverter: React.FC = () => {
 
         const batch = pagesToProcess.slice(i, i + BATCH_SIZE);
         
-        // Process current batch in parallel
-        await Promise.all(batch.map(async (page) => {
+        // Process current batch in parallel with a slight stagger
+        await Promise.all(batch.map(async (page, index) => {
             if (criticalErrorOccurred) return;
+
+            // Stagger requests by 250ms to avoid hitting API rate limits on the exact same millisecond
+            await new Promise(resolve => setTimeout(resolve, index * 250));
 
             try {
                 const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
@@ -287,9 +303,9 @@ const PdfConverter: React.FC = () => {
             }
         }));
 
-        // Delay between batches to respect API limits
+        // Delay between batches to respect API limits (reduced for speed)
         if (i + BATCH_SIZE < pagesToProcess.length && !criticalErrorOccurred) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
     }
     

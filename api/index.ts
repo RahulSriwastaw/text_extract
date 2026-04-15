@@ -5,6 +5,12 @@ import { NumberingStyle } from '../types.js';
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
+app.get('/api/config', (req, res) => {
+  const keysString = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
+  const keys = keysString.split(',').map(k => k.trim()).filter(k => k);
+  res.json({ keyCount: keys.length });
+});
+
 let currentKeyIndex = 0;
 
 const getGeminiClient = () => {
@@ -87,7 +93,7 @@ const extractLayoutWithRetry = async (
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: [
         {
           inlineData: {
@@ -218,7 +224,7 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0): Promise<any>
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         temperature: 0.1,

@@ -8,13 +8,9 @@ export const extractLayoutFromImage = async (
   isBilingual: boolean = false,
   mcqMode: boolean = true
 ): Promise<ExtractedElement[]> => {
-  // Perform OCR on the client side
-  let ocrText = '';
-  try {
-    ocrText = await performOCR(base64Image);
-  } catch (e) {
-    console.warn("OCR failed, proceeding without OCR context", e);
-  }
+  // Skipping client-side OCR for speed when processing in parallel.
+  // Gemini 2.5 Flash is highly capable of reading text directly from the image.
+  const ocrText = '';
 
   const response = await fetch('/api/extract', {
     method: 'POST',

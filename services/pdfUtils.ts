@@ -23,8 +23,8 @@ export const convertPdfToImages = async (file: File): Promise<string[]> => {
     for (let i = 1; i <= pageCount; i++) {
       const page = await pdf.getPage(i);
       
-      // Set scale to 4.0 for higher resolution OCR (vital for small fonts and math denominators)
-      const viewport = page.getViewport({ scale: 4.0 });
+      // Set scale to 2.5 for good resolution while keeping payload size small for parallel processing
+      const viewport = page.getViewport({ scale: 2.5 });
       
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
@@ -34,13 +34,17 @@ export const convertPdfToImages = async (file: File): Promise<string[]> => {
       canvas.height = viewport.height;
       canvas.width = viewport.width;
 
+      // Fill with white background (JPEG doesn't support transparency)
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
       await page.render({
         canvasContext: context,
         viewport: viewport,
       }).promise;
 
-      // Convert to base64
-      const base64 = canvas.toDataURL('image/png');
+      // Convert to JPEG to massively reduce base64 size for faster network transfer
+      const base64 = canvas.toDataURL('image/jpeg', 0.8);
       images.push(base64);
     }
 

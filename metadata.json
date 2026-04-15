@@ -1,6 +1,6 @@
 {
-  "name": "PDF to Word Converter",
-  "description": "Convert scanned PDFs and images (including Hindi/English Math papers) into editable Word documents using Gemini AI.",
+  "name": "AI PDF to Text",
+  "description": "Convert scanned PDFs and images (including Hindi/English Math papers) into editable text and Word documents using Gemini AI.",
   "requestFramePermissions": [
     "clipboard-read"
   ]

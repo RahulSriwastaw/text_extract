@@ -504,7 +504,7 @@ const PdfConverter: React.FC = () => {
             </motion.div>
             <div>
               <h1 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight">
-                PDF to Word
+                AI PDF to Text
               </h1>
               <p className="text-slate-500 text-[10px] md:text-xs">
                 Professional document conversion

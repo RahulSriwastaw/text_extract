@@ -537,6 +537,72 @@ const PdfConverter: React.FC = () => {
                animate={{ opacity: 1, y: 0 }}
                className="space-y-6"
              >
+                {/* Progress Bar for Processing State */}
+                <AnimatePresence>
+                  {appState === AppState.ANALYZING && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
+                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="bg-white p-4 rounded-2xl border border-orange-100 shadow-lg shadow-orange-100/50 relative overflow-hidden">
+                        {/* Animated background gradient */}
+                        <motion.div 
+                          className="absolute inset-0 bg-gradient-to-r from-orange-50 via-white to-orange-50 opacity-50"
+                          animate={{ x: ['-100%', '100%'] }}
+                          transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
+                        />
+                        
+                        <div className="relative z-10 flex flex-col gap-3">
+                          <div className="flex justify-between items-end">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center shadow-inner">
+                                <RefreshCw className="w-5 h-5 text-orange-600 animate-spin" />
+                              </div>
+                              <div>
+                                <h3 className="text-sm font-bold text-slate-800">Processing Documents</h3>
+                                <p className="text-[10px] text-slate-500 font-medium">Applying AI models to extract content...</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-3xl font-black text-orange-500 tabular-nums tracking-tight">
+                                {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner p-0.5">
+                            <motion.div 
+                              className="h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full relative overflow-hidden shadow-sm"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%` }}
+                              transition={{ type: "spring", bounce: 0, duration: 0.5 }}
+                            >
+                              {/* Shimmer effect on the progress bar itself */}
+                              <motion.div 
+                                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                                animate={{ x: ['-100%', '200%'] }}
+                                transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                              />
+                            </motion.div>
+                          </div>
+                          
+                          <div className="flex justify-between text-[10px] font-bold text-slate-400 px-1">
+                            <span>{pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length} of {pages.filter(p => p.isSelected).length} pages completed</span>
+                            {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
+                              <span className="text-rose-500 flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded-full">
+                                <AlertTriangle className="w-3 h-3" />
+                                {pages.filter(p => p.isSelected && p.status === 'error').length} errors
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {/* Action Bar - Reorganized for better accessibility */}
                 <div className="bg-white/95 backdrop-blur-xl p-3 rounded-2xl border border-slate-200 shadow-lg flex flex-col gap-4 sticky top-4 z-30">
                    

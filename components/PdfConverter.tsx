@@ -560,9 +560,9 @@ const PdfConverter: React.FC = () => {
                       initial={{ opacity: 0, height: 0, marginBottom: 0 }}
                       animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
                       exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                      className="overflow-hidden"
+                      className="sticky top-4 z-50 overflow-hidden rounded-2xl shadow-xl shadow-orange-900/5"
                     >
-                      <div className="bg-white p-4 rounded-2xl border border-orange-100 shadow-lg shadow-orange-100/50 relative overflow-hidden">
+                      <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-orange-200 relative overflow-hidden">
                         {/* Animated background gradient */}
                         <motion.div 
                           className="absolute inset-0 bg-gradient-to-r from-orange-50 via-white to-orange-50 opacity-50"

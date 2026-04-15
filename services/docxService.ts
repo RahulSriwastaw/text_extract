@@ -730,8 +730,20 @@ export const generateDocx = async (
       flushTable();
       
       // Convert base64 to Uint8Array for docx
-      const base64Data = element.imageB64.split(',')[1] || element.imageB64;
-      const binaryData = atob(base64Data);
+      let binaryData: string;
+      try {
+        const base64Data = element.imageB64.split(',')[1] || element.imageB64;
+        // Basic validation for base64 string
+        if (!base64Data || base64Data.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(base64Data)) {
+           console.warn("Skipping invalid base64 image data");
+           continue;
+        }
+        binaryData = atob(base64Data);
+      } catch (e) {
+        console.error("Failed to decode base64 image:", e);
+        continue; // Skip this image if it can't be decoded
+      }
+      
       const bytes = new Uint8Array(binaryData.length);
       for (let i = 0; i < binaryData.length; i++) {
         bytes[i] = binaryData.charCodeAt(i);

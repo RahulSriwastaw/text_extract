@@ -192,7 +192,9 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
     const isQuotaError = errorStr.includes("429") || 
                          errorStr.includes("RESOURCE_EXHAUSTED") ||
                          errorStr.includes("quota") ||
-                         errorStr.includes("limit");
+                         errorStr.includes("limit") ||
+                         errorStr.includes("503") ||
+                         errorStr.includes("UNAVAILABLE");
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
       const waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
@@ -252,7 +254,9 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0, failedKeys: s
     const isQuotaError = errorStr.includes("429") || 
                          errorStr.includes("RESOURCE_EXHAUSTED") ||
                          errorStr.includes("quota") ||
-                         errorStr.includes("limit");
+                         errorStr.includes("limit") ||
+                         errorStr.includes("503") ||
+                         errorStr.includes("UNAVAILABLE");
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
       const waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 

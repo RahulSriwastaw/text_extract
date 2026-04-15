@@ -5,6 +5,7 @@ import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
 import HistorySidebar from './HistorySidebar';
 import McqSidebar from './McqSidebar';
+import SettingsModal from './SettingsModal';
 import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem } from '../types';
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
@@ -28,29 +29,32 @@ const PdfConverter: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(true);
   const [autoProofread, setAutoProofread] = useState(false);
+  const [apiKeys, setApiKeys] = useState<string[]>([]);
 
-  // Load history on mount
+  // Load history and settings on mount
   useEffect(() => {
     const savedHistory = localStorage.getItem('conversion_history');
     if (savedHistory) {
-      try {
-        setHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error("Failed to load history", e);
-      }
+      try { setHistory(JSON.parse(savedHistory)); } catch (e) { console.error("Failed to load history", e); }
+    }
+    const savedKeys = localStorage.getItem('gemini_api_keys');
+    if (savedKeys) {
+      try { setApiKeys(JSON.parse(savedKeys)); } catch (e) { console.error("Failed to load keys", e); }
     }
   }, []);
 
   // Save history when it changes
   useEffect(() => {
-    try {
-      localStorage.setItem('conversion_history', JSON.stringify(history));
-    } catch (e) {
-      console.error("Failed to save history to localStorage", e);
-    }
+    try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
   }, [history]);
+
+  // Save keys when they change
+  useEffect(() => {
+    try { localStorage.setItem('gemini_api_keys', JSON.stringify(apiKeys)); } catch (e) {}
+  }, [apiKeys]);
 
   // Auto-download effect
   useEffect(() => {
@@ -237,9 +241,9 @@ const PdfConverter: React.FC = () => {
     // Identify pages to process
     const pagesToProcess = pages.filter(p => p.isSelected && p.status !== 'done');
     
-    // Batch configuration: Process 1 page at a time to stay within rate limits 
-    // for free/standard tier API keys.
-    const BATCH_SIZE = 1;
+    // Batch configuration: Use available keys for parallel processing
+    const availableKeys = apiKeys.length > 0 ? apiKeys : [undefined];
+    const BATCH_SIZE = availableKeys.length; // Process as many pages in parallel as we have keys
     let criticalErrorOccurred = false;
 
     for (let i = 0; i < pagesToProcess.length; i += BATCH_SIZE) {
@@ -247,12 +251,14 @@ const PdfConverter: React.FC = () => {
 
         const batch = pagesToProcess.slice(i, i + BATCH_SIZE);
         
-        // Process current batch
-        await Promise.all(batch.map(async (page) => {
+        // Process current batch in parallel
+        await Promise.all(batch.map(async (page, index) => {
             if (criticalErrorOccurred) return;
+            
+            const currentApiKey = availableKeys[index % availableKeys.length];
 
             try {
-                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
+                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, currentApiKey);
                 
                 // Process images & tables: Crop them from the original page
                 const processedElements = await Promise.all(elements.map(async (el) => {
@@ -298,7 +304,9 @@ const PdfConverter: React.FC = () => {
 
         // Delay between batches to respect API limits
         if (i + BATCH_SIZE < pagesToProcess.length && !criticalErrorOccurred) {
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Increased from 3000 to 5000
+            // Shorter delay if we have multiple keys, as the load is distributed
+            const delayMs = apiKeys.length > 1 ? 2000 : 5000;
+            await new Promise(resolve => setTimeout(resolve, delayMs));
         }
     }
     
@@ -319,7 +327,8 @@ const PdfConverter: React.FC = () => {
     setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined } : p));
 
     try {
-      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
+      const currentApiKey = apiKeys.length > 0 ? apiKeys[0] : undefined;
+      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, currentApiKey);
       
       const processedElements = await Promise.all(elements.map(async (el) => {
           if (includeImages && (el.type === 'image' || el.type === 'table') && el.bbox) {
@@ -506,6 +515,13 @@ const PdfConverter: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-md text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              Settings
+            </button>
             {pages.length > 0 && (
               <button 
                 onClick={reset}
@@ -799,6 +815,14 @@ const PdfConverter: React.FC = () => {
           pages={pages}
           mcqMode={mcqMode}
           autoProofread={autoProofread}
+          apiKey={apiKeys.length > 0 ? apiKeys[0] : undefined}
+        />
+
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          apiKeys={apiKeys}
+          setApiKeys={setApiKeys}
         />
       </div>
     </div>

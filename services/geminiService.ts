@@ -2,10 +2,10 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { NumberingStyle, ExtractedElement } from "../types";
 import { performOCR } from './ocrService';
 
-const getGeminiClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
+const getGeminiClient = (customApiKey?: string) => {
+  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("API Key is missing. Please set the GEMINI_API_KEY environment variable.");
+    throw new Error("API Key is missing. Please set the GEMINI_API_KEY environment variable or add custom keys in Settings.");
   }
   return new GoogleGenAI({ apiKey });
 };
@@ -18,10 +18,11 @@ export const extractLayoutFromImage = async (
   includeImages: boolean = true,
   isBilingual: boolean = false,
   mcqMode: boolean = true,
+  customApiKey?: string,
   retryCount = 0
 ): Promise<ExtractedElement[]> => {
   const MAX_RETRIES = 5; // Increased from 3 to 5
-  const client = getGeminiClient();
+  const client = getGeminiClient(customApiKey);
   
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
@@ -238,7 +239,7 @@ Return the data as a JSON object with an 'elements' array.`
       const waitTime = Math.pow(2, retryCount) * 15000 + Math.random() * 5000; 
       console.warn(`Quota exceeded. Retrying in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
-      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, retryCount + 1);
+      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, customApiKey, retryCount + 1);
     }
     throw error;
   }
@@ -252,8 +253,8 @@ export const extractTextFromImage = async (base64Image: string, numberingStyle: 
     .join('\n\n');
 };
 
-export const proofreadMcqs = async (rawText: string): Promise<any[]> => {
-  const client = getGeminiClient();
+export const proofreadMcqs = async (rawText: string, customApiKey?: string): Promise<any[]> => {
+  const client = getGeminiClient(customApiKey);
 
   const prompt = `
     You are an expert Exam Paper Editor. I will provide you with raw text extracted from an exam paper.

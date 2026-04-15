@@ -25,10 +25,9 @@ interface McqSidebarProps {
   pages: ScannedPage[];
   mcqMode: boolean;
   autoProofread: boolean;
-  apiKey?: string;
 }
 
-const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread, apiKey }) => {
+const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread }) => {
   const [isProofreading, setIsProofreading] = useState(false);
   const [manualMcqs, setManualMcqs] = useState<McqItem[] | null>(null);
   const [lastProcessedPageCount, setLastProcessedPageCount] = useState(0);
@@ -125,7 +124,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
         .map(p => p.extractedText)
         .join('\n\n');
       
-      const cleanedQuestions = await proofreadMcqs(allText, apiKey);
+      const cleanedQuestions = await proofreadMcqs(allText);
       
       if (cleanedQuestions.length > 0) {
         const formattedMcqs: McqItem[] = cleanedQuestions.map((q, idx) => ({

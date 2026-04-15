@@ -1,10 +1,4 @@
-import * as docx from "docx";
-
-// Workaround: Handle ESM/CJS interop issues where named exports might be missing in the bundle
-// We treat 'docx' as a namespace and extract classes from it.
-const docxLib = (docx as any).default || docx;
-
-const { 
+import {
   Document, 
   Packer, 
   Paragraph, 
@@ -16,18 +10,17 @@ const {
   TableCell,
   WidthType,
   BorderStyle,
-  Math: DocxMath, 
+  Math as DocxMath, 
   MathRun, 
   MathFraction, 
   MathSuperScript, 
   MathSubScript, 
   MathSubSuperScript, 
   MathRadical, 
-  MathNary, 
-  MathNaryLimitLocation,
+  MathSum, 
   ImageRun,
   TabStopType
-} = docxLib;
+} from "docx";
 
 import { ExtractedElement, OptionArrangement } from "../types";
 
@@ -352,9 +345,9 @@ function parseLatex(latex: string): any[] {
                      const naryChar = naryCharMap[cmd];
                      let sub: any = undefined;
                      let sup: any = undefined;
-                     let limitLocation = (cmd.includes('int') || cmd.includes('oint')) 
-                        ? (MathNaryLimitLocation ? MathNaryLimitLocation.SUB_SUP : undefined) 
-                        : (MathNaryLimitLocation ? MathNaryLimitLocation.UND_OVR : undefined);
+                     let limitLocation: any = (cmd.includes('int') || cmd.includes('oint')) 
+                        ? "subSup" 
+                        : "undOvr";
                      
                      let j = i;
                      let subStr = "";
@@ -368,11 +361,11 @@ function parseLatex(latex: string): any[] {
                              while (j < processedLatex.length && /\s/.test(processedLatex[j])) j++;
                              if (processedLatex.slice(j).startsWith('\\limits')) { 
                                  j += 7; skipping = true; 
-                                 if(MathNaryLimitLocation) limitLocation = MathNaryLimitLocation.UND_OVR; 
+                                 limitLocation = "undOvr"; 
                              }
                              if (processedLatex.slice(j).startsWith('\\nolimits')) { 
                                  j += 9; skipping = true; 
-                                 if(MathNaryLimitLocation) limitLocation = MathNaryLimitLocation.SUB_SUP; 
+                                 limitLocation = "subSup"; 
                              }
                          }
                          if (processedLatex[j] === '_') { 
@@ -384,8 +377,8 @@ function parseLatex(latex: string): any[] {
                          } else { break; }
                      }
                      
-                     if (MathNary) {
-                         nodes.push(new MathNary({ char: naryChar, subScript: sub, superScript: sup, limitLocation: limitLocation }));
+                     if (MathSum) {
+                         nodes.push(new MathSum({ children: [new MathRun(naryChar)], subScript: sub ? [sub] : undefined, superScript: sup ? [sup] : undefined }));
                      } else {
                          nodes.push(new MathRun(naryChar));
                          if (subStr) nodes.push(new MathRun(`_(${subStr})`));

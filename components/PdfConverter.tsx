@@ -30,6 +30,7 @@ const PdfConverter: React.FC = () => {
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(true);
   const [autoProofread, setAutoProofread] = useState(false);
+  const [selectedError, setSelectedError] = useState<string | null>(null);
 
   // Load history on mount
   useEffect(() => {
@@ -294,7 +295,7 @@ const PdfConverter: React.FC = () => {
                                      errorStr.includes("quota");
 
                 // Mark page as error
-                setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error' } : p));
+                setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: errorStr } : p));
 
                 if (isAuthOrQuota) {
                     setErrorMsg("API Rate Limit Reached: The AI is busy processing your pages. It will automatically retry with a delay. Please wait a moment."); 
@@ -348,7 +349,7 @@ const PdfConverter: React.FC = () => {
       } : p));
     } catch (e: any) {
       console.error("Retry Page Error:", e);
-      setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error' } : p));
+      setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: e.message } : p));
       setErrorMsg(e.message);
     }
   };
@@ -560,9 +561,9 @@ const PdfConverter: React.FC = () => {
                       initial={{ opacity: 0, height: 0, marginBottom: 0 }}
                       animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
                       exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                      className="sticky top-4 z-50 overflow-hidden rounded-2xl shadow-xl shadow-orange-900/5"
+                      className="sticky top-0 z-50 pt-4 overflow-hidden"
                     >
-                      <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-orange-200 relative overflow-hidden">
+                      <div className="bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-orange-200 shadow-xl shadow-orange-900/5 relative overflow-hidden">
                         {/* Animated background gradient */}
                         <motion.div 
                           className="absolute inset-0 bg-gradient-to-r from-orange-50 via-white to-orange-50 opacity-50"
@@ -574,10 +575,10 @@ const PdfConverter: React.FC = () => {
                           <div className="flex justify-between items-end">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center shadow-inner">
-                                <RefreshCw className="w-5 h-5 text-orange-600 animate-spin" />
+                                <RefreshCw className={`w-5 h-5 text-orange-600 ${appState === AppState.ANALYZING ? 'animate-spin' : ''}`} />
                               </div>
-                              <div>
-                                <h3 className="text-sm font-bold text-slate-800">Processing Documents</h3>
+                              <div className="overflow-hidden">
+                                <h3 className="text-sm font-bold text-slate-800 truncate">Processing: {fileName}</h3>
                                 <p className="text-[10px] text-slate-500 font-medium">Applying AI models to extract content...</p>
                               </div>
                             </div>
@@ -604,17 +605,67 @@ const PdfConverter: React.FC = () => {
                             </motion.div>
                           </div>
                           
-                          <div className="flex justify-between text-[10px] font-bold text-slate-400 px-1">
+                          <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 px-1">
                             <span>{pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length} of {pages.filter(p => p.isSelected).length} pages completed</span>
                             {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
-                              <span className="text-rose-500 flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded-full">
-                                <AlertTriangle className="w-3 h-3" />
-                                {pages.filter(p => p.isSelected && p.status === 'error').length} errors
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-rose-500 flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded-full">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  {pages.filter(p => p.isSelected && p.status === 'error').length} errors (Pages: {pages.map((p, idx) => p.isSelected && p.status === 'error' ? idx + 1 : null).filter(p => p !== null).join(', ')})
+                                </span>
+                                <button 
+                                  onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
+                                  className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full hover:bg-slate-200 transition-colors"
+                                >
+                                  View Logs
+                                </button>
+                                <button 
+                                  onClick={() => {
+                                    // Logic to retry failed pages
+                                    setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending' } : p));
+                                    // Trigger processing again
+                                    processPages();
+                                  }}
+                                  className="bg-rose-600 text-white px-2 py-1 rounded-full hover:bg-rose-700 transition-colors"
+                                >
+                                  Retry Failed
+                                </button>
+                              </div>
                             )}
                           </div>
                         </div>
                       </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Error Modal */}
+                <AnimatePresence>
+                  {selectedError && (
+                    <motion.div 
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4"
+                      onClick={() => setSelectedError(null)}
+                    >
+                      <motion.div 
+                        initial={{ scale: 0.9 }}
+                        animate={{ scale: 1 }}
+                        className="bg-white p-6 rounded-2xl max-w-lg w-full shadow-2xl"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <h3 className="text-lg font-bold text-slate-900 mb-4">Error Details</h3>
+                        <pre className="bg-slate-100 p-4 rounded-lg text-xs text-slate-700 overflow-auto max-h-60 whitespace-pre-wrap">
+                          {selectedError}
+                        </pre>
+                        <button 
+                          onClick={() => setSelectedError(null)}
+                          className="mt-4 w-full bg-slate-900 text-white py-2 rounded-lg hover:bg-slate-800"
+                        >
+                          Close
+                        </button>
+                      </motion.div>
                     </motion.div>
                   )}
                 </AnimatePresence>

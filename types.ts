@@ -41,6 +41,7 @@ export interface ScannedPage {
   imageUrl: string; // Base64 or Blob URL
   pageNumber: number;
   status: 'pending' | 'processing' | 'done' | 'error';
+  errorMessage?: string;
   extractedText?: string; // Legacy support
   elements?: ExtractedElement[];
   isSelected: boolean;

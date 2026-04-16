@@ -244,7 +244,7 @@ const PdfConverter: React.FC = () => {
     // 1. Visually mark ALL selected pages as 'processing' immediately.
     setPages(prev => prev.map(p => 
       (p.isSelected && p.status !== 'done') 
-        ? { ...p, status: 'processing' } 
+        ? { ...p, status: 'processing', elements: undefined, extractedText: undefined } 
         : p
     ));
     
@@ -339,7 +339,7 @@ const PdfConverter: React.FC = () => {
     setErrorMsg(null);
 
     // Update to processing
-    setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined } : p));
+    setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined } : p));
 
     try {
       const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
@@ -760,7 +760,7 @@ const PdfConverter: React.FC = () => {
                                         {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
                                             <button 
                                                 onClick={() => {
-                                                    setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending' } : p));
+                                                    setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending', elements: undefined, extractedText: undefined } : p));
                                                     startExtraction();
                                                 }}
                                                 className="px-4 py-2 bg-rose-600 text-white rounded-lg text-xs font-bold hover:bg-rose-700 transition-colors shadow-md"

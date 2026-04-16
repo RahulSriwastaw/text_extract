@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   LayoutDashboard, 
   Users, 
@@ -15,7 +16,10 @@ import {
   Download,
   Briefcase,
   GraduationCap,
-  ShieldCheck
+  ShieldCheck,
+  X,
+  Activity,
+  Mail
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -42,15 +46,68 @@ const data = [
 ];
 
 const projects = [
-  { id: 1, name: 'Global Academy', status: 'Active', students: 1240, growth: '+12%', manager: 'Sarah Chen' },
-  { id: 2, name: 'Tech Institute', status: 'Active', students: 850, growth: '+5%', manager: 'James Wilson' },
-  { id: 3, name: 'Future Skills', status: 'Pending', students: 0, growth: '0%', manager: 'Elena Rodriguez' },
-  { id: 4, name: 'Creative Arts', status: 'Active', students: 420, growth: '-2%', manager: 'Michael Bay' },
-  { id: 5, name: 'Science Hub', status: 'Inactive', students: 0, growth: '0%', manager: 'David Kim' },
+  { 
+    id: 1, 
+    name: 'Global Academy', 
+    status: 'Active', 
+    students: 1240, 
+    growth: '+12%', 
+    manager: 'Sarah Chen',
+    description: 'A comprehensive platform for international students focusing on language and culture.',
+    recentActivity: [
+      { id: 1, type: 'Enrollment', user: 'John Doe', time: '2 hours ago', status: 'Completed' },
+      { id: 2, type: 'Course Update', user: 'Sarah Chen', time: '5 hours ago', status: 'Published' },
+      { id: 3, type: 'Payment', user: 'Maria Garcia', time: '1 day ago', status: 'Verified' },
+    ],
+    associatedUsers: [
+      { id: 1, name: 'Sarah Chen', role: 'Project Manager', email: 'sarah@global.com' },
+      { id: 2, name: 'David Miller', role: 'Instructor', email: 'david@global.com' },
+      { id: 3, name: 'Lisa Wong', role: 'Support', email: 'lisa@global.com' },
+    ],
+    metrics: [
+      { name: 'Mon', value: 40 },
+      { name: 'Tue', value: 30 },
+      { name: 'Wed', value: 60 },
+      { name: 'Thu', value: 45 },
+      { name: 'Fri', value: 70 },
+      { name: 'Sat', value: 55 },
+      { name: 'Sun', value: 80 },
+    ]
+  },
+  { 
+    id: 2, 
+    name: 'Tech Institute', 
+    status: 'Active', 
+    students: 850, 
+    growth: '+5%', 
+    manager: 'James Wilson',
+    description: 'Advanced technical training center for software engineering and data science.',
+    recentActivity: [
+      { id: 1, type: 'New Course', user: 'James Wilson', time: '1 hour ago', status: 'Draft' },
+      { id: 2, type: 'Enrollment', user: 'Kevin Hart', time: '3 hours ago', status: 'Completed' },
+    ],
+    associatedUsers: [
+      { id: 1, name: 'James Wilson', role: 'Project Manager', email: 'james@tech.com' },
+      { id: 2, name: 'Robert Fox', role: 'Lead Dev', email: 'rob@tech.com' },
+    ],
+    metrics: [
+      { name: 'Mon', value: 20 },
+      { name: 'Tue', value: 40 },
+      { name: 'Wed', value: 35 },
+      { name: 'Thu', value: 50 },
+      { name: 'Fri', value: 45 },
+      { name: 'Sat', value: 60 },
+      { name: 'Sun', value: 55 },
+    ]
+  },
+  { id: 3, name: 'Future Skills', status: 'Pending', students: 0, growth: '0%', manager: 'Elena Rodriguez', description: 'Upcoming project focusing on soft skills and leadership.', recentActivity: [], associatedUsers: [], metrics: [] },
+  { id: 4, name: 'Creative Arts', status: 'Active', students: 420, growth: '-2%', manager: 'Michael Bay', description: 'Digital arts and media production school.', recentActivity: [], associatedUsers: [], metrics: [] },
+  { id: 5, name: 'Science Hub', status: 'Inactive', students: 0, growth: '0%', manager: 'David Kim', description: 'Research and development center for STEM education.', recentActivity: [], associatedUsers: [], metrics: [] },
 ];
 
 const AdminPanel = () => {
   const [activeTab, setActiveTab] = useState('Dashboard');
+  const [selectedProject, setSelectedProject] = useState<any>(null);
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans">
@@ -283,7 +340,11 @@ const AdminPanel = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {projects.map((project) => (
-                    <tr key={project.id} className="hover:bg-slate-50/50 transition-colors group">
+                    <tr 
+                      key={project.id} 
+                      className="hover:bg-slate-50/50 transition-colors group cursor-pointer"
+                      onClick={() => setSelectedProject(project)}
+                    >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 font-bold text-xs">
@@ -340,6 +401,146 @@ const AdminPanel = () => {
           </div>
         </div>
       </main>
+
+      {/* Project Detail Modal */}
+      <AnimatePresence>
+        {selectedProject && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* Modal Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-orange-500 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-orange-500/20">
+                    {selectedProject.name.charAt(0)}
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">{selectedProject.name}</h2>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        selectedProject.status === 'Active' ? 'bg-emerald-50 text-emerald-600' :
+                        selectedProject.status === 'Pending' ? 'bg-amber-50 text-amber-600' :
+                        'bg-slate-100 text-slate-500'
+                      }`}>
+                        {selectedProject.status}
+                      </span>
+                      <span className="text-xs text-slate-400">•</span>
+                      <span className="text-xs text-slate-500 font-medium">Managed by {selectedProject.manager}</span>
+                    </div>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setSelectedProject(null)}
+                  className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="flex-1 overflow-y-auto p-8">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Left Column: Info & Metrics */}
+                  <div className="lg:col-span-2 space-y-8">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Description</h3>
+                      <p className="text-slate-600 leading-relaxed">
+                        {selectedProject.description || "No description provided for this project."}
+                      </p>
+                    </div>
+
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Performance Metrics</h3>
+                      <div className="h-64 w-full bg-slate-50 rounded-xl p-4 border border-slate-100">
+                        {selectedProject.metrics && selectedProject.metrics.length > 0 ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={selectedProject.metrics}>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94A3B8', fontSize: 10}} />
+                              <YAxis axisLine={false} tickLine={false} tick={{fill: '#94A3B8', fontSize: 10}} />
+                              <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'}} />
+                              <Line type="monotone" dataKey="value" stroke="#F97316" strokeWidth={3} dot={{fill: '#F97316', r: 4}} activeDot={{r: 6}} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="h-full flex items-center justify-center text-slate-400 italic text-sm">
+                            No metric data available
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Associated Users</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {selectedProject.associatedUsers && selectedProject.associatedUsers.length > 0 ? (
+                          selectedProject.associatedUsers.map((user: any) => (
+                            <div key={user.id} className="flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl shadow-sm">
+                              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 font-bold">
+                                {user.name.charAt(0)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-slate-900 truncate">{user.name}</p>
+                                <p className="text-xs text-slate-500 truncate">{user.role}</p>
+                              </div>
+                              <button className="p-2 text-slate-400 hover:text-orange-500 transition-colors">
+                                <Mail size={16} />
+                              </button>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-sm text-slate-400 italic">No users associated with this project.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Recent Activity */}
+                  <div className="space-y-6">
+                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                      <Activity size={16} />
+                      Recent Activity
+                    </h3>
+                    <div className="space-y-4">
+                      {selectedProject.recentActivity && selectedProject.recentActivity.length > 0 ? (
+                        selectedProject.recentActivity.map((activity: any) => (
+                          <div key={activity.id} className="relative pl-6 pb-4 border-l-2 border-slate-100 last:pb-0">
+                            <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-white border-2 border-orange-500"></div>
+                            <p className="text-sm font-bold text-slate-900">{activity.type}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">By {activity.user} • {activity.time}</p>
+                            <span className="inline-block mt-2 px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold rounded uppercase">
+                              {activity.status}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-slate-400 italic">No recent activity recorded.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
+                <button 
+                  onClick={() => setSelectedProject(null)}
+                  className="px-6 py-2 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"
+                >
+                  Close
+                </button>
+                <button className="px-6 py-2 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 rounded-xl shadow-lg shadow-orange-500/20 transition-all">
+                  Manage Project
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -554,90 +554,6 @@ const PdfConverter: React.FC = () => {
                animate={{ opacity: 1, y: 0 }}
                className="space-y-6"
              >
-                {/* Progress Bar for Processing State */}
-                <AnimatePresence>
-                  {appState === AppState.ANALYZING && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                      animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
-                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                      className="sticky top-0 z-50 pt-4 overflow-hidden"
-                    >
-                      <div className="bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-orange-200 shadow-xl shadow-orange-900/5 relative overflow-hidden">
-                        {/* Animated background gradient */}
-                        <motion.div 
-                          className="absolute inset-0 bg-gradient-to-r from-orange-50 via-white to-orange-50 opacity-50"
-                          animate={{ x: ['-100%', '100%'] }}
-                          transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
-                        />
-                        
-                        <div className="relative z-10 flex flex-col gap-3">
-                          <div className="flex justify-between items-end">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center shadow-inner">
-                                <RefreshCw className={`w-5 h-5 text-orange-600 ${appState === AppState.ANALYZING ? 'animate-spin' : ''}`} />
-                              </div>
-                              <div className="overflow-hidden">
-                                <h3 className="text-sm font-bold text-slate-800 truncate">Processing: {fileName}</h3>
-                                <p className="text-[10px] text-slate-500 font-medium">Applying AI models to extract content...</p>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-3xl font-black text-orange-500 tabular-nums tracking-tight">
-                                {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
-                              </span>
-                            </div>
-                          </div>
-                          
-                          <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner p-0.5">
-                            <motion.div 
-                              className="h-full bg-gradient-to-r from-orange-400 to-orange-500 rounded-full relative overflow-hidden shadow-sm"
-                              initial={{ width: 0 }}
-                              animate={{ width: `${Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%` }}
-                              transition={{ type: "spring", bounce: 0, duration: 0.5 }}
-                            >
-                              {/* Shimmer effect on the progress bar itself */}
-                              <motion.div 
-                                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent"
-                                animate={{ x: ['-100%', '200%'] }}
-                                transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
-                              />
-                            </motion.div>
-                          </div>
-                          
-                          <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 px-1">
-                            <span>{pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length} of {pages.filter(p => p.isSelected).length} pages completed</span>
-                            {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
-                              <div className="flex items-center gap-2">
-                                <span className="text-rose-500 flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded-full">
-                                  <AlertTriangle className="w-3 h-3" />
-                                  {pages.filter(p => p.isSelected && p.status === 'error').length} errors (Pages: {pages.map((p, idx) => p.isSelected && p.status === 'error' ? idx + 1 : null).filter(p => p !== null).join(', ')})
-                                </span>
-                                <button 
-                                  onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
-                                  className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full hover:bg-slate-200 transition-colors"
-                                >
-                                  View Logs
-                                </button>
-                                <button 
-                                  onClick={() => {
-                                    // Logic to retry failed pages
-                                    setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending' } : p));
-                                    // Trigger processing again
-                                    processPages();
-                                  }}
-                                  className="bg-rose-600 text-white px-2 py-1 rounded-full hover:bg-rose-700 transition-colors"
-                                >
-                                  Retry Failed
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
 
                 {/* Error Modal */}
                 <AnimatePresence>
@@ -670,103 +586,166 @@ const PdfConverter: React.FC = () => {
                   )}
                 </AnimatePresence>
 
-                {/* Action Bar - Reorganized for better accessibility */}
-                <div className="bg-white/95 backdrop-blur-xl p-3 rounded-2xl border border-slate-200 shadow-lg flex flex-col gap-4 sticky top-4 z-30">
-                   
-                   {/* Top Row: Selection & Main Actions */}
-                   <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                        <div className="flex items-center gap-3">
-                             <div className="flex items-center gap-2 px-2 py-1 bg-slate-100 rounded-lg">
-                                <span className="text-xs font-bold text-slate-600">{selectedCount}/{totalCount}</span>
-                                <div className="flex gap-1">
-                                    <button 
-                                        onClick={() => toggleAllSelection(true)}
-                                        className="text-[10px] font-bold text-slate-700 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
-                                    >
-                                        ALL
-                                    </button>
-                                    <button 
-                                        onClick={() => toggleAllSelection(false)}
-                                        className="text-[10px] font-bold text-slate-400 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
-                                    >
-                                        NONE
-                                    </button>
-                                </div>
-                             </div>
+                {/* Main Tool Header - Combined Progress & Actions */}
+                <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200 shadow-lg sticky top-0 z-50 overflow-hidden">
+                   {/* Integrated Progress Bar (Top edge) */}
+                   <AnimatePresence>
+                        {appState === AppState.ANALYZING && (
+                            <motion.div 
+                                initial={{ height: 0 }}
+                                animate={{ height: 4 }}
+                                exit={{ height: 0 }}
+                                className="w-full bg-slate-100 relative overflow-hidden"
+                            >
+                                <motion.div 
+                                    className="h-full bg-orange-500 relative"
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%` }}
+                                    transition={{ type: "spring", bounce: 0, duration: 0.5 }}
+                                >
+                                    <motion.div 
+                                        className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                                        animate={{ x: ['-100%', '200%'] }}
+                                        transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                                    />
+                                </motion.div>
+                            </motion.div>
+                        )}
+                   </AnimatePresence>
 
-                             <div className="relative">
-                                <Filter className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                                <input 
-                                    type="text" 
-                                    placeholder="Range (e.g. 1-5)" 
-                                    className="pl-6 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all w-28"
-                                    value={rangeInput}
-                                    onChange={(e) => setRangeInput(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
-                                />
-                             </div>
+                   <div className="p-3 flex flex-col gap-3">
+                        {/* Top Row: Processing Info (Conditional) & Main Actions */}
+                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                {appState === AppState.ANALYZING ? (
+                                    <div className="flex items-center gap-3 bg-orange-50 px-3 py-1.5 rounded-xl border border-orange-100 min-w-0 max-w-md">
+                                        <RefreshCw className="w-4 h-4 text-orange-600 animate-spin flex-shrink-0" />
+                                        <div className="flex flex-col min-w-0">
+                                            <span className="text-[10px] font-bold text-orange-800 truncate">Processing: {fileName}</span>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[9px] text-orange-600/70 font-bold tabular-nums">
+                                                    {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
+                                                </span>
+                                                <span className="text-[9px] text-orange-400 font-medium">
+                                                    {pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages
+                                                </span>
+                                                {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
+                                                    <button 
+                                                        onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
+                                                        className="text-[9px] text-rose-600 font-bold hover:underline"
+                                                    >
+                                                        {pages.filter(p => p.isSelected && p.status === 'error').length} errors
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 px-2 py-1 bg-slate-100 rounded-lg">
+                                        <span className="text-xs font-bold text-slate-600">{selectedCount}/{totalCount}</span>
+                                        <div className="flex gap-1">
+                                            <button 
+                                                onClick={() => toggleAllSelection(true)}
+                                                className="text-[10px] font-bold text-slate-700 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
+                                            >
+                                                ALL
+                                            </button>
+                                            <button 
+                                                onClick={() => toggleAllSelection(false)}
+                                                className="text-[10px] font-bold text-slate-400 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
+                                            >
+                                                NONE
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="relative">
+                                    <Filter className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="Range (e.g. 1-5)" 
+                                        className="pl-6 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all w-28"
+                                        value={rangeInput}
+                                        onChange={(e) => setRangeInput(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 w-full md:w-auto">
+                                {hasCompletedPages && (
+                                    <div className="flex gap-2 mr-2">
+                                        <button 
+                                            onClick={copyAllText}
+                                            className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+                                            title="Copy All"
+                                        >
+                                            {copySuccess ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                                        </button>
+                                        <button 
+                                            onClick={downloadDocx}
+                                            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-md"
+                                        >
+                                            <FileDown className="w-4 h-4" />
+                                            DOCX
+                                        </button>
+                                    </div>
+                                )}
+
+                                {appState !== AppState.ANALYZING ? (
+                                    <div className="flex gap-2 flex-1 md:flex-none">
+                                        <label className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                                            <Plus className="w-4 h-4" />
+                                            ADD
+                                            <input 
+                                                type="file" 
+                                                className="hidden" 
+                                                accept=".pdf,.jpg,.jpeg,.png" 
+                                                multiple 
+                                                onChange={(e) => handleFilesSelected(e.target.files, true)} 
+                                            />
+                                        </label>
+                                        <button
+                                            onClick={startExtraction}
+                                            disabled={selectedPendingCount === 0 && !hasErrorPages}
+                                            className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold transition-all ${
+                                                selectedPendingCount === 0 && !hasErrorPages
+                                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                    : 'bg-orange-500 text-white hover:bg-orange-600 shadow-md shadow-orange-100'
+                                            }`}
+                                        >
+                                            <Wand2 className="w-4 h-4" /> 
+                                            {hasErrorPages && selectedPendingCount === 0 
+                                                ? 'RETRY' 
+                                                : `CONVERT (${selectedPendingCount})`
+                                            }
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2 flex-1 md:flex-none">
+                                        {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
+                                            <button 
+                                                onClick={() => {
+                                                    setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending' } : p));
+                                                    startExtraction();
+                                                }}
+                                                className="px-4 py-2 bg-rose-600 text-white rounded-lg text-xs font-bold hover:bg-rose-700 transition-colors shadow-md"
+                                            >
+                                                Retry Failed
+                                            </button>
+                                        )}
+                                        <div className="px-6 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
+                                            <RefreshCw className="w-4 h-4 animate-spin" />
+                                            PROCESSING...
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
-                        <div className="flex items-center gap-2 w-full md:w-auto">
-                            {hasCompletedPages && (
-                                <div className="flex gap-2 mr-2">
-                                    <button 
-                                        onClick={copyAllText}
-                                        className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
-                                        title="Copy All"
-                                    >
-                                        {copySuccess ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                                    </button>
-                                    <button 
-                                        onClick={downloadDocx}
-                                        className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-md"
-                                    >
-                                        <FileDown className="w-4 h-4" />
-                                        DOCX
-                                    </button>
-                                </div>
-                            )}
-
-                            {appState !== AppState.ANALYZING ? (
-                                <div className="flex gap-2 flex-1 md:flex-none">
-                                    <label className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors">
-                                        <Plus className="w-4 h-4" />
-                                        ADD
-                                        <input 
-                                            type="file" 
-                                            className="hidden" 
-                                            accept=".pdf,.jpg,.jpeg,.png" 
-                                            multiple 
-                                            onChange={(e) => handleFilesSelected(e.target.files, true)} 
-                                        />
-                                    </label>
-                                    <button
-                                        onClick={startExtraction}
-                                        disabled={selectedPendingCount === 0 && !hasErrorPages}
-                                        className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold transition-all ${
-                                            selectedPendingCount === 0 && !hasErrorPages
-                                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                : 'bg-orange-500 text-white hover:bg-orange-600 shadow-md shadow-orange-100'
-                                        }`}
-                                    >
-                                        <Wand2 className="w-4 h-4" /> 
-                                        {hasErrorPages && selectedPendingCount === 0 
-                                            ? 'RETRY' 
-                                            : `CONVERT (${selectedPendingCount})`
-                                        }
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="flex-1 md:flex-none px-6 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
-                                    <RefreshCw className="w-4 h-4 animate-spin" />
-                                    PROCESSING...
-                                </div>
-                            )}
-                        </div>
-                   </div>
-
-                   {/* Bottom Row: Tools & Settings Grid */}
-                   <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 pt-3 border-t border-slate-100">
+                        {/* Bottom Row: Tools & Settings Grid */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-2 border-t border-slate-100">
                         {/* MCQ Mode */}
                         <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-orange-50/50 border border-orange-100">
                             <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">MCQ Mode</span>
@@ -875,7 +854,8 @@ const PdfConverter: React.FC = () => {
                                 <ListChecks className="w-3.5 h-3.5" />
                             </button>
                         </div>
-                   </div>
+                    </div>
+                </div>
                 </div>
 
                 {/* Error Banner */}

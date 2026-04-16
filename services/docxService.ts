@@ -791,7 +791,7 @@ export const generateDocx = async (
       
       if (isComplexTable) {
           docChildren.push(new Paragraph({
-              children: [new TextRun({ text: "(Table rendered as image due to complexity)", size: 16, italic: true, color: "666666" })],
+              children: [new TextRun({ text: "(Table rendered as image due to complexity)", size: 16, italics: true, color: "666666" })],
               alignment: AlignmentType.CENTER,
               spacing: { after: 120 }
           }));
@@ -978,7 +978,7 @@ export const generateDocx = async (
         alignment: AlignmentType.BOTH, // Justified Text for professional look
         spacing: spacing,
         indent: indent,
-        borders: borders
+        border: borders
     }));
     
     } // End of inner lines loop

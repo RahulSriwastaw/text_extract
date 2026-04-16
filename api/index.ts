@@ -72,8 +72,17 @@ const extractLayoutWithRetry = async (
   }
 
   const bilingualInstruction = isBilingual
-    ? `- **BILINGUAL OUTPUT**: If a question or text is in a single language, provide its translation in the other major language present in the document (e.g., if Hindi, add English; if English, add Hindi). Present both versions clearly.`
-    : `- **STRICTLY NO TRANSLATION**: Do not translate Hindi to English or vice versa.`;
+    ? `**CRITICAL RULE: BILINGUAL OUTPUT REQUIRED**:
+- You MUST output EVERY question and EVERY option in BOTH English and Hindi.
+- If the source text is ONLY in English, you MUST translate it to Hindi and output BOTH (English first, then Hindi).
+- If the source text is ONLY in Hindi, you MUST translate it to English and output BOTH (Hindi first, then English).
+- If the source text is already in both languages, preserve both.
+- Do not skip translating any part of the text.`
+    : `**CRITICAL RULE: NO TRANSLATION**:
+- Extract the text EXACTLY in the language it is written.
+- If it is in Hindi, output ONLY Hindi.
+- If it is in English, output ONLY English.
+- DO NOT translate anything.`;
 
   const imageInstruction = includeImages 
     ? `2. **Diagrams & Figures**:

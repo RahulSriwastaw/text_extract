@@ -203,13 +203,44 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
                          errorStr.includes("quota") ||
                          errorStr.includes("limit") ||
                          errorStr.includes("503") ||
-                         errorStr.includes("UNAVAILABLE");
+                         errorStr.includes("UNAVAILABLE") ||
+                         errorStr.includes("Unexpected token") ||
+                         errorStr.includes("JSON") ||
+                         errorStr.includes("fetch failed") ||
+                         errorStr.includes("ECONNRESET") ||
+                         errorStr.includes("ETIMEDOUT");
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
-      const waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
-      console.warn(`Quota exceeded. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
+      
+      // Attempt to extract recommended retry delay if provided in Google RPC error
+      try {
+        if (errorStr.startsWith('{') && errorStr.includes('error')) {
+          const errObj = JSON.parse(errorStr);
+          const details = errObj.error?.details || [];
+          const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
+          if (retryInfo && retryInfo.retryDelay) {
+            const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
+            if (!isNaN(delaySecs)) {
+              waitTime = (delaySecs * 1000) + 1000; // Use recommended delay + 1s buffer
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+
+      console.warn(`Quota or network issue. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
       return extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, retryCount + 1, [...failedKeys, currentKey]);
+    }
+
+    // Clean up output message if it's a raw JSON string
+    if (errorStr.startsWith('{') && errorStr.includes('error')) {
+      try {
+        const errObj = JSON.parse(errorStr);
+        throw new Error(errObj.error?.message || "API Error");
+      } catch (e) {}
     }
     throw error;
   }
@@ -265,13 +296,40 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0, failedKeys: s
                          errorStr.includes("quota") ||
                          errorStr.includes("limit") ||
                          errorStr.includes("503") ||
-                         errorStr.includes("UNAVAILABLE");
+                         errorStr.includes("UNAVAILABLE") ||
+                         errorStr.includes("Unexpected token") ||
+                         errorStr.includes("JSON") ||
+                         errorStr.includes("fetch failed") ||
+                         errorStr.includes("ECONNRESET") ||
+                         errorStr.includes("ETIMEDOUT");
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
-      const waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
-      console.warn(`Quota exceeded. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
+      
+      try {
+        if (errorStr.startsWith('{') && errorStr.includes('error')) {
+          const errObj = JSON.parse(errorStr);
+          const details = errObj.error?.details || [];
+          const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
+          if (retryInfo && retryInfo.retryDelay) {
+            const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
+            if (!isNaN(delaySecs)) {
+              waitTime = (delaySecs * 1000) + 1000;
+            }
+          }
+        }
+      } catch (e) {}
+
+      console.warn(`Quota or network issue. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
       return proofreadWithRetry(rawText, retryCount + 1, [...failedKeys, currentKey]);
+    }
+
+    if (errorStr.startsWith('{') && errorStr.includes('error')) {
+      try {
+        const errObj = JSON.parse(errorStr);
+        throw new Error(errObj.error?.message || "API Error");
+      } catch (e) {}
     }
     throw error;
   }

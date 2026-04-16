@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileDown, RefreshCw, Wand2, AlertTriangle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks } from 'lucide-react';
+import { FileDown, RefreshCw, Wand2, AlertTriangle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
@@ -31,6 +31,13 @@ const PdfConverter: React.FC = () => {
   const [mcqMode, setMcqMode] = useState(true);
   const [autoProofread, setAutoProofread] = useState(false);
   const [selectedError, setSelectedError] = useState<string | null>(null);
+  const [wordsConsumed, setWordsConsumed] = useState(0);
+  const [pointsConsumed, setPointsConsumed] = useState(0);
+
+  // Helper to count words
+  const countWords = (text: string) => {
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  };
 
   // Load history on mount
   useEffect(() => {
@@ -132,6 +139,8 @@ const PdfConverter: React.FC = () => {
       const namePart = firstFile.name.substring(0, firstFile.name.lastIndexOf('.')) || firstFile.name;
       setFileName(namePart);
       setPages([]); // Clear previous
+      setWordsConsumed(0);
+      setPointsConsumed(0);
     }
     
     setAppState(AppState.PROCESSING_PDF);
@@ -262,6 +271,12 @@ const PdfConverter: React.FC = () => {
             try {
                 const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
                 
+                // Calculate words and points
+                const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
+                const pageWords = countWords(pageText);
+                setWordsConsumed(prev => prev + pageWords);
+                setPointsConsumed(prev => prev + 1); // 1 point per page
+
                 // Process images & tables: Crop them from the original page
                 const processedElements = await Promise.all(elements.map(async (el) => {
                     if (includeImages && (el.type === 'image' || el.type === 'table') && el.bbox) {
@@ -329,6 +344,12 @@ const PdfConverter: React.FC = () => {
     try {
       const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
       
+      // Calculate words and points
+      const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
+      const pageWords = countWords(pageText);
+      setWordsConsumed(prev => prev + pageWords);
+      setPointsConsumed(prev => prev + 1);
+
       const processedElements = await Promise.all(elements.map(async (el) => {
           if (includeImages && (el.type === 'image' || el.type === 'table') && el.bbox) {
               try {
@@ -659,6 +680,18 @@ const PdfConverter: React.FC = () => {
                                         </div>
                                     </div>
                                 )}
+
+                                {/* Live Consumption Stats */}
+                                <div className="hidden sm:flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5 bg-blue-50/50 px-2 py-1 rounded-lg border border-blue-100/50">
+                                        <Type className="w-3 h-3 text-blue-500" />
+                                        <span className="text-[10px] font-bold text-blue-700 tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[8px] opacity-70">WORDS</span></span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 bg-amber-50/50 px-2 py-1 rounded-lg border border-amber-100/50">
+                                        <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                                        <span className="text-[10px] font-bold text-amber-700 tabular-nums">{pointsConsumed} <span className="text-[8px] opacity-70">POINTS</span></span>
+                                    </div>
+                                </div>
 
                                 <div className="relative">
                                     <Filter className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />

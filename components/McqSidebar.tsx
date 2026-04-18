@@ -41,7 +41,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
       if (page.status !== 'done' || !page.elements) return;
       
       page.elements.forEach(el => {
-        if (el.type !== 'text' || !el.content) return;
+        if (el.type !== 'text' || !el.content || typeof el.content !== 'string') return;
         
         const lines = el.content.split('\n').map(l => l.trim()).filter(l => l);
         

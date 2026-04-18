@@ -190,6 +190,12 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
       if (!Array.isArray(parsedElements)) {
         throw new Error("Response is not a JSON array");
       }
+      
+      // Ensure content is a string
+      parsedElements = parsedElements.map((el: any) => ({
+        ...el,
+        content: Array.isArray(el.content) ? el.content.join('\n') : (el.content ? String(el.content) : '')
+      }));
     } catch (parseError) {
       console.error("Failed to parse Gemini response as JSON:", responseText);
       throw new Error("Invalid JSON response from AI model");

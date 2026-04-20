@@ -43,7 +43,14 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
       page.elements.forEach(el => {
         if (el.type !== 'text' || !el.content || typeof el.content !== 'string') return;
         
-        const lines = el.content.split('\n').map(l => l.trim()).filter(l => l);
+        // Pre-process: Force newlines before Q.1, #Q.1, etc. if the AI squashes them into the same line as the previous option
+        const forceNewlines = el.content
+          .replace(/([a-z0-9])\s+(#?Q(?:uestion)?\.?\s*\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
+          .replace(/([a-z0-9])\s+(#\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
+          .replace(/Ans\s+(#?Q)/gi, 'Ans\n$1')
+          .replace(/([a-z0-9])\s+([A-Ea-e]\s*[\.\)\]]\s+)/gi, '$1\n$2'); // Also try to split options if squashed
+
+        const lines = forceNewlines.split('\n').map(l => l.trim()).filter(l => l);
         
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];

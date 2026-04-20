@@ -252,8 +252,8 @@ const PdfConverter: React.FC = () => {
     const pagesToProcess = pages.filter(p => p.isSelected && p.status !== 'done');
     
     // Batch configuration: Process up to 10 pages, but limited by the number of API keys available
-    // This ensures that exactly 1 key is used per page in a batch, preventing rate limits.
-    const BATCH_SIZE = Math.max(1, Math.min(10, keyCount));
+    // For free tier accounts, we limit batch size to 2 to avoid hitting the 15 RPM limit instantly.
+    const BATCH_SIZE = Math.min(2, keyCount);
     let criticalErrorOccurred = false;
 
     for (let i = 0; i < pagesToProcess.length; i += BATCH_SIZE) {
@@ -302,26 +302,27 @@ const PdfConverter: React.FC = () => {
                 console.error(`Error processing page ${page.pageNumber}:`, e);
                 
                 const errorStr = e?.message || String(e);
-                const isAuthOrQuota = errorStr.includes("API Key") || 
-                                     errorStr.includes("Usage limit") || 
-                                     errorStr.includes("Authentication") ||
-                                     errorStr.includes("429") ||
+                const isRateLimit = errorStr.includes("429") || 
                                      errorStr.includes("RESOURCE_EXHAUSTED") ||
-                                     errorStr.includes("quota");
+                                     errorStr.includes("quota") ||
+                                     errorStr.includes("limit");
 
                 // Mark page as error
                 setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: errorStr } : p));
 
-                if (isAuthOrQuota) {
-                    setErrorMsg("API Rate Limit Reached: The AI is busy processing your pages. It will automatically retry with a delay. Please wait a moment."); 
-                    criticalErrorOccurred = false; // Don't stop everything, let the internal retry handle it
+                if (isRateLimit) {
+                    setErrorMsg("Quota Exceeded / Rate Limit Hit: You have used up the available Gemini Free Tier quota. Please wait roughly 1 hour or manually retry later."); 
+                    criticalErrorOccurred = true; // Stop the loop so we don't spam the API
+                } else if (errorStr.includes("API Key") || errorStr.includes("Authentication")) {
+                    setErrorMsg("Authentication Error: Invalid API Key. Please check your AI Studio environment settings.");
+                    criticalErrorOccurred = true; 
                 }
             }
         }));
 
-        // Delay between batches to respect API limits (reduced for speed)
+        // Delay between batches to respect API limits
         if (i + BATCH_SIZE < pagesToProcess.length && !criticalErrorOccurred) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Increase to 3 seconds between batches strictly to preserve quota
         }
     }
     

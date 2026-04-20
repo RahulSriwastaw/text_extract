@@ -99,11 +99,12 @@ const extractLayoutWithRetry = async (
    - **STRICTLY IGNORE**: Do not extract any image elements.`;
 
   const mcqInstruction = mcqMode 
-    ? `**MCQ EXTRACTION MODE**:
-- This document is primarily an MCQ paper.
-- Ensure every question is followed by its options (A, B, C, D, etc.).
-- If options are in a grid (e.g., A and B on one line, C and D on another), extract them in order.
-- Maintain the relationship between questions and their options.`
+    ? `**MCQ EXTRACTION MODE (STRICT FORMATTING REQUIRED)**:
+- This document is an MCQ paper.
+- CRITICAL: You MUST place a newline character before EVERY single question to ensure it is not merged with previous text.
+- Format every question so it starts on a NEW LINE like "Q.1 [Question Text]".
+- Format every option so it starts on a NEW LINE like "A. [Option Text]".
+- Do NOT squash multiple questions or options into a single paragraph. Each question and each option MUST be on its own line.`
     : `**GENERAL DOCUMENT MODE**:
 - Extract text as it appears. Maintain paragraphs and structure.`;
 
@@ -215,25 +216,28 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
                          errorStr.includes("fetch failed") ||
                          errorStr.includes("ECONNRESET") ||
                          errorStr.includes("ETIMEDOUT");
+
+    let extractedJsonObj: any = null;
+    const jsonMatch = errorStr.match(/\{.*\}/s);
+    if (jsonMatch) {
+      try {
+        extractedJsonObj = JSON.parse(jsonMatch[0]);
+      } catch(e) {}
+    }
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
       let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
       
       // Attempt to extract recommended retry delay if provided in Google RPC error
-      try {
-        if (errorStr.startsWith('{') && errorStr.includes('error')) {
-          const errObj = JSON.parse(errorStr);
-          const details = errObj.error?.details || [];
-          const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
-          if (retryInfo && retryInfo.retryDelay) {
-            const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
-            if (!isNaN(delaySecs)) {
-              waitTime = (delaySecs * 1000) + 1000; // Use recommended delay + 1s buffer
-            }
+      if (extractedJsonObj?.error?.details) {
+        const details = extractedJsonObj.error.details;
+        const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
+        if (retryInfo && retryInfo.retryDelay) {
+          const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
+          if (!isNaN(delaySecs)) {
+            waitTime = (delaySecs * 1000) + 1000; // Use recommended delay + 1s buffer
           }
         }
-      } catch (e) {
-        // Ignore parse errors
       }
 
       console.warn(`Quota or network issue. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
@@ -242,11 +246,8 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
     }
 
     // Clean up output message if it's a raw JSON string
-    if (errorStr.startsWith('{') && errorStr.includes('error')) {
-      try {
-        const errObj = JSON.parse(errorStr);
-        throw new Error(errObj.error?.message || "API Error");
-      } catch (e) {}
+    if (extractedJsonObj?.error?.message) {
+      throw new Error(extractedJsonObj.error.message);
     }
     throw error;
   }
@@ -308,34 +309,36 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0, failedKeys: s
                          errorStr.includes("fetch failed") ||
                          errorStr.includes("ECONNRESET") ||
                          errorStr.includes("ETIMEDOUT");
+
+    let extractedJsonObj: any = null;
+    const jsonMatch = errorStr.match(/\{.*\}/s);
+    if (jsonMatch) {
+      try {
+        extractedJsonObj = JSON.parse(jsonMatch[0]);
+      } catch(e) {}
+    }
     
     if (isQuotaError && retryCount < MAX_RETRIES) {
       let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
       
-      try {
-        if (errorStr.startsWith('{') && errorStr.includes('error')) {
-          const errObj = JSON.parse(errorStr);
-          const details = errObj.error?.details || [];
-          const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
-          if (retryInfo && retryInfo.retryDelay) {
-            const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
-            if (!isNaN(delaySecs)) {
-              waitTime = (delaySecs * 1000) + 1000;
-            }
+      if (extractedJsonObj?.error?.details) {
+        const details = extractedJsonObj.error.details;
+        const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
+        if (retryInfo && retryInfo.retryDelay) {
+          const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
+          if (!isNaN(delaySecs)) {
+            waitTime = (delaySecs * 1000) + 1000; // Use recommended delay + 1s buffer
           }
         }
-      } catch (e) {}
+      }
 
       console.warn(`Quota or network issue. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
       await delay(waitTime);
       return proofreadWithRetry(rawText, retryCount + 1, [...failedKeys, currentKey]);
     }
 
-    if (errorStr.startsWith('{') && errorStr.includes('error')) {
-      try {
-        const errObj = JSON.parse(errorStr);
-        throw new Error(errObj.error?.message || "API Error");
-      } catch (e) {}
+    if (extractedJsonObj?.error?.message) {
+      throw new Error(extractedJsonObj.error.message);
     }
     throw error;
   }

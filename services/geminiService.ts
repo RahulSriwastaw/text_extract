@@ -6,7 +6,8 @@ export const extractLayoutFromImage = async (
   numberingStyle: NumberingStyle = NumberingStyle.HASH,
   includeImages: boolean = true,
   isBilingual: boolean = false,
-  mcqMode: boolean = true
+  mcqMode: boolean = true,
+  retryCount: number = 0
 ): Promise<ExtractedElement[]> => {
   // Skipping client-side OCR for speed when processing in parallel.
   // Gemini 2.5 Flash is highly capable of reading text directly from the image.
@@ -29,6 +30,12 @@ export const extractLayoutFromImage = async (
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
+    if (response.status === 429 && retryCount < 5) {
+        const waitTime = errorData.waitTime || 60000;
+        console.warn(`[Client] Quota hit. Waiting ${waitTime}ms before retry ${retryCount + 1}/5...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, retryCount + 1);
+    }
     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
   }
 
@@ -44,7 +51,7 @@ export const extractTextFromImage = async (base64Image: string, numberingStyle: 
     .join('\n\n');
 };
 
-export const proofreadMcqs = async (rawText: string): Promise<any[]> => {
+export const proofreadMcqs = async (rawText: string, retryCount: number = 0): Promise<any[]> => {
   const response = await fetch('/api/proofread', {
     method: 'POST',
     headers: {
@@ -55,6 +62,12 @@ export const proofreadMcqs = async (rawText: string): Promise<any[]> => {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
+    if (response.status === 429 && retryCount < 5) {
+        const waitTime = errorData.waitTime || 60000;
+        console.warn(`[Client] Quota hit. Waiting ${waitTime}ms before retry ${retryCount + 1}/5...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        return proofreadMcqs(rawText, retryCount + 1);
+    }
     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
   }
 

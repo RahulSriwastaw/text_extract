@@ -5,33 +5,30 @@ import { NumberingStyle } from '../types.js';
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/api/config', (req, res) => {
-  const keysString = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || '';
-  const keys = keysString.split(',').map(k => k.trim()).filter(k => k);
-  res.json({ keyCount: keys.length });
+app.get('/api/debug-key', (req, res) => {
+  const k = process.env.GEMINI_API_KEY || '';
+  res.json({ key: k, length: k.length });
 });
 
-const getGeminiClient = (excludeKeys: string[] = []) => {
-  const keysString = process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY;
-  if (!keysString) {
-    throw new Error("API Key is missing. Please set the GEMINI_API_KEYS environment variable.");
-  }
-  
-  let keys = keysString.split(',').map(k => k.trim()).filter(k => k);
-  if (keys.length === 0) {
-    throw new Error("No valid API keys found.");
+const getGeminiClient = () => {
+  let apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    apiKey = apiKey.replace(/['"\s]/g, '');
   }
 
-  // Filter out keys that have already failed in this retry chain,
-  // unless all keys have failed (in which case we try them all again)
-  let availableKeys = keys.filter(k => !excludeKeys.includes(k));
-  if (availableKeys.length === 0) {
-    availableKeys = keys;
+  // Fallback to GEMINI_API_KEYS if user still has it in their env and GEMINI_API_KEY is invalid
+  if (!apiKey || !apiKey.startsWith('AI')) {
+    const keysString = process.env.GEMINI_API_KEYS || '';
+    const keys = keysString.split(',').map(k => k.replace(/['"\s]/g, '')).filter(k => k);
+    if (keys.length > 0) {
+      const randomIndex = Math.floor(Math.random() * keys.length);
+      apiKey = keys[randomIndex];
+    }
   }
 
-  // Select a completely random key from the available pool
-  const randomIndex = Math.floor(Math.random() * availableKeys.length);
-  const apiKey = availableKeys[randomIndex];
+  if (!apiKey) {
+    throw new Error("API Key is missing. Please set the GEMINI_API_KEY environment variable.");
+  }
 
   return { client: new GoogleGenAI({ apiKey }), key: apiKey };
 };
@@ -45,11 +42,10 @@ const extractLayoutWithRetry = async (
   includeImages: boolean,
   isBilingual: boolean,
   mcqMode: boolean,
-  retryCount = 0,
-  failedKeys: string[] = []
+  retryCount = 0
 ): Promise<any> => {
   const MAX_RETRIES = 5;
-  const { client, key: currentKey } = getGeminiClient(failedKeys);
+  const { client, key: currentKey } = getGeminiClient();
   
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
@@ -147,6 +143,7 @@ ${bilingualInstruction}
    - ${numberingInstruction}
    - For multiple-choice options, ensure they are extracted as separate text elements or clearly separated within the text.
    - Preserve mathematical formulas and scientific notations accurately. Use LaTeX format enclosed in $...$ for inline math and $$...$$ for block math if applicable.
+   - PAY VERY CLOSE ATTENTION to recurring decimals or numbers with a line/bar over them (e.g., $0.04\\overline{3}$ or $0.\\overline{43}$). You MUST extract the bar correctly using LaTeX \\overline{}! This is a very common requirement.
 
 ${imageInstruction}
 
@@ -161,7 +158,7 @@ Each object in the array must have the following structure:
 {
   "type": "text" | "image" | "table",
   "content": "The extracted text, image description, or markdown table",
-  "bbox": [x_min, y_min, x_max, y_max] // Optional: normalized coordinates [0-1000] representing the bounding box of the element
+  "bbox": [ymin, xmin, ymax, xmax] // Optional: normalized coordinates [0-1000] representing the bounding box of the element
 }
 
 **BBOX INSTRUCTIONS**:
@@ -192,11 +189,24 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         throw new Error("Response is not a JSON array");
       }
       
-      // Ensure content is a string
-      parsedElements = parsedElements.map((el: any) => ({
-        ...el,
-        content: Array.isArray(el.content) ? el.content.join('\n') : (el.content ? String(el.content) : '')
-      }));
+      parsedElements = parsedElements.map((el: any) => {
+        let bboxObj = el.bbox;
+        if (Array.isArray(el.bbox) && el.bbox.length === 4) {
+          bboxObj = {
+            ymin: el.bbox[0],
+            xmin: el.bbox[1],
+            ymax: el.bbox[2],
+            xmax: el.bbox[3]
+          };
+        }
+
+        return {
+          ...el,
+          id: Math.random().toString(36).substring(2, 11),
+          bbox: bboxObj,
+          content: Array.isArray(el.content) ? el.content.join('\n') : (el.content ? String(el.content) : '')
+        };
+      });
     } catch (parseError) {
       console.error("Failed to parse Gemini response as JSON:", responseText);
       throw new Error("Invalid JSON response from AI model");
@@ -228,6 +238,11 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
     if (isQuotaError && retryCount < MAX_RETRIES) {
       let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
       
+      const retryInMatch = errorStr.match(/retry in ([\d\.]+)s/i);
+      if (retryInMatch && retryInMatch[1]) {
+        waitTime = (parseFloat(retryInMatch[1]) * 1000) + 1000;
+      }
+
       // Attempt to extract recommended retry delay if provided in Google RPC error
       if (extractedJsonObj?.error?.details) {
         const details = extractedJsonObj.error.details;
@@ -240,9 +255,12 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         }
       }
 
-      console.warn(`Quota or network issue. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
-      await delay(waitTime);
-      return extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, retryCount + 1, [...failedKeys, currentKey]);
+      console.warn(`Quota or network issue. Wait time: ${Math.round(waitTime/1000)}s...`);
+      throw new Error(JSON.stringify({ isQuotaError: true, waitTime, originalError: errorStr }));
+    }
+
+    if (errorStr.includes("API key not valid")) {
+      throw new Error("API key not valid. Please verify your GEMINI_API_KEY in the AI Studio Settings menu.");
     }
 
     // Clean up output message if it's a raw JSON string
@@ -253,9 +271,9 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
   }
 };
 
-const proofreadWithRetry = async (rawText: string, retryCount = 0, failedKeys: string[] = []): Promise<any> => {
+const proofreadWithRetry = async (rawText: string, retryCount = 0): Promise<any> => {
   const MAX_RETRIES = 5;
-  const { client, key: currentKey } = getGeminiClient(failedKeys);
+  const { client, key: currentKey } = getGeminiClient();
 
   const prompt = `
     You are an expert Exam Paper Editor. I will provide you with raw text extracted from an exam paper.
@@ -321,6 +339,11 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0, failedKeys: s
     if (isQuotaError && retryCount < MAX_RETRIES) {
       let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
       
+      const retryInMatch = errorStr.match(/retry in ([\d\.]+)s/i);
+      if (retryInMatch && retryInMatch[1]) {
+        waitTime = (parseFloat(retryInMatch[1]) * 1000) + 1000;
+      }
+
       if (extractedJsonObj?.error?.details) {
         const details = extractedJsonObj.error.details;
         const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
@@ -332,9 +355,12 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0, failedKeys: s
         }
       }
 
-      console.warn(`Quota or network issue. Retrying with a different key in ${Math.round(waitTime/1000)}s... (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
-      await delay(waitTime);
-      return proofreadWithRetry(rawText, retryCount + 1, [...failedKeys, currentKey]);
+      console.warn(`Quota or network issue. Wait time: ${Math.round(waitTime/1000)}s...`);
+      throw new Error(JSON.stringify({ isQuotaError: true, waitTime, originalError: errorStr }));
+    }
+
+    if (errorStr.includes("API key not valid")) {
+      throw new Error("API key not valid. Please verify your GEMINI_API_KEY in the AI Studio Settings menu.");
     }
 
     if (extractedJsonObj?.error?.message) {
@@ -350,7 +376,13 @@ app.post('/api/extract', async (req, res) => {
     const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode);
     res.json({ elements });
   } catch (error: any) {
-    console.error("Extraction error:", error);
+    console.warn("Extraction failed:", error?.message || error);
+    try {
+      const parsedError = JSON.parse(error.message);
+      if (parsedError.isQuotaError) {
+        return res.status(429).json({ error: parsedError.originalError || "Quota exceeded", waitTime: parsedError.waitTime });
+      }
+    } catch(e) {}
     res.status(500).json({ error: error.message || "Extraction failed" });
   }
 });
@@ -361,7 +393,13 @@ app.post('/api/proofread', async (req, res) => {
     const questions = await proofreadWithRetry(rawText);
     res.json({ questions });
   } catch (error: any) {
-    console.error("Proofread error:", error);
+    console.warn("Proofread failed:", error?.message || error);
+    try {
+      const parsedError = JSON.parse(error.message);
+      if (parsedError.isQuotaError) {
+        return res.status(429).json({ error: parsedError.originalError || "Quota exceeded", waitTime: parsedError.waitTime });
+      }
+    } catch(e) {}
     res.status(500).json({ error: error.message || "Proofread failed" });
   }
 });

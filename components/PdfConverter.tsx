@@ -229,17 +229,9 @@ const PdfConverter: React.FC = () => {
     setAppState(AppState.ANALYZING);
     setErrorMsg(null);
     
-    // Fetch config to know how many keys we have
-    let keyCount = 1;
-    try {
-      const res = await fetch('/api/config');
-      if (res.ok) {
-        const data = await res.json();
-        keyCount = data.keyCount || 1;
-      }
-    } catch (e) {
-      console.warn("Could not fetch config", e);
-    }
+    // Process pages one by one to avoid rate limits with a single API key
+    const BATCH_SIZE = 1;
+    let criticalErrorOccurred = false;
 
     // 1. Visually mark ALL selected pages as 'processing' immediately.
     setPages(prev => prev.map(p => 
@@ -250,11 +242,6 @@ const PdfConverter: React.FC = () => {
     
     // Identify pages to process
     const pagesToProcess = pages.filter(p => p.isSelected && p.status !== 'done');
-    
-    // Batch configuration: Process up to 10 pages, but limited by the number of API keys available
-    // For free tier accounts, we limit batch size to 2 to avoid hitting the 15 RPM limit instantly.
-    const BATCH_SIZE = Math.min(2, keyCount);
-    let criticalErrorOccurred = false;
 
     for (let i = 0; i < pagesToProcess.length; i += BATCH_SIZE) {
         if (criticalErrorOccurred) break;
@@ -310,23 +297,23 @@ const PdfConverter: React.FC = () => {
                 // Mark page as error
                 setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: errorStr } : p));
 
+                const errorLower = errorStr.toLowerCase();
                 if (isRateLimit) {
                     setErrorMsg("Quota Exceeded / Rate Limit Hit: You have used up the available Gemini Free Tier quota. Please wait roughly 1 hour or manually retry later."); 
                     criticalErrorOccurred = true; // Stop the loop so we don't spam the API
-                } else if (errorStr.includes("API Key") || errorStr.includes("Authentication")) {
-                    setErrorMsg("Authentication Error: Invalid API Key. Please check your AI Studio environment settings.");
+                } else if (errorLower.includes("api key") || errorLower.includes("authentication")) {
+                    setErrorMsg(`Authentication Error: ${errorStr}`);
                     criticalErrorOccurred = true; 
                 }
             }
         }));
 
-        // Delay between batches to respect API limits
+        // Delay between pages to respect API limits
         if (i + BATCH_SIZE < pagesToProcess.length && !criticalErrorOccurred) {
-            await new Promise(resolve => setTimeout(resolve, 3000)); // Increase to 3 seconds between batches strictly to preserve quota
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Delay between requests to handle 15 RPM limits cleanly
         }
     }
     
-    // Final state update
     if (!criticalErrorOccurred) {
         setAppState(AppState.COMPLETED);
     }
@@ -512,24 +499,24 @@ const PdfConverter: React.FC = () => {
   const selectedPendingCount = pages.filter(p => p.isSelected && p.status !== 'done').length;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] font-sans selection:bg-orange-100 selection:text-orange-900">
-      <div className="max-w-7xl mx-auto px-4 py-8 md:px-8 md:py-12">
+    <div className="min-h-screen bg-[#0F0F0F] font-sans selection:bg-[#FF6B2B]/20 selection:text-[#FF6B2B]">
+      <div className="max-w-7xl mx-auto px-3 py-3 md:px-3 md:py-12">
         
         {/* Header - More Compact */}
-        <header className="mb-6 flex flex-col md:flex-row items-center justify-between gap-4">
+        <header className="mb-6 flex flex-col md:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-3 text-left">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-900 text-white shadow-md flex items-center justify-center"
+              className="flex-shrink-0 w-8 h-8 rounded-[8px] bg-[#FF6B2B] text-white flex items-center justify-center"
             >
               <Wand2 className="w-4 h-4" />
             </motion.div>
             <div>
-              <h1 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight">
+              <h1 className="text-[16px] md:text-[18px] font-bold text-[#EFEFEF] tracking-tight">
                 AI PDF to Text
               </h1>
-              <p className="text-slate-500 text-[10px] md:text-xs">
+              <p className="text-[#555555] text-[10px] md:text-[11px]">
                 Professional document conversion
               </p>
             </div>
@@ -539,7 +526,7 @@ const PdfConverter: React.FC = () => {
             {pages.length > 0 && (
               <button 
                 onClick={reset}
-                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                className="p-1.5 text-[#555555] hover:text-[#F44336] hover:bg-[#3A1A1A] rounded-[6px] transition-colors"
                 title="Reset All"
               >
                 <RefreshCw className="w-4 h-4" />
@@ -563,8 +550,8 @@ const PdfConverter: React.FC = () => {
                     animate={{ opacity: 1 }}
                     className="mt-8 flex flex-col items-center gap-3"
                   >
-                    <div className="w-8 h-8 border-2 border-slate-900/20 border-t-slate-900 rounded-full animate-spin" />
-                    <p className="text-slate-600 font-semibold tracking-wider uppercase text-[10px]">
+                    <div className="w-8 h-8 border-2 border-[#252525] border-t-[#FF6B2B] rounded-[20px] animate-spin" />
+                    <p className="text-[#EFEFEF] font-semibold tracking-wider uppercase text-[10px]">
                       Analyzing document...
                     </p>
                   </motion.div>
@@ -584,22 +571,22 @@ const PdfConverter: React.FC = () => {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4"
+                      className="fixed inset-0 bg-[#0F0F0F]/50 z-[100] flex items-center justify-center p-3"
                       onClick={() => setSelectedError(null)}
                     >
                       <motion.div 
                         initial={{ scale: 0.9 }}
                         animate={{ scale: 1 }}
-                        className="bg-white p-6 rounded-2xl max-w-lg w-full shadow-2xl"
+                        className="bg-[#1A1A1A] p-3 rounded-[8px] max-w-lg w-full"
                         onClick={e => e.stopPropagation()}
                       >
-                        <h3 className="text-lg font-bold text-slate-900 mb-4">Error Details</h3>
-                        <pre className="bg-slate-100 p-4 rounded-lg text-xs text-slate-700 overflow-auto max-h-60 whitespace-pre-wrap">
+                        <h3 className="text-[16px] font-bold text-[#EFEFEF] mb-4">Error Details</h3>
+                        <pre className="bg-[#141414] p-3 rounded-[8px] text-[11px] text-[#EFEFEF] overflow-auto max-h-60 whitespace-pre-wrap">
                           {selectedError}
                         </pre>
                         <button 
                           onClick={() => setSelectedError(null)}
-                          className="mt-4 w-full bg-slate-900 text-white py-2 rounded-lg hover:bg-slate-800"
+                          className="mt-4 w-full bg-transparent border border-[#2A2A2A] text-[#EFEFEF] py-2 rounded-[6px] hover:bg-[#1A1A1A] transition-colors font-medium text-[13px]"
                         >
                           Close
                         </button>
@@ -609,7 +596,7 @@ const PdfConverter: React.FC = () => {
                 </AnimatePresence>
 
                 {/* Main Tool Header - Combined Progress & Actions */}
-                <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-200 shadow-lg sticky top-0 z-50 overflow-hidden">
+                <div className="bg-[#1A1A1A] rounded-[8px] border border-[#252525] sticky top-0 z-50 overflow-hidden">
                    {/* Integrated Progress Bar (Top edge) */}
                    <AnimatePresence>
                         {appState === AppState.ANALYZING && (
@@ -617,19 +604,14 @@ const PdfConverter: React.FC = () => {
                                 initial={{ height: 0 }}
                                 animate={{ height: 4 }}
                                 exit={{ height: 0 }}
-                                className="w-full bg-slate-100 relative overflow-hidden"
+                                className="w-full bg-[#141414] relative overflow-hidden"
                             >
                                 <motion.div 
-                                    className="h-full bg-orange-500 relative"
+                                    className="h-full bg-[#FF6B2B] relative"
                                     initial={{ width: 0 }}
                                     animate={{ width: `${Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%` }}
                                     transition={{ type: "spring", bounce: 0, duration: 0.5 }}
                                 >
-                                    <motion.div 
-                                        className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent"
-                                        animate={{ x: ['-100%', '200%'] }}
-                                        transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
-                                    />
                                 </motion.div>
                             </motion.div>
                         )}
@@ -637,15 +619,15 @@ const PdfConverter: React.FC = () => {
 
                    <div className="p-3 flex flex-col gap-3">
                         {/* Top Row: Processing Info (Conditional) & Main Actions */}
-                        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="flex flex-col md:flex-row justify-between items-center gap-3">
                             <div className="flex items-center gap-3 flex-1 min-w-0">
                                 {appState === AppState.ANALYZING ? (
-                                    <div className="flex items-center gap-3 bg-orange-50 px-3 py-1.5 rounded-xl border border-orange-100 min-w-0 max-w-md">
-                                        <RefreshCw className="w-4 h-4 text-orange-600 animate-spin flex-shrink-0" />
+                                    <div className="flex items-center gap-3 bg-[#1A2A3A] px-3 py-1.5 rounded-[8px] border border-[#252525] min-w-0 max-w-md">
+                                        <RefreshCw className="w-4 h-4 text-[#FF6B2B] animate-spin flex-shrink-0" />
                                         <div className="flex flex-col min-w-0">
                                             <span className="text-[10px] font-bold text-orange-800 truncate">Processing: {fileName}</span>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[9px] text-orange-600/70 font-bold tabular-nums">
+                                                <span className="text-[9px] text-[#FF6B2B]/70 font-bold tabular-nums">
                                                     {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
                                                 </span>
                                                 <span className="text-[9px] text-orange-400 font-medium">
@@ -654,7 +636,7 @@ const PdfConverter: React.FC = () => {
                                                 {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
                                                     <button 
                                                         onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
-                                                        className="text-[9px] text-rose-600 font-bold hover:underline"
+                                                        className="text-[9px] text-[#F44336] font-bold hover:underline"
                                                     >
                                                         {pages.filter(p => p.isSelected && p.status === 'error').length} errors
                                                     </button>
@@ -663,18 +645,18 @@ const PdfConverter: React.FC = () => {
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="flex items-center gap-2 px-2 py-1 bg-slate-100 rounded-lg">
-                                        <span className="text-xs font-bold text-slate-600">{selectedCount}/{totalCount}</span>
+                                    <div className="flex items-center gap-2 px-2 py-1 bg-[#141414] rounded-[8px]">
+                                        <span className="text-[11px] font-bold text-[#EFEFEF]">{selectedCount}/{totalCount}</span>
                                         <div className="flex gap-1">
                                             <button 
                                                 onClick={() => toggleAllSelection(true)}
-                                                className="text-[10px] font-bold text-slate-700 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
+                                                className="text-[10px] font-bold text-[#EFEFEF] hover:bg-[#1A1A1A] px-2 py-0.5 rounded  transition-all"
                                             >
                                                 ALL
                                             </button>
                                             <button 
                                                 onClick={() => toggleAllSelection(false)}
-                                                className="text-[10px] font-bold text-slate-400 hover:bg-white px-2 py-0.5 rounded shadow-sm transition-all"
+                                                className="text-[10px] font-bold text-[#555555] hover:bg-[#1A1A1A] px-2 py-0.5 rounded  transition-all"
                                             >
                                                 NONE
                                             </button>
@@ -684,22 +666,22 @@ const PdfConverter: React.FC = () => {
 
                                 {/* Live Consumption Stats */}
                                 <div className="hidden sm:flex items-center gap-2">
-                                    <div className="flex items-center gap-1.5 bg-blue-50/50 px-2 py-1 rounded-lg border border-blue-100/50">
-                                        <Type className="w-3 h-3 text-blue-500" />
+                                    <div className="flex items-center gap-1.5 bg-[#1A2A3A]/50 px-2 py-1 rounded-[8px] border border-[#252525]/50">
+                                        <Type className="w-3 h-3 bg-[#FF6B2B]" />
                                         <span className="text-[10px] font-bold text-blue-700 tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[8px] opacity-70">WORDS</span></span>
                                     </div>
-                                    <div className="flex items-center gap-1.5 bg-amber-50/50 px-2 py-1 rounded-lg border border-amber-100/50">
-                                        <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                                    <div className="flex items-center gap-1.5 bg-[#1A2A3A]/50 px-2 py-1 rounded-[8px] border border-amber-100/50">
+                                        <Zap className="w-3 h-3 text-[#FF6B2B] fill-amber-500" />
                                         <span className="text-[10px] font-bold text-amber-700 tabular-nums">{pointsConsumed} <span className="text-[8px] opacity-70">POINTS</span></span>
                                     </div>
                                 </div>
 
                                 <div className="relative">
-                                    <Filter className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                                    <Filter className="w-3 h-3 text-[#555555] absolute left-2 top-1/2 -translate-y-1/2" />
                                     <input 
                                         type="text" 
                                         placeholder="Range (e.g. 1-5)" 
-                                        className="pl-6 pr-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-200 transition-all w-28"
+                                        className="pl-6 pr-2 py-1 text-[11px] bg-[#111111] border border-[#252525] rounded-[8px] focus:outline-none focus:border-[#FF6B2B] focus:ring-2 focus:ring-slate-200 transition-all w-28"
                                         value={rangeInput}
                                         onChange={(e) => setRangeInput(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
@@ -712,14 +694,14 @@ const PdfConverter: React.FC = () => {
                                     <div className="flex gap-2 mr-2">
                                         <button 
                                             onClick={copyAllText}
-                                            className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+                                            className="p-2 text-[#555555] hover:bg-[#141414] rounded-[8px] transition-colors"
                                             title="Copy All"
                                         >
-                                            {copySuccess ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                                            {copySuccess ? <Check className="w-4 h-4 text-[#4CAF50]" /> : <Copy className="w-4 h-4" />}
                                         </button>
                                         <button 
                                             onClick={downloadDocx}
-                                            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-slate-800 transition-all shadow-md"
+                                            className="px-3 py-2 transparent text-[#EFEFEF] border border-[#2A2A2A] hover:bg-[#1A1A1A] rounded-[6px] text-[11px] font-bold flex items-center gap-2 transition-all "
                                         >
                                             <FileDown className="w-4 h-4" />
                                             DOCX
@@ -729,7 +711,7 @@ const PdfConverter: React.FC = () => {
 
                                 {appState !== AppState.ANALYZING ? (
                                     <div className="flex gap-2 flex-1 md:flex-none">
-                                        <label className="px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                                        <label className="px-3 py-2 transparent text-[#EFEFEF] border border-[#2A2A2A] hover:bg-[#1A1A1A] rounded-[6px] text-[11px] font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors">
                                             <Plus className="w-4 h-4" />
                                             ADD
                                             <input 
@@ -743,10 +725,10 @@ const PdfConverter: React.FC = () => {
                                         <button
                                             onClick={startExtraction}
                                             disabled={selectedPendingCount === 0 && !hasErrorPages}
-                                            className={`flex-1 md:flex-none px-6 py-2 rounded-lg flex items-center justify-center gap-2 text-xs font-bold transition-all ${
+                                            className={`flex-1 md:flex-none px-3 py-2 rounded-[6px] flex items-center justify-center gap-2 text-[11px] font-bold transition-all ${
                                                 selectedPendingCount === 0 && !hasErrorPages
-                                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                    : 'bg-orange-500 text-white hover:bg-orange-600 shadow-md shadow-orange-100'
+                                                    ? 'bg-[#141414] text-[#555555] cursor-not-allowed'
+                                                    : 'bg-[#FF6B2B] text-white hover:bg-[#E55A1A]'
                                             }`}
                                         >
                                             <Wand2 className="w-4 h-4" /> 
@@ -764,12 +746,12 @@ const PdfConverter: React.FC = () => {
                                                     setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending', elements: undefined, extractedText: undefined } : p));
                                                     startExtraction();
                                                 }}
-                                                className="px-4 py-2 bg-rose-600 text-white rounded-lg text-xs font-bold hover:bg-rose-700 transition-colors shadow-md"
+                                                className="px-3 py-2 bg-[#3A1A1A] text-[#F44336] border border-[#F44336]/30 text-white rounded-[8px] text-[11px] font-bold hover:bg-[#F44336]/20 transition-colors "
                                             >
                                                 Retry Failed
                                             </button>
                                         )}
-                                        <div className="px-6 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
+                                        <div className="px-3 py-2 bg-[#141414] text-[#EFEFEF] rounded-[8px] text-[11px] font-bold flex items-center justify-center gap-2">
                                             <RefreshCw className="w-4 h-4 animate-spin" />
                                             PROCESSING...
                                         </div>
@@ -779,42 +761,42 @@ const PdfConverter: React.FC = () => {
                         </div>
 
                         {/* Bottom Row: Tools & Settings Grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-2 border-t border-slate-100">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-2 border-t border-[#252525]">
                         {/* MCQ Mode */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-orange-50/50 border border-orange-100">
-                            <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">MCQ Mode</span>
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">MCQ Mode</span>
                             <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-orange-700/70 font-medium">{mcqMode ? 'Active' : 'Disabled'}</span>
+                                <span className="text-[10px] text-[#555555] font-medium">{mcqMode ? 'Active' : 'Disabled'}</span>
                                 <button
                                     onClick={() => setMcqMode(!mcqMode)}
-                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${mcqMode ? 'bg-orange-500' : 'bg-slate-300'}`}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${mcqMode ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
                                 >
-                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </button>
                             </div>
                         </div>
 
                         {/* Auto Proofread */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-purple-50/50 border border-purple-100">
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
                             <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">Proofread</span>
                             <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-purple-700/70 font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
+                                <span className="text-[10px] text-[#555555] font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
                                 <button
                                     onClick={() => setAutoProofread(!autoProofread)}
-                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoProofread ? 'bg-purple-500' : 'bg-slate-300'}`}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${autoProofread ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
                                 >
-                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoProofread ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${autoProofread ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </button>
                             </div>
                         </div>
 
                         {/* Numbering Style */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-blue-50/50 border border-blue-100">
-                            <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider">Pattern</span>
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#2196F3] uppercase tracking-wider">Pattern</span>
                             <select 
                                 value={numberingStyle}
                                 onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
-                                className="text-[10px] font-bold bg-transparent border-none p-0 focus:ring-0 text-blue-800 cursor-pointer"
+                                className="text-[10px] font-bold bg-transparent border-none p-0 focus:ring-0 text-[#EFEFEF] cursor-pointer"
                             >
                                 <option value={NumberingStyle.Q_DOT}>Q1.</option>
                                 <option value={NumberingStyle.HASH}>#1.</option>
@@ -824,53 +806,53 @@ const PdfConverter: React.FC = () => {
                         </div>
 
                         {/* Bilingual */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-emerald-50/50 border border-emerald-100">
-                            <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Bilingual</span>
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#4CAF50] uppercase tracking-wider">Bilingual</span>
                             <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-emerald-700/70 font-medium">{isBilingual ? 'On' : 'Off'}</span>
+                                <span className="text-[10px] text-[#555555] font-medium">{isBilingual ? 'On' : 'Off'}</span>
                                 <button
                                     onClick={() => setIsBilingual(!isBilingual)}
-                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${isBilingual ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${isBilingual ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
                                 >
-                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${isBilingual ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${isBilingual ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </button>
                             </div>
                         </div>
 
                         {/* Images */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
-                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Images</span>
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#111111] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#EFEFEF] uppercase tracking-wider">Images</span>
                             <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-slate-500 font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
+                                <span className="text-[10px] text-[#555555] font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
                                 <button
                                     onClick={() => setIncludeImages(!includeImages)}
-                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${includeImages ? 'bg-slate-800' : 'bg-slate-300'}`}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${includeImages ? 'bg-[#141414]' : 'bg-[#2A2A2A]'}`}
                                 >
-                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${includeImages ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${includeImages ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </button>
                             </div>
                         </div>
 
                         {/* Auto Save */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
-                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Auto Save</span>
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#111111] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#EFEFEF] uppercase tracking-wider">Auto Save</span>
                             <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-slate-500 font-medium">{autoDownload ? 'On' : 'Off'}</span>
+                                <span className="text-[10px] text-[#555555] font-medium">{autoDownload ? 'On' : 'Off'}</span>
                                 <button
                                     onClick={() => setAutoDownload(!autoDownload)}
-                                    className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoDownload ? 'bg-slate-800' : 'bg-slate-300'}`}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${autoDownload ? 'bg-[#141414]' : 'bg-[#2A2A2A]'}`}
                                 >
-                                    <div className={`w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${autoDownload ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${autoDownload ? 'translate-x-4' : 'translate-x-0'}`} />
                                 </button>
                             </div>
                         </div>
 
                         {/* History */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
-                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">History</span>
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#111111] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#EFEFEF] uppercase tracking-wider">History</span>
                             <button
                                 onClick={() => setIsHistoryOpen(true)}
-                                className="flex items-center justify-between text-slate-700 hover:text-slate-900 transition-colors"
+                                className="flex items-center justify-between text-[#EFEFEF] hover:text-[#EFEFEF] transition-colors"
                             >
                                 <span className="text-[10px] font-medium">View Past</span>
                                 <Clock className="w-3.5 h-3.5" />
@@ -878,8 +860,8 @@ const PdfConverter: React.FC = () => {
                         </div>
 
                         {/* MCQ Bank */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-orange-50/50 border border-orange-100">
-                            <span className="text-[10px] font-bold text-orange-600 uppercase tracking-wider">MCQ Bank</span>
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">MCQ Bank</span>
                             <button
                                 onClick={() => setIsMcqSidebarOpen(true)}
                                 className="flex items-center justify-between text-orange-700 hover:text-orange-900 transition-colors"
@@ -899,12 +881,12 @@ const PdfConverter: React.FC = () => {
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
                             exit={{ opacity: 0, height: 0 }}
-                            className="p-4 bg-rose-50 text-rose-700 rounded-2xl border border-rose-100 flex items-start gap-3"
+                            className="p-3 bg-[#1A2A3A] text-rose-700 rounded-[8px] border border-rose-100 flex items-start gap-3"
                         >
                             <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                             <div>
-                                <h4 className="font-bold text-sm uppercase tracking-wider">Processing Error</h4>
-                                <p className="text-sm mt-1">{errorMsg}</p>
+                                <h4 className="font-bold text-[13px] uppercase tracking-wider">Processing Error</h4>
+                                <p className="text-[13px] mt-1">{errorMsg}</p>
                             </div>
                         </motion.div>
                     )}

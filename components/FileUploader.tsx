@@ -80,10 +80,10 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`relative group border-2 border-dashed rounded-2xl p-6 md:p-8 text-center transition-all duration-300 ease-in-out ${
+        className={`relative group border-2 border-dashed rounded-[8px] p-3 md:p-3 text-center transition-all duration-300 ease-in-out ${
           isDragActive 
-            ? 'border-slate-500 bg-slate-50/50 scale-[1.01] shadow-xl shadow-slate-500/10' 
-            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+            ? 'border-slate-500 bg-[#111111]/50 scale-[1.01]  -slate-500/10' 
+            : 'border-[#252525] bg-[#1A1A1A] hover:border-[#252525] hover:bg-[#111111]/50'
         } ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
       >
         <input
@@ -95,35 +95,35 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
           onChange={handleChange}
           disabled={isLoading}
         />
-        <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center gap-3 md:gap-4">
-          <div className={`w-12 h-12 md:w-14 md:h-14 rounded-xl flex items-center justify-center transition-all duration-300 ${
-            isDragActive ? 'bg-slate-800 text-white scale-110' : 'bg-slate-100 text-slate-400 group-hover:bg-slate-200 group-hover:text-slate-600'
+        <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center gap-3 md:gap-3">
+          <div className={`w-12 h-12 md:w-14 md:h-14 rounded-[8px] flex items-center justify-center transition-all duration-300 ${
+            isDragActive ? 'bg-[#141414] text-white scale-110' : 'bg-[#141414] text-[#555555] group-hover:bg-[#2A2A2A] group-hover:text-[#EFEFEF]'
           }`}>
             <Upload className="w-6 h-6 md:w-7 md:h-7" />
           </div>
           
           <div className="space-y-1">
-            <h3 className="text-lg md:text-xl font-semibold text-slate-900 tracking-tight">
+            <h3 className="text-[16px] md:text-[18px] font-semibold text-[#EFEFEF] tracking-tight">
               Drop your documents here
             </h3>
-            <p className="text-slate-500 text-sm md:text-base">
-              or <span className="text-slate-800 font-medium hover:underline">browse your files</span>
+            <p className="text-[#555555] text-[13px] md:text-[14px]">
+              or <span className="text-[#EFEFEF] font-medium hover:underline">browse your files</span>
             </p>
-            <p className="text-slate-400 text-xs mt-2">
-              You can also press <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded-md text-slate-600 font-mono text-[10px]">Ctrl+V</kbd> / <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded-md text-slate-600 font-mono text-[10px]">Cmd+V</kbd> to paste images
+            <p className="text-[#555555] text-[11px] mt-2">
+              You can also press <kbd className="px-1.5 py-0.5 bg-[#141414] border border-[#252525] rounded-[6px] text-[#EFEFEF] font-mono text-[10px]">Ctrl+V</kbd> / <kbd className="px-1.5 py-0.5 bg-[#141414] border border-[#252525] rounded-[6px] text-[#EFEFEF] font-mono text-[10px]">Cmd+V</kbd> to paste images
             </p>
           </div>
 
           <div className="flex items-center gap-3 pt-3">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-md text-xs font-medium text-slate-600">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#141414] rounded-[6px] text-[11px] font-medium text-[#EFEFEF]">
               <FileText className="w-3.5 h-3.5" />
               PDF
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-md text-xs font-medium text-slate-600">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#141414] rounded-[6px] text-[11px] font-medium text-[#EFEFEF]">
               <ImageIcon className="w-3.5 h-3.5" />
               Images
             </div>
-            <div className="text-xs text-slate-400 font-medium">
+            <div className="text-[11px] text-[#555555] font-medium">
               Max 50MB per file
             </div>
           </div>
@@ -135,7 +135,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-500/5 rounded-2xl pointer-events-none border-4 border-slate-500/20"
+              className="absolute inset-0 bg-[#111111]0/5 rounded-[8px] pointer-events-none border-4 border-slate-500/20"
             />
           )}
         </AnimatePresence>
@@ -146,7 +146,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="mt-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm font-medium"
+              className="mt-4 p-3 bg-red-50 text-red-700 rounded-[8px] text-[13px] font-medium"
             >
               {error}
             </motion.div>
@@ -154,15 +154,15 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
         </AnimatePresence>
       </motion.div>
       
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-3">
         {[
           { title: 'Hindi & English', desc: 'Full support for bilingual papers' },
           { title: 'Math Formulas', desc: 'Accurate LaTeX conversion' },
           { title: 'Editable Word', desc: 'Download as professional DOCX' }
         ].map((feature, i) => (
-          <div key={i} className="p-3 rounded-xl bg-white border border-slate-100 shadow-sm flex flex-col justify-center">
-            <h4 className="font-semibold text-slate-800 text-sm">{feature.title}</h4>
-            <p className="text-slate-500 text-xs mt-0.5">{feature.desc}</p>
+          <div key={i} className="p-3 rounded-[8px] bg-[#1A1A1A] border border-[#252525]  flex flex-col justify-center">
+            <h4 className="font-semibold text-[#EFEFEF] text-[13px]">{feature.title}</h4>
+            <p className="text-[#555555] text-[11px] mt-0.5">{feature.desc}</p>
           </div>
         ))}
       </div>

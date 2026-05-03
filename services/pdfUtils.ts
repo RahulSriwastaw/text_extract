@@ -85,15 +85,16 @@ export const cropImage = async (base64: string, bbox: { ymin: number, xmin: numb
       }
 
       // Normalized coordinates are 0-1000
-      const x = (bbox.xmin / 1000) * img.width;
-      const y = (bbox.ymin / 1000) * img.height;
-      const width = ((bbox.xmax - bbox.xmin) / 1000) * img.width;
-      const height = ((bbox.ymax - bbox.ymin) / 1000) * img.height;
+      const x = Math.min(bbox.xmin, bbox.xmax) / 1000 * img.width;
+      const y = Math.min(bbox.ymin, bbox.ymax) / 1000 * img.height;
+      const width = Math.abs(bbox.xmax - bbox.xmin) / 1000 * img.width;
+      const height = Math.abs(bbox.ymax - bbox.ymin) / 1000 * img.height;
 
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = Math.max(1, Math.round(width));
+      canvas.height = Math.max(1, Math.round(height));
 
-      ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
+      // Use the integer values for drawing
+      ctx.drawImage(img, x, y, width, height, 0, 0, canvas.width, canvas.height);
       resolve(canvas.toDataURL('image/png'));
     };
     img.onerror = () => reject(new Error("Failed to load image for cropping"));

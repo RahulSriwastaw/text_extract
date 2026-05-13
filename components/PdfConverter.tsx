@@ -9,6 +9,9 @@ import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem }
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
 import { generateDocx } from '../services/docxService';
+import { auth, db } from '../services/firebase';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { collection, query, orderBy, limit, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 // Fallback UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -39,36 +42,72 @@ const PdfConverter: React.FC = () => {
     return text.trim().split(/\s+/).filter(Boolean).length;
   };
 
-  // Load history on mount
+  const [user] = useAuthState(auth);
+
+  // Load history on mount or when user changes
   useEffect(() => {
-    const savedHistory = localStorage.getItem('conversion_history');
-    if (savedHistory) {
-      try { setHistory(JSON.parse(savedHistory)); } catch (e) { console.error("Failed to load history", e); }
+    if (user) {
+      // Load from Firestore
+      const historyQuery = query(
+        collection(db, `users/${user.uid}/history`),
+        orderBy('timestamp', 'desc'),
+        limit(20)
+      );
+
+      const unsubscribe = onSnapshot(historyQuery, (snapshot) => {
+        const cloudHistory = snapshot.docs.map(doc => ({
+          ...doc.data(),
+          id: doc.id
+        })) as HistoryItem[];
+        setHistory(cloudHistory);
+      }, (error) => {
+        console.error("Firestore history error:", error);
+      });
+
+      return () => unsubscribe();
+    } else {
+      // Load from localStorage for anonymous users
+      const savedHistory = localStorage.getItem('conversion_history');
+      if (savedHistory) {
+        try { setHistory(JSON.parse(savedHistory)); } catch (e) { console.error("Failed to load history", e); }
+      }
     }
-  }, []);
+  }, [user]);
 
-  // Save history when it changes
+  // Save history when it changes (only for anonymous users, Firestore handles its own)
   useEffect(() => {
-    try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
-  }, [history]);
+    if (!user) {
+      try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
+    }
+  }, [history, user]);
 
-  // Auto-download effect
+  // Auto-save to history effect
   useEffect(() => {
     if (appState === AppState.COMPLETED) {
-      // Save to history
       const completedElements = pages
         .filter(p => p.status === 'done' && p.elements)
         .flatMap(p => p.elements || []);
       
       if (completedElements.length > 0) {
-        const newItem: HistoryItem = {
-          id: generateId(),
+        const newItem: Omit<HistoryItem, 'id'> = {
           fileName: fileName,
           timestamp: Date.now(),
           pagesCount: pages.length,
           elements: completedElements
         };
-        setHistory(prev => [newItem, ...prev].slice(0, 20)); // Keep last 20
+
+        if (user) {
+          // Save to Firestore
+          const historyId = generateId();
+          setDoc(doc(db, `users/${user.uid}/history`, historyId), {
+            ...newItem,
+            id: historyId,
+            userId: user.uid
+          }).catch(err => console.error("Failed to save to Firestore:", err));
+        } else {
+          // Save to state (which saves to localStorage via effect)
+          setHistory(prev => [{ ...newItem, id: generateId() } as HistoryItem, ...prev].slice(0, 20));
+        }
       }
 
       if (autoDownload) {
@@ -128,7 +167,11 @@ const PdfConverter: React.FC = () => {
     }
 
     if (hasOversizedFiles) {
-      alert("Some files exceed the 50MB limit and were skipped.");
+      setErrorMsg("Some files exceed the 50MB limit and were skipped.");
+      if (validFiles.length === 0) {
+        setAppState(AppState.ERROR);
+        return;
+      }
     }
 
     if (validFiles.length === 0) return;
@@ -152,7 +195,7 @@ const PdfConverter: React.FC = () => {
       for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
         
-        if (file.type === 'application/pdf') {
+        if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
           const images = await convertPdfToImages(file);
           images.forEach(img => {
             newPages.push({
@@ -162,7 +205,7 @@ const PdfConverter: React.FC = () => {
               isSelected: true // Default selected
             });
           });
-        } else if (file.type.startsWith('image/')) {
+        } else if (file.type.startsWith('image/') || /\.(jpg|jpeg|png)$/i.test(file.name)) {
           const base64 = await readFileAsBase64(file);
           newPages.push({
             id: generateId(),
@@ -390,7 +433,7 @@ const PdfConverter: React.FC = () => {
       .filter(el => includeImages || el.type !== 'image');
     
     if (allElements.length === 0) {
-        if (!autoDownload) alert("No content extracted to save.");
+        if (!autoDownload) setErrorMsg("No content extracted to save.");
         return;
     }
 
@@ -406,7 +449,7 @@ const PdfConverter: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (e) {
       console.error(e);
-      alert("Failed to generate DOCX file.");
+      setErrorMsg("Failed to generate DOCX file.");
     }
   };
 
@@ -444,7 +487,8 @@ const PdfConverter: React.FC = () => {
     
     try {
         await navigator.clipboard.writeText(`\`\`\`markdown\n${fullText}\n\`\`\``);
-        alert("Copied as Markdown!");
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
     } catch (err) {
         console.error('Failed to copy markdown: ', err);
     }
@@ -465,7 +509,7 @@ const PdfConverter: React.FC = () => {
       try {
         const elements = item.elements || [];
         if (elements.length === 0) {
-          alert("No content found in this history item.");
+          setErrorMsg("No content found in this history item.");
           return;
         }
         const blob = await generateDocx(elements, optionArrangement);
@@ -479,7 +523,7 @@ const PdfConverter: React.FC = () => {
         window.URL.revokeObjectURL(url);
       } catch (e) {
         console.error(e);
-        alert("Failed to generate DOCX from history.");
+        setErrorMsg("Failed to generate DOCX from history.");
       }
     };
     downloadItem();
@@ -487,7 +531,11 @@ const PdfConverter: React.FC = () => {
   };
 
   const handleDeleteHistoryItem = (id: string) => {
-    setHistory(prev => prev.filter(item => item.id !== id));
+    if (user) {
+      deleteDoc(doc(db, `users/${user.uid}/history`, id)).catch(err => console.error("Failed to delete history:", err));
+    } else {
+      setHistory(prev => prev.filter(item => item.id !== id));
+    }
   };
 
   const hasCompletedPages = pages.some(p => p.status === 'done' && (p.extractedText || p.elements));
@@ -622,15 +670,15 @@ const PdfConverter: React.FC = () => {
                         <div className="flex flex-col md:flex-row justify-between items-center gap-3">
                             <div className="flex items-center gap-3 flex-1 min-w-0">
                                 {appState === AppState.ANALYZING ? (
-                                    <div className="flex items-center gap-3 bg-[#1A2A3A] px-3 py-1.5 rounded-[8px] border border-[#252525] min-w-0 max-w-md">
+                                    <div className="flex items-center gap-3 bg-[#1A1A1A] px-3 py-1.5 rounded-[8px] border border-[#252525] min-w-0 max-w-md">
                                         <RefreshCw className="w-4 h-4 text-[#FF6B2B] animate-spin flex-shrink-0" />
                                         <div className="flex flex-col min-w-0">
-                                            <span className="text-[10px] font-bold text-orange-800 truncate">Processing: {fileName}</span>
+                                            <span className="text-[10px] font-bold text-[#EFEFEF] truncate">Processing: {fileName}</span>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[9px] text-[#FF6B2B]/70 font-bold tabular-nums">
+                                                <span className="text-[9px] text-[#FF6B2B] font-bold tabular-nums">
                                                     {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
                                                 </span>
-                                                <span className="text-[9px] text-orange-400 font-medium">
+                                                <span className="text-[9px] text-[#888888] font-medium">
                                                     {pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages
                                                 </span>
                                                 {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
@@ -666,13 +714,13 @@ const PdfConverter: React.FC = () => {
 
                                 {/* Live Consumption Stats */}
                                 <div className="hidden sm:flex items-center gap-2">
-                                    <div className="flex items-center gap-1.5 bg-[#1A2A3A]/50 px-2 py-1 rounded-[8px] border border-[#252525]/50">
-                                        <Type className="w-3 h-3 bg-[#FF6B2B]" />
-                                        <span className="text-[10px] font-bold text-blue-700 tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[8px] opacity-70">WORDS</span></span>
+                                    <div className="flex items-center gap-1.5 bg-[#1A1A1A] px-2 py-1 rounded-[8px] border border-[#252525]">
+                                        <Type className="w-3 h-3 text-[#2196F3]" />
+                                        <span className="text-[10px] font-bold text-[#EFEFEF] tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[8px] text-[#555555]">WORDS</span></span>
                                     </div>
-                                    <div className="flex items-center gap-1.5 bg-[#1A2A3A]/50 px-2 py-1 rounded-[8px] border border-amber-100/50">
-                                        <Zap className="w-3 h-3 text-[#FF6B2B] fill-amber-500" />
-                                        <span className="text-[10px] font-bold text-amber-700 tabular-nums">{pointsConsumed} <span className="text-[8px] opacity-70">POINTS</span></span>
+                                    <div className="flex items-center gap-1.5 bg-[#1A1A1A] px-2 py-1 rounded-[8px] border border-[#252525]">
+                                        <Zap className="w-3 h-3 text-[#FF6B2B]" />
+                                        <span className="text-[10px] font-bold text-[#EFEFEF] tabular-nums">{pointsConsumed} <span className="text-[8px] text-[#555555]">POINTS</span></span>
                                     </div>
                                 </div>
 
@@ -881,12 +929,12 @@ const PdfConverter: React.FC = () => {
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
                             exit={{ opacity: 0, height: 0 }}
-                            className="p-3 bg-[#1A2A3A] text-rose-700 rounded-[8px] border border-rose-100 flex items-start gap-3"
+                            className="p-3 bg-[#3A1A1A] text-[#F44336] rounded-[8px] border border-[#F44336]/30 flex items-start gap-3 mt-4"
                         >
-                            <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                            <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-[#F44336]" />
                             <div>
-                                <h4 className="font-bold text-[13px] uppercase tracking-wider">Processing Error</h4>
-                                <p className="text-[13px] mt-1">{errorMsg}</p>
+                                <h4 className="font-bold text-[13px] uppercase tracking-wider text-[#F44336]">Processing Error</h4>
+                                <p className="text-[13px] mt-1 text-[#EFEFEF]">{errorMsg}</p>
                             </div>
                         </motion.div>
                     )}

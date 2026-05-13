@@ -57,7 +57,9 @@ const LATEX_SYMBOLS: Record<string, string> = {
     'setminus': '∖', 'wr': '≀', 'diamond': '⋄',
     'top': '⊤', 'bottom': '⊥', 'models': '⊧', 'vdash': '⊢', 'dashv': '⊣',
     'langle': '⟨', 'rangle': '⟩', 'lceil': '⌈', 'rceil': '⌉', 'lfloor': '⌊', 'rfloor': '⌋',
-    'micro': 'μ', 'ohm': 'Ω'
+    'micro': 'μ', 'ohm': 'Ω',
+    'vdots': '⋮', 'ddots': '⋱',
+    'checkmark': '✓', 'triangledown': '▽'
 };
 
 const MATH_FUNCTIONS = [
@@ -802,25 +804,37 @@ export const generateDocx = async (
     if (!element.content) continue;
     
     // Pre-process lines to merge those that don't start a new block
+    // Also protect multi-line math blocks
     const content = element.content || '';
-    const rawLines = content.split('\n');
+    
+    // Protection for multi-line math: join sections between $$ and $$
+    let blockMathRestored = content;
+    const mathBlocks = content.match(/\$\$[\s\S]*?\$\$/g);
+    if (mathBlocks) {
+        mathBlocks.forEach((block, idx) => {
+            const protectedBlock = block.replace(/\n/g, ' [[MATH_BR]] ');
+            blockMathRestored = blockMathRestored.replace(block, protectedBlock);
+        });
+    }
+
+    const rawLines = blockMathRestored.split('\n');
     const lines: string[] = [];
     let currentLineBuffer = "";
 
     for (let i = 0; i < rawLines.length; i++) {
-        const line = rawLines[i].trim();
+        let line = rawLines[i].trim();
         if (!line) {
-            if (currentLineBuffer) lines.push(currentLineBuffer);
+            if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
             currentLineBuffer = "";
             continue;
         }
 
-        const cleanLineText = line.replace(/\*\*/g, '');
-        const isHeader = /^(Section|Part|Khand|Unit|Q\.\s*Paper|Paper|Code|Set)\s+[\w\d]+/i.test(line) && line.length < 50;
+        const cleanLineText = line.replace(/\*\*/g, '').replace(/ \[\[MATH_BR\]\] /g, ' ');
+        const isHeader = /^(Section|Part|Khand|Unit|Q\.\s*Paper|Paper|Code|Set)\s+[\w\d]+/i.test(cleanLineText) && cleanLineText.length < 50;
         const isMetadata = /^(Subject|Time|Max\.?\s*Marks|Marks|Class|Date|Roll\s*No|Duration)\s*[:\-]/i.test(cleanLineText);
         const isInstruction = /^(Note|Instructions?|General\s*Instructions?)\s*[:\-]/i.test(cleanLineText);
-        const isSeparator = /^(\(OR\)|OR|अथवा|Athava|[\/]\s*OR|OR\s*[\/]|\s)+$/i.test(line.replace(/[^a-zA-Z\u0900-\u097F\/]/g, '').trim());
-        const isFullEquation = line.startsWith('$$') && line.endsWith('$$') && (line.match(/\$\$/g) || []).length === 2;
+        const isSeparator = /^(\(OR\)|OR|अथवा|Athava|[\/]\s*OR|OR\s*[\/]|\s)+$/i.test(cleanLineText.replace(/[^a-zA-Z\u0900-\u097F\/]/g, '').trim());
+        const isFullEquation = line.includes('$$');
         const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s?\d+|Prashn\s?\d+|Question\s?\d+|प्रश्न\s?\d+|\d+\.|[\(\[]\d+[\)\]]|\d+[\)])\s/i.test(cleanLineText);
         const isSubQuestion = /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
         const isOption = /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanLineText);
@@ -830,13 +844,13 @@ export const generateDocx = async (
         const isNewBlock = isHeader || isMetadata || isInstruction || isSeparator || isFullEquation || isMainQuestion || isSubQuestion || isOption || isTableRow || isBlockquote;
 
         if (isNewBlock) {
-            if (currentLineBuffer) lines.push(currentLineBuffer);
+            if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
             currentLineBuffer = line;
         } else {
             currentLineBuffer += (currentLineBuffer ? " " : "") + line;
         }
     }
-    if (currentLineBuffer) lines.push(currentLineBuffer);
+    if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();

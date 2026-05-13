@@ -70,10 +70,9 @@ const extractLayoutWithRetry = async (
   const bilingualInstruction = isBilingual
     ? `**CRITICAL RULE: BILINGUAL OUTPUT REQUIRED**:
 - You MUST output EVERY question and EVERY option in BOTH English and Hindi.
-- If the source text is ONLY in English, you MUST translate it to Hindi and output BOTH (English first, then Hindi).
-- If the source text is ONLY in Hindi, you MUST translate it to English and output BOTH (Hindi first, then English).
-- If the source text is already in both languages, preserve both.
-- Do not skip translating any part of the text.`
+- **COMBINE OPTIONS**: If options are bilingual (e.g., A. Hindi and A. English), you MUST combine them into a single line like "A. [Hindi Text] / [English Text]". Do NOT output (A) Hindi and (A) English as separate lines.
+- Keep the translation accurate. If the source text is only in one language, translate it to the other and combine.
+- Maintain the ordering: Usually Hindi followed by English, separated by a forward slash " / " or appearing on immediate next lines within the same block.`
     : `**CRITICAL RULE: NO TRANSLATION**:
 - Extract the text EXACTLY in the language it is written.
 - If it is in Hindi, output ONLY Hindi.
@@ -100,7 +99,8 @@ const extractLayoutWithRetry = async (
 - CRITICAL: You MUST place a newline character before EVERY single question to ensure it is not merged with previous text.
 - Format every question so it starts on a NEW LINE like "Q.1 [Question Text]".
 - Format every option so it starts on a NEW LINE like "A. [Option Text]".
-- Do NOT squash multiple questions or options into a single paragraph. Each question and each option MUST be on its own line.`
+- **BILINGUAL MATCHING**: In bilingual mode, combine the Hindi and English versions of the same option into one line: "A. [Hindi] / [English]".
+- Do NOT squash multiple questions into a single paragraph. Each question and its corresponding combined options MUST be clearly structured.`
     : `**GENERAL DOCUMENT MODE**:
 - Extract text as it appears. Maintain paragraphs and structure.`;
 
@@ -142,8 +142,12 @@ ${bilingualInstruction}
    - Identify distinct blocks of text (paragraphs, questions, options, headers).
    - ${numberingInstruction}
    - For multiple-choice options, ensure they are extracted as separate text elements or clearly separated within the text.
-   - Preserve mathematical formulas and scientific notations accurately. Use LaTeX format enclosed in $...$ for inline math and $$...$$ for block math if applicable.
+   - Preserve mathematical formulas and scientific notations accurately.
+   - **STRICT MATH RULE**: You MUST enclose ALL mathematical formulas, variables, and expressions in double dollar signs like \`$$\` ... \`$$\` (e.g., \`$$x^2 + y^2 = r^2$$\`), even for simple inline variables like \`$$x$$\`.
+   - Use standard LaTeX format for all math.
    - PAY VERY CLOSE ATTENTION to recurring decimals or numbers with a line/bar over them (e.g., $0.04\\overline{3}$ or $0.\\overline{43}$). You MUST extract the bar correctly using LaTeX \\overline{}! This is a very common requirement.
+   - For fractions, always use \`\\frac{num}{den}\`. For square roots, use \`\\sqrt{...}\`.
+   - Ensure complex equations are balanced and valid LaTeX.
 
 ${imageInstruction}
 

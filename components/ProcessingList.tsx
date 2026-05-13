@@ -107,17 +107,17 @@ const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, on
             {/* Status Badge */}
             <div className="absolute top-2 right-2">
                {page.status === 'processing' && (
-                 <span className="bg-[#141414]/90 backdrop-blur text-white text-[10px] font-medium px-2 py-0.5 rounded-[20px] flex items-center gap-1 ">
+                 <span className="bg-[#1A2A3A] text-[#2196F3] text-[11px] px-[9px] py-[3px] rounded-[20px] flex items-center gap-1">
                    <Loader2 className="w-3 h-3 animate-spin" /> Processing
                  </span>
                )}
                {page.status === 'done' && (
-                 <span className="bg-emerald-600/90 backdrop-blur text-white text-[10px] font-medium px-2 py-0.5 rounded-[20px] flex items-center gap-1 ">
+                 <span className="bg-[#1A3A1A] text-[#4CAF50] text-[11px] px-[9px] py-[3px] rounded-[20px] flex items-center gap-1">
                    <CheckCircle2 className="w-3 h-3" /> Done
                  </span>
                )}
                {page.status === 'error' && (
-                 <span className="bg-[#3A1A1A] text-[#F44336] border border-[#F44336]/30/90 backdrop-blur text-white text-[10px] font-medium px-2 py-0.5 rounded-[20px] flex items-center gap-1 ">
+                 <span className="bg-[#3A1A1A] text-[#F44336] text-[11px] px-[9px] py-[3px] rounded-[20px] flex items-center gap-1">
                    <AlertCircle className="w-3 h-3" /> Failed
                  </span>
                )}
@@ -280,9 +280,9 @@ const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, on
                                 </span>
 
                                 {page.status === 'error' && (
-                                    <button 
+                                     <button 
                                         onClick={() => onRetry(page.id)}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1A1A1A] border border-rose-200 text-[#F44336] rounded-[8px] hover:bg-[#1A2A3A] transition-all  text-[10px] font-semibold"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1A1A1A] border border-[#252525] text-[#F44336] rounded-[8px] hover:bg-[#3A1A1A] transition-all  text-[10px] font-semibold"
                                     >
                                         <RefreshCw className="w-3 h-3" /> Retry Page
                                     </button>

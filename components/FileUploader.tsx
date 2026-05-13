@@ -15,7 +15,10 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
     const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
     const filesArray = Array.from(files);
     for (const file of filesArray) {
-      if (!allowedTypes.includes(file.type)) {
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      const isAllowedExt = ['pdf', 'jpg', 'jpeg', 'png'].includes(ext);
+      
+      if (!allowedTypes.includes(file.type) && !isAllowedExt) {
         setError(`Invalid file type: ${file.name}. Only PDF and images (JPG, PNG) are allowed.`);
         return false;
       }
@@ -135,7 +138,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-[#111111]0/5 rounded-[8px] pointer-events-none border-4 border-slate-500/20"
+              className="absolute inset-0 bg-[#111111]/50 rounded-[8px] pointer-events-none border-4 border-slate-500/20"
             />
           )}
         </AnimatePresence>
@@ -146,7 +149,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="mt-4 p-3 bg-red-50 text-red-700 rounded-[8px] text-[13px] font-medium"
+              className="mt-4 p-3 bg-[#3A1A1A] text-[#F44336] border border-[#F44336]/30 rounded-[8px] text-[13px] font-medium"
             >
               {error}
             </motion.div>

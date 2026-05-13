@@ -1,0 +1,44 @@
+{
+  "entities": {
+    "HistoryItem": {
+      "title": "History Item",
+      "description": "Information about a past PDF to Word conversion",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "fileName": { "type": "string" },
+        "timestamp": { "type": "integer" },
+        "pagesCount": { "type": "integer" },
+        "elements": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      },
+      "required": ["id", "userId", "fileName", "timestamp", "pagesCount", "elements"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Stores user profile data"
+    },
+    "users/{userId}/history/{historyId}": {
+      "schema": "HistoryItem",
+      "description": "Stores the user's conversion history"
+    }
+  }
+}

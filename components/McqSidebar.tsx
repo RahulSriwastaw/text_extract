@@ -158,8 +158,26 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
     if (mcqs.length === 0) return;
     
     const elements = mcqs.map((mcq, idx) => {
-      const content = `**Q.${idx + 1}** ${mcq.questionText}\n` + 
-                      mcq.options.map(o => `(${o.label}) ${o.text}`).join('\n');
+      // Helper to ensure LaTeX is wrapped in $$ for docxService to pick it up
+      const ensureLatexWrapped = (text: string) => {
+        if (!text) return "";
+        // If it already has any math delimiters, it's probably fine
+        if (text.includes('$$') || text.includes('\\(') || text.includes('\\[')) return text;
+        
+        // If it looks like it has LaTeX but no delimiters, wrap it
+        // A simple heuristic: check for backslashes followed by common math commands
+        if (/\\[a-zA-Z]+/.test(text) || /[_^]/.test(text)) {
+           return `$$ ${text} $$`;
+        }
+        return text;
+      };
+
+      const qText = ensureLatexWrapped(mcq.questionText);
+      const optionsText = mcq.options.map(o => {
+        return `(${o.label}) ${ensureLatexWrapped(o.text)}`;
+      }).join('\n');
+
+      const content = `**Q.${idx + 1}** ${qText}\n${optionsText}`;
       return { type: 'text', content };
     });
     
@@ -247,7 +265,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed inset-y-0 right-0 w-full max-w-md bg-[#111111] z-50 flex flex-col border-l border-[#252525]"
+            className="fixed inset-y-0 right-0 w-full max-w-md bg-[#141414] z-50 flex flex-col border-l border-[#252525]"
           >
             <div className="flex flex-col gap-3 p-3 bg-[#1A1A1A] border-b border-[#252525]">
               <div className="flex items-center justify-between">
@@ -333,7 +351,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <input type="checkbox" className="w-4 h-4 rounded border-[#252525] text-[#FF6B2B] focus:ring-[#FF6B2B]" />
-                        <div className="min-w-[24px] h-6 px-1.5 rounded-[20px] bg-[#1A2A3A] text-[#FF6B2B] flex items-center justify-center text-[11px] font-bold">
+                        <div className="min-w-[24px] h-6 px-1.5 rounded-[20px] bg-[#1A1A1A] text-[#FF6B2B] flex items-center justify-center text-[11px] font-bold border border-[#252525]">
                           {idx + 1}
                         </div>
                       </div>
@@ -345,10 +363,10 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
 
                     {/* Tags - Centered */}
                     <div className="flex flex-col items-center gap-1.5 -mt-2 mb-1">
-                      <span className="px-3 py-0.5 bg-[#1A2A3A] text-[#FF6B2B] rounded-[20px] text-[10px] font-bold uppercase tracking-wider">
+                      <span className="px-[9px] py-[3px] bg-[#1A2A3A] text-[#2196F3] rounded-[20px] text-[11px] font-bold uppercase tracking-wider">
                         MCQ
                       </span>
-                      <span className="px-3 py-0.5 bg-[#1A2A3A] text-[#FF6B2B] rounded-[20px] text-[10px] font-bold uppercase tracking-wider">
+                      <span className="px-[9px] py-[3px] bg-[#1A2A3A] text-[#2196F3] rounded-[20px] text-[11px] font-bold uppercase tracking-wider">
                         PAGE {mcq.pageNumber}
                       </span>
                     </div>
@@ -379,7 +397,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                         <Edit className="w-4 h-4" />
                         Edit
                       </button>
-                      <button className="flex-1 flex items-center justify-center gap-1.5 py-1.5 border border-[#252525] text-[#F44336] rounded-[8px] text-[13px] font-medium hover:bg-red-50 transition-colors">
+                      <button className="flex-1 flex items-center justify-center gap-1.5 py-1.5 border border-[#252525] text-[#F44336] rounded-[8px] text-[13px] font-medium hover:bg-[#3A1A1A] transition-colors">
                         <Trash2 className="w-4 h-4" />
                         Delete
                       </button>

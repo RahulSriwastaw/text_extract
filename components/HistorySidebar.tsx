@@ -2,6 +2,7 @@ import React from 'react';
 import { Clock, Trash2, FileText, ChevronRight, Download, Copy } from 'lucide-react';
 import { HistoryItem } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth } from '../services/firebase';
 
 interface HistorySidebarProps {
   history: HistoryItem[];
@@ -39,7 +40,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-0 h-full w-full max-w-md bg-[#1A1A1A] z-50 flex flex-col"
+            className="fixed right-0 top-0 h-full w-full max-w-md bg-[#141414] z-50 flex flex-col"
           >
             <div className="p-3 border-b border-[#252525] flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -56,7 +57,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
                         onClearAll();
                       }
                     }}
-                    className="p-1.5 text-[#555555] hover:text-[#F44336] hover:bg-[#1A2A3A] rounded-[8px] transition-colors"
+                    className="p-1.5 text-[#555555] hover:text-[#F44336] hover:bg-[#3A1A1A] rounded-[8px] transition-colors"
                     title="Clear All"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -128,7 +129,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
                               e.stopPropagation();
                               onDeleteItem(item.id);
                             }}
-                            className="p-1.5 text-[#555555] hover:text-[#F44336] hover:bg-[#1A2A3A] rounded-[6px] transition-all"
+                            className="p-1.5 text-[#555555] hover:text-[#F44336] hover:bg-[#3A1A1A] rounded-[6px] transition-all"
                             title="Delete"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -143,7 +144,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
 
             <div className="p-3 border-t border-[#252525] bg-[#111111]/50">
               <p className="text-[11px] text-[#555555] text-center">
-                History is saved locally on your device.
+                {auth.currentUser ? "History is synced to your account." : "History is saved locally on your device."}
               </p>
             </div>
           </motion.div>

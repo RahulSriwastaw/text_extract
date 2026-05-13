@@ -28,7 +28,7 @@ function App() {
       <div className="min-h-screen bg-[#0F0F0F]">
         <Navbar />
         <AnimatePresence mode="wait">
-          {!user || !showConverter ? (
+          {!showConverter ? (
             <motion.div
               key="landing"
               initial={{ opacity: 0 }}

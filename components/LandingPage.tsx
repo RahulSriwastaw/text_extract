@@ -20,12 +20,8 @@ interface LandingPageProps {
 
 const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
   const loginAndStart = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-      onStart();
-    } catch (error) {
-      console.error("Login failed:", error);
-    }
+    // Bypassing login for testing
+    onStart();
   };
 
   const containerVariants = {

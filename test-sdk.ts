@@ -5,7 +5,7 @@ async function test() {
   const client = new GoogleGenAI({ apiKey: "INVALID_BLABLA" });
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash-latest',
       contents: 'hello',
     });
     console.log("Success!", Object.keys(response));

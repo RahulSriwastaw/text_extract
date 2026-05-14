@@ -110,7 +110,7 @@ const extractLayoutWithRetry = async (
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.5-flash-latest',
       contents: [
         {
           inlineData: {
@@ -316,7 +316,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.5-flash-latest',
       contents: prompt,
       config: {
         temperature: 0.1,

@@ -33,6 +33,7 @@ const PdfConverter: React.FC = () => {
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(true);
   const [showMcqNumbers, setShowMcqNumbers] = useState(true);
+  const [refineMode, setRefineMode] = useState(false);
   const [autoProofread, setAutoProofread] = useState(false);
   const [selectedError, setSelectedError] = useState<string | null>(null);
   const [wordsConsumed, setWordsConsumed] = useState(0);
@@ -300,7 +301,7 @@ const PdfConverter: React.FC = () => {
             await new Promise(resolve => setTimeout(resolve, index * 250));
 
             try {
-                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
+                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
                 
                 // Calculate words and points
                 const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
@@ -374,7 +375,7 @@ const PdfConverter: React.FC = () => {
     setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined } : p));
 
     try {
-      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode);
+      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
       
       // Calculate words and points
       const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
@@ -933,6 +934,20 @@ const PdfConverter: React.FC = () => {
                                 </button>
                             </div>
                         </div>
+
+                        {/* Refine Mode */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">Refine</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-[#555555] font-medium">{refineMode ? 'Active' : 'A-Z'}</span>
+                                <button
+                                    onClick={() => setRefineMode(!refineMode)}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${refineMode ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
+                                >
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${refineMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 </div>
@@ -985,6 +1000,76 @@ const PdfConverter: React.FC = () => {
           isBilingual={isBilingual}
           showMcqNumbers={showMcqNumbers}
         />
+
+        {/* SEO Content Section */}
+        <div className="mt-24 border-t border-[#252525] pt-16 pb-12">
+            <div className="max-w-4xl mx-auto space-y-12 px-4">
+                <section>
+                    <h2 className="text-[24px] font-bold text-[#EFEFEF] mb-6 tracking-tight">Advanced AI PDF to Text Converter</h2>
+                    <p className="text-[#888888] leading-relaxed text-[15px]">
+                        Our **AI PDF to Text** technology goes beyond traditional OCR. Traditionally, 
+                        converting a **pdf to text** meant losing the layout, losing table structures, 
+                        and dealing with messy character recognition. With the power of Gemini 1.5 Pro, 
+                        we process your documents visually, understanding exactly where each paragraph, 
+                        heading, and table belongs.
+                    </p>
+                </section>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-left">
+                    <div className="bg-[#141414] p-6 rounded-[12px] border border-[#252525]">
+                        <h3 className="text-[18px] font-bold text-[#FF6B2B] mb-3">Accurate OCR</h3>
+                        <p className="text-[#888888] text-[14px] leading-relaxed">
+                            Extract text from high-resolution images or low-quality scanned PDFs. 
+                            Our **pdf to text converter** handles handwriting, mathematical formulas, 
+                            and multiple languages with ease.
+                        </p>
+                    </div>
+                    <div className="bg-[#141414] p-6 rounded-[12px] border border-[#252525]">
+                        <h3 className="text-[18px] font-bold text-[#FF6B2B] mb-3">Layout Preservation</h3>
+                        <p className="text-[#888888] text-[14px] leading-relaxed">
+                            Unlike most **pdf to text** tools, we preserve the hierarchy. Headings, 
+                            bullets, and multi-column layouts are detected and reconstructed 
+                            perfectly in your final output.
+                        </p>
+                    </div>
+                </div>
+
+                <section>
+                    <h2 className="text-[22px] font-bold text-[#EFEFEF] mb-8 text-center italic">Frequently Asked Questions</h2>
+                    <div className="space-y-4">
+                        {[
+                            {
+                                q: "How does the AI PDF to Text converter work?",
+                                a: "We use advanced vision-based AI (Gemini 1.5) to 'look' at your PDF pages just like a human would. This allows us to recognize text, tables, and images in context, providing much higher accuracy than standard OCR engines."
+                            },
+                            {
+                                q: "Is this pdf to text tool secure?",
+                                a: "Yes. Your files are processed securely and are not used to train our models. If you are logged in, your history is stored in your private cloud account. If not, it stays on your local machine."
+                            },
+                            {
+                                q: "Can it handle scanned images as well as PDFs?",
+                                a: "Absolutely. You can upload JPG, PNG, and scanned PDF files. Our tool acts as a comprehensive **pdf to text converter** for all visual document types."
+                            },
+                            {
+                                q: "Is there a limit on the number of pages?",
+                                a: "You can process multiple documents in parallel. The free tier respects API quotas, ensuring you get high-quality extractions without cost."
+                            }
+                        ].map((faq, i) => (
+                            <div key={i} className="bg-[#141414]/50 border border-[#252525] p-5 rounded-[8px]">
+                                <h4 className="text-[14px] font-bold text-[#FF6B2B] mb-2">{faq.q}</h4>
+                                <p className="text-[#888888] text-[13px] leading-relaxed">{faq.a}</p>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
+                <footer className="pt-12 text-center">
+                    <p className="text-[#555555] text-[12px]">
+                        © 2026 AI PDF to Text Converter. All rights reserved. Built with advanced AI layout analysis.
+                    </p>
+                </footer>
+            </div>
+        </div>
       </div>
     </div>
   );

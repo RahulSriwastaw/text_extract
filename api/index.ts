@@ -42,6 +42,7 @@ const extractLayoutWithRetry = async (
   includeImages: boolean,
   isBilingual: boolean,
   mcqMode: boolean,
+  refineMode: boolean = false,
   retryCount = 0
 ): Promise<any> => {
   const MAX_RETRIES = 5;
@@ -110,6 +111,15 @@ const extractLayoutWithRetry = async (
     : `**GENERAL DOCUMENT MODE**:
 - Extract text as it appears. Maintain paragraphs and structure.`;
 
+  const refineInstruction = refineMode
+    ? `**REFINE MODE ENABLED (SMART CONTENT FILTERING)**:
+- YOUR GOAL: Extract ONLY the primary subject matter content.
+- **REMOVE JUNK**: Automatically identify and EXCLUDE headers, footers, page numbers, watermark text, boilerplate instructions, exam center codes, dates, or decorative text.
+- **PRESERVE CONTENT**: Do NOT change, summarize, or rewrite the actual content. Extract the main text VERBATIM (EXACTLY as written).
+- Focus on questions, options, and main paragraphs. If a piece of text looks like it doesn't belong to the core material, SKIP IT.`
+    : `**FULLY EXTRACTION MODE (A TO Z)**:
+- Extract EVERY piece of text from the page, including headers, footers, page numbers, and small boilerplate text. Leave nothing out.`;
+
   try {
     const response = await client.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -124,10 +134,11 @@ const extractLayoutWithRetry = async (
           text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
 
 ${mcqInstruction}
+${refineInstruction}
 
 **CRITICAL RULE: COMPLETE EXTRACTION**:
 - You MUST read the ENTIRE page from top to bottom.
-- Do NOT skip any questions, options, paragraphs, or text, no matter how small the font is or where it is located on the page.
+- Do NOT skip any questions, options, paragraphs, or text, no matter how small the font is or where it is located on the page (unless it is junk text and Refine Mode is ON).
 - Ensure every single question and its options are extracted.
 
 **OCR CONTEXT**:
@@ -392,8 +403,8 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
 
 app.post('/api/extract', async (req, res) => {
   try {
-    const { base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode } = req.body;
-    const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode);
+    const { base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode } = req.body;
+    const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
     res.json({ elements });
   } catch (error: any) {
     console.warn("Extraction failed:", error?.message || error);

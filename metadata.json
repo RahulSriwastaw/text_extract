@@ -1,6 +1,6 @@
 {
-  "name": "AI PDF to Text",
-  "description": "Convert scanned PDFs and images into editable Word documents with AI layout analysis, cloud history sync, and secure authentication.",
+  "name": "AI PDF to Text Converter",
+  "description": "Accurate AI PDF to Text converter and OCR tool. Convert scanned PDFs and images into editable Word documents while preserving complex layouts.",
   "requestFramePermissions": [
     "clipboard-read"
   ]

@@ -33,9 +33,10 @@ interface McqSidebarProps {
   mcqMode: boolean;
   autoProofread: boolean;
   isBilingual: boolean;
+  showMcqNumbers: boolean;
 }
 
-const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread, isBilingual }) => {
+const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread, isBilingual, showMcqNumbers }) => {
   const [isProofreading, setIsProofreading] = useState(false);
   const [manualMcqs, setManualMcqs] = useState<McqItem[] | null>(null);
   const [lastProcessedPageCount, setLastProcessedPageCount] = useState(0);
@@ -196,7 +197,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
         return `(${o.label.toLowerCase()}) ${ensureLatexWrapped(o.text)}`;
       }).join('\n');
 
-      let content = `**Question: ${idx + 1}.** ${qText}\n${optionsText}`;
+      let content = `**Question: ${showMcqNumbers ? (idx + 1) + '. ' : ''}**${qText}\n${optionsText}`;
       if (mcq.answer) {
         content += `\n**Answer: ${mcq.answer}**`;
       }
@@ -249,7 +250,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
           <h1>MCQ Bank</h1>
           ${mcqs.map((mcq, idx) => `
             <div class="question">
-              <div class="q-text">Question: ${idx + 1}. ${mcq.questionText}</div>
+              <div class="q-text">Question: ${showMcqNumbers ? (idx + 1) + '. ' : ''}${mcq.questionText}</div>
               <div class="options">
                 ${mcq.options.map(o => `<div class="option">(${o.label.toLowerCase()}) ${o.text}</div>`).join('')}
               </div>
@@ -396,7 +397,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
 
                     {/* Question Text */}
                     <p className="text-[#EFEFEF] text-[13px] font-medium line-clamp-3 whitespace-pre-wrap">
-                      Question: {idx + 1}. {mcq.questionText}
+                      Question: {showMcqNumbers ? (idx + 1) + '. ' : ''}{mcq.questionText}
                     </p>
 
                     {/* Options */}

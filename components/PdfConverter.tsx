@@ -32,6 +32,7 @@ const PdfConverter: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(true);
+  const [showMcqNumbers, setShowMcqNumbers] = useState(true);
   const [autoProofread, setAutoProofread] = useState(false);
   const [selectedError, setSelectedError] = useState<string | null>(null);
   const [wordsConsumed, setWordsConsumed] = useState(0);
@@ -918,6 +919,20 @@ const PdfConverter: React.FC = () => {
                                 <ListChecks className="w-3.5 h-3.5" />
                             </button>
                         </div>
+
+                        {/* MCQ Numbers */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">Numbers</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-[#555555] font-medium">{showMcqNumbers ? 'On' : 'Off'}</span>
+                                <button
+                                    onClick={() => setShowMcqNumbers(!showMcqNumbers)}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${showMcqNumbers ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
+                                >
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${showMcqNumbers ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 </div>
@@ -968,6 +983,7 @@ const PdfConverter: React.FC = () => {
           mcqMode={mcqMode}
           autoProofread={autoProofread}
           isBilingual={isBilingual}
+          showMcqNumbers={showMcqNumbers}
         />
       </div>
     </div>

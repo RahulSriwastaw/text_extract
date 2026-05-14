@@ -26,7 +26,7 @@ const PdfConverter: React.FC = () => {
   const [autoDownload, setAutoDownload] = useState<boolean>(true);
   const [numberingStyle, setNumberingStyle] = useState<NumberingStyle>(NumberingStyle.HASH);
   const [isBilingual, setIsBilingual] = useState(false);
-  const [includeImages, setIncludeImages] = useState<boolean>(true);
+  const [includeImages, setIncludeImages] = useState<boolean>(false);
   const [optionArrangement, setOptionArrangement] = useState<OptionArrangement>(OptionArrangement.VERTICAL);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);

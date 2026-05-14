@@ -33,11 +33,29 @@ export const extractLayoutFromImage = async (
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     if (response.status === 429 && retryCount < 5) {
-        const waitTime = errorData.waitTime || 60000;
-        console.warn(`[Client] Quota hit. Waiting ${waitTime}ms before retry ${retryCount + 1}/5...`);
+        let waitTime = errorData.waitTime || 60000;
+        
+        // Try to parse waitTime from nested error message if not directly available
+        if (errorData.error && typeof errorData.error === 'string') {
+          try {
+            const parsed = JSON.parse(errorData.error);
+            if (parsed.waitTime) waitTime = parsed.waitTime;
+          } catch(e) {
+            const match = errorData.error.match(/retry in ([\d\.]+)s/i);
+            if (match) waitTime = (parseFloat(match[1]) * 1000) + 1000;
+          }
+        }
+
+        console.warn(`[Client] Quota hit. Waiting ${Math.round(waitTime/1000)}s before retry ${retryCount + 1}/5...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, retryCount + 1);
     }
+    
+    // Friendly error message for quota
+    if (response.status === 429) {
+      throw new Error("Gemini Free Tier Quota Exceeded. The AI is busy (20 requests/day limit reached). Please wait a few minutes or retry later.");
+    }
+    
     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
   }
 
@@ -65,11 +83,28 @@ export const proofreadMcqs = async (rawText: string, isBilingual: boolean = fals
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     if (response.status === 429 && retryCount < 5) {
-        const waitTime = errorData.waitTime || 60000;
-        console.warn(`[Client] Quota hit. Waiting ${waitTime}ms before retry ${retryCount + 1}/5...`);
+        let waitTime = errorData.waitTime || 60000;
+        
+        // Try to parse waitTime from nested error message
+        if (errorData.error && typeof errorData.error === 'string') {
+          try {
+            const parsed = JSON.parse(errorData.error);
+            if (parsed.waitTime) waitTime = parsed.waitTime;
+          } catch(e) {
+            const match = errorData.error.match(/retry in ([\d\.]+)s/i);
+            if (match) waitTime = (parseFloat(match[1]) * 1000) + 1000;
+          }
+        }
+
+        console.warn(`[Client] Quota hit (Proofread). Waiting ${Math.round(waitTime/1000)}s before retry ${retryCount + 1}/5...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         return proofreadMcqs(rawText, isBilingual, retryCount + 1);
     }
+    
+    if (response.status === 429) {
+      throw new Error("Gemini Free Tier Quota Exceeded (Proofread limit reached). Please wait a few minutes.");
+    }
+    
     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
   }
 

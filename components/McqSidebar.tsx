@@ -34,9 +34,10 @@ interface McqSidebarProps {
   autoProofread: boolean;
   isBilingual: boolean;
   showMcqNumbers: boolean;
+  showAnswers: boolean;
 }
 
-const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread, isBilingual, showMcqNumbers }) => {
+const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread, isBilingual, showMcqNumbers, showAnswers }) => {
   const [isProofreading, setIsProofreading] = useState(false);
   const [manualMcqs, setManualMcqs] = useState<McqItem[] | null>(null);
   const [lastProcessedPageCount, setLastProcessedPageCount] = useState(0);
@@ -198,7 +199,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
       }).join('\n');
 
       let content = `**Question: ${showMcqNumbers ? (idx + 1) + '. ' : ''}**${qText}\n${optionsText}`;
-      if (mcq.answer) {
+      if (mcq.answer && showAnswers) {
         content += `\n**Answer: ${mcq.answer}**`;
       }
       return { type: 'text', content };
@@ -254,7 +255,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
               <div class="options">
                 ${mcq.options.map(o => `<div class="option">(${o.label.toLowerCase()}) ${o.text}</div>`).join('')}
               </div>
-              ${mcq.answer ? `<div class="answer" style="margin-top: 8px; font-weight: bold; color: #FF6B2B;">Answer: ${mcq.answer}</div>` : ''}
+              ${mcq.answer && showAnswers ? `<div class="answer" style="margin-top: 8px; font-weight: bold; color: #FF6B2B;">Answer: ${mcq.answer}</div>` : ''}
             </div>
           `).join('')}
           <script>
@@ -413,7 +414,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                       </div>
                     </div>
 
-                    {mcq.answer && (
+                    {mcq.answer && showAnswers && (
                       <div className="mt-2 py-2 px-3 bg-[#1A1A1A] border border-[#252525] rounded-[6px]">
                         <p className="text-[12px] font-bold text-[#FF6B2B]">Answer: {mcq.answer}</p>
                       </div>

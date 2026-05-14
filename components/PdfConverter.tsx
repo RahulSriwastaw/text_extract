@@ -33,6 +33,7 @@ const PdfConverter: React.FC = () => {
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(true);
   const [showMcqNumbers, setShowMcqNumbers] = useState(true);
+  const [showAnswers, setShowAnswers] = useState(true);
   const [refineMode, setRefineMode] = useState(false);
   const [autoProofread, setAutoProofread] = useState(false);
   const [selectedError, setSelectedError] = useState<string | null>(null);
@@ -334,20 +335,37 @@ const PdfConverter: React.FC = () => {
                 console.error(`Error processing page ${page.pageNumber}:`, e);
                 
                 const errorStr = e?.message || String(e);
+
+                const errorLower = errorStr.toLowerCase();
                 const isRateLimit = errorStr.includes("429") || 
                                      errorStr.includes("RESOURCE_EXHAUSTED") ||
                                      errorStr.includes("quota") ||
                                      errorStr.includes("limit");
 
-                // Mark page as error
-                setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: errorStr } : p));
+                // Try to extract a clean message if it's JSON
+                let displayError = errorStr;
+                try {
+                  const parsed = JSON.parse(errorStr);
+                  if (parsed.error && typeof parsed.error === 'string') {
+                    try {
+                      const inner = JSON.parse(parsed.error);
+                      if (inner.error?.message) displayError = inner.error.message;
+                    } catch(e) {
+                      displayError = parsed.error;
+                    }
+                  } else if (parsed.message) {
+                    displayError = parsed.message;
+                  }
+                } catch(e) {}
 
-                const errorLower = errorStr.toLowerCase();
+                // Mark page as error
+                setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: displayError } : p));
+
                 if (isRateLimit) {
-                    setErrorMsg("Quota Exceeded / Rate Limit Hit: You have used up the available Gemini Free Tier quota. Please wait roughly 1 hour or manually retry later."); 
-                    criticalErrorOccurred = true; // Stop the loop so we don't spam the API
+                    setErrorMsg("Gemini Free Tier Quota Reached. The AI is currently overwhelmed by high demand. Please try again in a few minutes or process pages one by one."); 
+                    criticalErrorOccurred = true; 
                 } else if (errorLower.includes("api key") || errorLower.includes("authentication")) {
-                    setErrorMsg(`Authentication Error: ${errorStr}`);
+                    setErrorMsg(`Authentication Error: ${displayError}`);
                     criticalErrorOccurred = true; 
                 }
             }
@@ -403,8 +421,16 @@ const PdfConverter: React.FC = () => {
       } : p));
     } catch (e: any) {
       console.error("Retry Page Error:", e);
-      setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: e.message } : p));
-      setErrorMsg(e.message);
+      const errorStr = e.message || String(e);
+      let displayError = errorStr;
+      try {
+        const parsed = JSON.parse(errorStr);
+        if (parsed.message) displayError = parsed.message;
+        else if (parsed.error && typeof parsed.error === 'string') displayError = parsed.error;
+      } catch(e) {}
+
+      setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: displayError } : p));
+      setErrorMsg(displayError);
     }
   };
 
@@ -948,6 +974,20 @@ const PdfConverter: React.FC = () => {
                                 </button>
                             </div>
                         </div>
+
+                        {/* Answers Toggle */}
+                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
+                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">Answers</span>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-[#555555] font-medium">{showAnswers ? 'On' : 'Off'}</span>
+                                <button
+                                    onClick={() => setShowAnswers(!showAnswers)}
+                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${showAnswers ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
+                                >
+                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${showAnswers ? 'translate-x-4' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 </div>
@@ -999,6 +1039,7 @@ const PdfConverter: React.FC = () => {
           autoProofread={autoProofread}
           isBilingual={isBilingual}
           showMcqNumbers={showMcqNumbers}
+          showAnswers={showAnswers}
         />
 
         {/* SEO Content Section */}

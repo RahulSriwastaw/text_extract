@@ -57,7 +57,8 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
           .replace(/([a-z0-9\u0900-\u097F])\s+(#?(?:Question|Q)\.?\s*[:\-]?\s*\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
           .replace(/([a-z0-9\u0900-\u097F])\s+(#\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
           .replace(/Ans\s+(#?Q)/gi, 'Ans\n$1')
-          .replace(/([a-z0-9\u0900-\u097F])\s+([\(]?\s*[A-Ea-e]\s*[\.\)\]]\s+)/gi, '$1\n$2'); // Also try to split options if squashed
+          .replace(/([a-z0-9\u0900-\u097F])\s+([\(]?\s*[A-Ea-e]\s*[\.\)\]]\s+)/gi, '$1\n$2') // Also try to split options if squashed
+          .replace(/([a-z0-9\u0900-\u097F])\s+(Answer\s*[:\-]?\s*[A-Ea-e])/gi, '$1\n$2'); // Force newline before Answer if squashed
 
         const lines = forceNewlines.split('\n').map(l => l.trim()).filter(l => l);
         
@@ -86,8 +87,8 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
             continue;
           }
 
-          // Match Answer: A
-          const ansMatch = cleanLine.match(/^Answer\s*[:\-]\s*([A-Ea-e])/i);
+          // Match Answer: A, Ans: A, Ans A, Answer A
+          const ansMatch = cleanLine.match(/^(?:Answer|Ans)\s*[:\-]?\s*([A-Ea-e])/i);
           if (ansMatch && currentQuestion) {
             currentQuestion.answer = ansMatch[1].toUpperCase();
             continue;

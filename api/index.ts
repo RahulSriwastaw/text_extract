@@ -72,9 +72,11 @@ const extractLayoutWithRetry = async (
 - You MUST output EVERY question and EVERY option in BOTH Hindi and English.
 - **QUESTION FORMAT**: "Question: [Number]. [Hindi Question] / [English Question]" (e.g., "Question: 1. 7.5 के प्रथम 8 गुणकों का औसत कितना होगा? / What will be the average of the first 8 multiples of 7.5?")
 - **OPTION FORMAT**: Combine Hindi and English into one line: "(a) [Hindi Option] / [English Option]". Use lowercase letters in parentheses for options: (a), (b), (c), (d).
-- **ANSWER FORMAT**: After all options, add a line like "Answer: [Label]" (e.g., "Answer: A").
+- **ANSWER FORMAT**: After all options, add a line like "Answer: [Label]" (e.g., "Answer: A") on its OWN NEW LINE.
 - If the source text is only in one language, translate it to the other and combine.
-- Maintain the ordering: Hindi followed by English, separated by a forward slash " / ".`
+- Maintain the ordering: Hindi followed by English, separated by a forward slash " / ".
+- **VERTICAL ALIGNMENT**: Ensure each question starts on a new line and each option is clearly separated.
+- **Answer Preservation**: NEVER skip the answer if it is visible on the page.`
     : `**CRITICAL RULE: NO TRANSLATION**:
 - Extract the text EXACTLY in the language it is written.
 - If it is in Hindi, output ONLY Hindi.
@@ -100,7 +102,7 @@ const extractLayoutWithRetry = async (
 - This document is an MCQ paper.
 - Every question MUST start with "Question: [Number]. "
 - Every option MUST start with a bracketed lowercase letter like "(a) ", "(b) ", etc.
-- If you find the correct answer, add it as a new line like "Answer: [Label]" (e.g., "Answer: A").
+- **ANSWER FORMAT**: Every MCQ MUST end with "Answer: [Label]" (e.g., "Answer: A") on its OWN NEW LINE after all options.
 - **BILINGUAL MATCHING**: If the source document has Hindi and English versions of the same question/option as separate blocks or on different pages, YOU MUST find them and combine them into one single line using the " / " separator. NEVER output the same question twice in different languages.
 - **COMPLETE EXTRACTION**: Always check if a question is continued on the next column or page.
 - **NUMBERING**: Always use the "Question: [Number]. " prefix for questions.
@@ -110,7 +112,7 @@ const extractLayoutWithRetry = async (
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
+      model: 'gemini-3-flash-preview',
       contents: [
         {
           inlineData: {
@@ -316,7 +318,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
         temperature: 0.1,

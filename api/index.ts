@@ -101,13 +101,16 @@ const extractLayoutWithRetry = async (
 - Every question MUST start with "Question: [Number]. "
 - Every option MUST start with a bracketed lowercase letter like "(a) ", "(b) ", etc.
 - If you find the correct answer, add it as a new line like "Answer: [Label]" (e.g., "Answer: A").
-- **BILINGUAL MATCHING**: In bilingual mode, combine the Hindi and English versions of the same question/option into one line using " / ".`
+- **BILINGUAL MATCHING**: If the source document has Hindi and English versions of the same question/option as separate blocks or on different pages, YOU MUST find them and combine them into one single line using the " / " separator. NEVER output the same question twice in different languages.
+- **COMPLETE EXTRACTION**: Always check if a question is continued on the next column or page.
+- **NUMBERING**: Always use the "Question: [Number]. " prefix for questions.
+- **OPTIONS**: Always use "(a) ", "(b) ", etc. for options. Ensure labels are lowercase and bracketed.`
     : `**GENERAL DOCUMENT MODE**:
 - Extract text as it appears. Maintain paragraphs and structure.`;
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
       contents: [
         {
           inlineData: {
@@ -276,13 +279,22 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
   }
 };
 
-const proofreadWithRetry = async (rawText: string, retryCount = 0): Promise<any> => {
+const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false, retryCount = 0): Promise<any> => {
   const MAX_RETRIES = 5;
   const { client, key: currentKey } = getGeminiClient();
+
+  const bilingualAddon = isBilingual 
+    ? `
+    IMPORTANT: This document is BILINGUAL (Hindi and English).
+    - Preservation Rule: You MUST preserve BOTH languages for each question and its options.
+    - Format Rule: Combine them into a single line separated by " / " (e.g., "Hindi Question / English Question").
+    - Consistent Labeling: Ensure options are labeled consistently (a), (b), (c), (d).`
+    : ``;
 
   const prompt = `
     You are an expert Exam Paper Editor. I will provide you with raw text extracted from an exam paper.
     Your task is to identify and extract all Multiple Choice Questions (MCQs) from this text.
+    ${bilingualAddon}
     
     For each MCQ:
     1. Extract the question text clearly.
@@ -304,7 +316,7 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0): Promise<any>
 
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
       contents: prompt,
       config: {
         temperature: 0.1,
@@ -395,8 +407,8 @@ app.post('/api/extract', async (req, res) => {
 
 app.post('/api/proofread', async (req, res) => {
   try {
-    const { rawText } = req.body;
-    const questions = await proofreadWithRetry(rawText);
+    const { rawText, isBilingual } = req.body;
+    const questions = await proofreadWithRetry(rawText, isBilingual);
     res.json({ questions });
   } catch (error: any) {
     console.warn("Proofread failed:", error?.message || error);

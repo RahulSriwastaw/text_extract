@@ -51,13 +51,13 @@ export const extractTextFromImage = async (base64Image: string, numberingStyle: 
     .join('\n\n');
 };
 
-export const proofreadMcqs = async (rawText: string, retryCount: number = 0): Promise<any[]> => {
+export const proofreadMcqs = async (rawText: string, isBilingual: boolean = false, retryCount: number = 0): Promise<any[]> => {
   const response = await fetch('/api/proofread', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ rawText }),
+    body: JSON.stringify({ rawText, isBilingual }),
   });
 
   if (!response.ok) {
@@ -66,7 +66,7 @@ export const proofreadMcqs = async (rawText: string, retryCount: number = 0): Pr
         const waitTime = errorData.waitTime || 60000;
         console.warn(`[Client] Quota hit. Waiting ${waitTime}ms before retry ${retryCount + 1}/5...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        return proofreadMcqs(rawText, retryCount + 1);
+        return proofreadMcqs(rawText, isBilingual, retryCount + 1);
     }
     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
   }

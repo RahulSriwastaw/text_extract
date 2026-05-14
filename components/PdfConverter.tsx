@@ -967,6 +967,7 @@ const PdfConverter: React.FC = () => {
           pages={pages}
           mcqMode={mcqMode}
           autoProofread={autoProofread}
+          isBilingual={isBilingual}
         />
       </div>
     </div>

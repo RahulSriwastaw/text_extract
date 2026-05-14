@@ -32,9 +32,10 @@ interface McqSidebarProps {
   pages: ScannedPage[];
   mcqMode: boolean;
   autoProofread: boolean;
+  isBilingual: boolean;
 }
 
-const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread }) => {
+const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread, isBilingual }) => {
   const [isProofreading, setIsProofreading] = useState(false);
   const [manualMcqs, setManualMcqs] = useState<McqItem[] | null>(null);
   const [lastProcessedPageCount, setLastProcessedPageCount] = useState(0);
@@ -51,11 +52,12 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
         if (el.type !== 'text' || !el.content || typeof el.content !== 'string') return;
         
         // Pre-process: Force newlines before Q.1, #Q.1, etc. if the AI squashes them into the same line as the previous option
+        // We include Hindi characters [\u0900-\u097F] in the lookbehind range
         const forceNewlines = el.content
-          .replace(/([a-z0-9])\s+(#?Q(?:uestion)?\.?\s*\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
-          .replace(/([a-z0-9])\s+(#\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
+          .replace(/([a-z0-9\u0900-\u097F])\s+(#?(?:Question|Q)\.?\s*[:\-]?\s*\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
+          .replace(/([a-z0-9\u0900-\u097F])\s+(#\d+\s*[\.\)\-:]?\s+)/gi, '$1\n$2')
           .replace(/Ans\s+(#?Q)/gi, 'Ans\n$1')
-          .replace(/([a-z0-9])\s+([A-Ea-e]\s*[\.\)\]]\s+)/gi, '$1\n$2'); // Also try to split options if squashed
+          .replace(/([a-z0-9\u0900-\u097F])\s+([\(]?\s*[A-Ea-e]\s*[\.\)\]]\s+)/gi, '$1\n$2'); // Also try to split options if squashed
 
         const lines = forceNewlines.split('\n').map(l => l.trim()).filter(l => l);
         
@@ -64,7 +66,8 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
           const cleanLine = line.replace(/[\*\_]/g, '').trim();
           
           // Match Question: 1., Q.1, 1., #1, Question 1, 100. What, Q100, 100 . What
-          const qMatch = cleanLine.match(/^(?:(?:Question|Q)\.?\s*|#\s*)(\d+)\s*[\.\)\-:]?\s*(.*)|^(\d+)\s*[\.\)\-:]\s*(.*)/i);
+          // Updated to handle colon after Question/Q more broadly
+          const qMatch = cleanLine.match(/^(?:(?:Question|Q)\.?\s*[:\-]?\s*|#\s*)(\d+)\s*[\.\)\-:]?\s*(.*)|^(\d+)\s*[\.\)\-:]\s*(.*)/i);
           if (qMatch) {
             const qNum = qMatch[1] || qMatch[3];
             const qText = qMatch[2] || qMatch[4];
@@ -145,7 +148,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
         .map(p => p.extractedText)
         .join('\n\n');
       
-      const cleanedQuestions = await proofreadMcqs(allText);
+      const cleanedQuestions = await proofreadMcqs(allText, isBilingual);
       
       if (cleanedQuestions.length > 0) {
         const formattedMcqs: McqItem[] = (cleanedQuestions as McqItemAI[]).map((q, idx) => ({

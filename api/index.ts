@@ -68,11 +68,13 @@ const extractLayoutWithRetry = async (
   }
 
   const bilingualInstruction = isBilingual
-    ? `**CRITICAL RULE: BILINGUAL OUTPUT REQUIRED**:
-- You MUST output EVERY question and EVERY option in BOTH English and Hindi.
-- **COMBINE OPTIONS**: If options are bilingual (e.g., A. Hindi and A. English), you MUST combine them into a single line like "A. [Hindi Text] / [English Text]". Do NOT output (A) Hindi and (A) English as separate lines.
-- Keep the translation accurate. If the source text is only in one language, translate it to the other and combine.
-- Maintain the ordering: Usually Hindi followed by English, separated by a forward slash " / " or appearing on immediate next lines within the same block.`
+    ? `**CRITICAL MCQ RULE: BILINGUAL OUTPUT REQUIRED**:
+- You MUST output EVERY question and EVERY option in BOTH Hindi and English.
+- **QUESTION FORMAT**: "Question: [Number]. [Hindi Question] / [English Question]" (e.g., "Question: 1. 7.5 के प्रथम 8 गुणकों का औसत कितना होगा? / What will be the average of the first 8 multiples of 7.5?")
+- **OPTION FORMAT**: Combine Hindi and English into one line: "(a) [Hindi Option] / [English Option]". Use lowercase letters in parentheses for options: (a), (b), (c), (d).
+- **ANSWER FORMAT**: After all options, add a line like "Answer: [Label]" (e.g., "Answer: A").
+- If the source text is only in one language, translate it to the other and combine.
+- Maintain the ordering: Hindi followed by English, separated by a forward slash " / ".`
     : `**CRITICAL RULE: NO TRANSLATION**:
 - Extract the text EXACTLY in the language it is written.
 - If it is in Hindi, output ONLY Hindi.
@@ -96,11 +98,10 @@ const extractLayoutWithRetry = async (
   const mcqInstruction = mcqMode 
     ? `**MCQ EXTRACTION MODE (STRICT FORMATTING REQUIRED)**:
 - This document is an MCQ paper.
-- CRITICAL: You MUST place a newline character before EVERY single question to ensure it is not merged with previous text.
-- Format every question so it starts on a NEW LINE like "Q.1 [Question Text]".
-- Format every option so it starts on a NEW LINE like "A. [Option Text]".
-- **BILINGUAL MATCHING**: In bilingual mode, combine the Hindi and English versions of the same option into one line: "A. [Hindi] / [English]".
-- Do NOT squash multiple questions into a single paragraph. Each question and its corresponding combined options MUST be clearly structured.`
+- Every question MUST start with "Question: [Number]. "
+- Every option MUST start with a bracketed lowercase letter like "(a) ", "(b) ", etc.
+- If you find the correct answer, add it as a new line like "Answer: [Label]" (e.g., "Answer: A").
+- **BILINGUAL MATCHING**: In bilingual mode, combine the Hindi and English versions of the same question/option into one line using " / ".`
     : `**GENERAL DOCUMENT MODE**:
 - Extract text as it appears. Maintain paragraphs and structure.`;
 
@@ -296,6 +297,7 @@ const proofreadWithRetry = async (rawText: string, retryCount = 0): Promise<any>
     Return the result as a JSON object with a 'questions' array. Each item should have:
     - questionText: string
     - options: array of {label: string, text: string}
+    - answer: string (the label of the correct option if found, e.g., "A")
     
     If no MCQs are found, return {"questions": []}.
   `;

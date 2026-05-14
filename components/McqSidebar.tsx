@@ -16,7 +16,14 @@ interface McqItem {
   questionNumber: string;
   questionText: string;
   options: McqOption[];
+  answer?: string;
   status: string;
+}
+
+interface McqItemAI {
+  questionText: string;
+  options: McqOption[];
+  answer?: string;
 }
 
 interface McqSidebarProps {
@@ -56,8 +63,8 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
           const line = lines[i];
           const cleanLine = line.replace(/[\*\_]/g, '').trim();
           
-          // Match Q.1, 1., #1, Question 1, 100. What, Q100, 100 . What
-          const qMatch = cleanLine.match(/^(?:Q(?:uestion)?\.?\s*|#\s*)(\d+)\s*[\.\)\-:]?\s*(.*)|^(\d+)\s*[\.\)\-:]\s*(.*)/i);
+          // Match Question: 1., Q.1, 1., #1, Question 1, 100. What, Q100, 100 . What
+          const qMatch = cleanLine.match(/^(?:(?:Question|Q)\.?\s*|#\s*)(\d+)\s*[\.\)\-:]?\s*(.*)|^(\d+)\s*[\.\)\-:]\s*(.*)/i);
           if (qMatch) {
             const qNum = qMatch[1] || qMatch[3];
             const qText = qMatch[2] || qMatch[4];
@@ -75,8 +82,15 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
             };
             continue;
           }
+
+          // Match Answer: A
+          const ansMatch = cleanLine.match(/^Answer\s*[:\-]\s*([A-Ea-e])/i);
+          if (ansMatch && currentQuestion) {
+            currentQuestion.answer = ansMatch[1].toUpperCase();
+            continue;
+          }
           
-          // Match options: (A) text, A. text, Ans A. text, X A. text, ✓ A. text, A . text
+          // Match options: (A) text, a. text, Ans A. text, X A. text, ✓ A. text, A . text
           const optMatch = cleanLine.match(/^(?:Ans(?:wer)?\s*)?(?:[X✓x]\s*)?[\(\[]?([A-Ea-e])\s*[\.\)\]]\s*(.*)/);
           if (optMatch && currentQuestion) {
             currentQuestion.options!.push({
@@ -134,12 +148,13 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
       const cleanedQuestions = await proofreadMcqs(allText);
       
       if (cleanedQuestions.length > 0) {
-        const formattedMcqs: McqItem[] = cleanedQuestions.map((q, idx) => ({
+        const formattedMcqs: McqItem[] = (cleanedQuestions as McqItemAI[]).map((q, idx) => ({
           id: `proofread-${idx}-${Date.now()}`,
           pageNumber: 0, // AI cleaned version doesn't strictly follow pages
           questionNumber: (idx + 1).toString(),
           questionText: q.questionText,
           options: q.options,
+          answer: q.answer,
           status: 'VERIFIED'
         }));
         setManualMcqs(formattedMcqs);
@@ -162,7 +177,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
       const ensureLatexWrapped = (text: string) => {
         if (!text) return "";
         // If it already has any math delimiters, it's probably fine
-        if (text.includes('$$') || text.includes('\\(') || text.includes('\\[')) return text;
+        if (text.includes('$') || text.includes('\\(') || text.includes('\\[')) return text;
         
         // If it looks like it has LaTeX but no delimiters, wrap it
         // A simple heuristic: check for backslashes followed by common math commands
@@ -174,10 +189,13 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
 
       const qText = ensureLatexWrapped(mcq.questionText);
       const optionsText = mcq.options.map(o => {
-        return `(${o.label}) ${ensureLatexWrapped(o.text)}`;
+        return `(${o.label.toLowerCase()}) ${ensureLatexWrapped(o.text)}`;
       }).join('\n');
 
-      const content = `**Q.${idx + 1}** ${qText}\n${optionsText}`;
+      let content = `**Question: ${idx + 1}.** ${qText}\n${optionsText}`;
+      if (mcq.answer) {
+        content += `\n**Answer: ${mcq.answer}**`;
+      }
       return { type: 'text', content };
     });
     
@@ -227,10 +245,11 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
           <h1>MCQ Bank</h1>
           ${mcqs.map((mcq, idx) => `
             <div class="question">
-              <div class="q-text">Q.${idx + 1} ${mcq.questionText}</div>
+              <div class="q-text">Question: ${idx + 1}. ${mcq.questionText}</div>
               <div class="options">
-                ${mcq.options.map(o => `<div class="option">(${o.label}) ${o.text}</div>`).join('')}
+                ${mcq.options.map(o => `<div class="option">(${o.label.toLowerCase()}) ${o.text}</div>`).join('')}
               </div>
+              ${mcq.answer ? `<div class="answer" style="margin-top: 8px; font-weight: bold; color: #FF6B2B;">Answer: ${mcq.answer}</div>` : ''}
             </div>
           `).join('')}
           <script>
@@ -373,7 +392,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
 
                     {/* Question Text */}
                     <p className="text-[#EFEFEF] text-[13px] font-medium line-clamp-3 whitespace-pre-wrap">
-                      {mcq.questionText}
+                      Question: {idx + 1}. {mcq.questionText}
                     </p>
 
                     {/* Options */}
@@ -382,12 +401,18 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                       <div className="space-y-2">
                         {mcq.options.map((opt, oIdx) => (
                           <div key={oIdx} className="flex items-start gap-2 text-[13px]">
-                            <span className="font-bold text-[#555555] w-4">{opt.label}.</span>
+                            <span className="font-bold text-[#555555] w-4">({opt.label.toLowerCase()}).</span>
                             <span className="text-[#EFEFEF]">{opt.text}</span>
                           </div>
                         ))}
                       </div>
                     </div>
+
+                    {mcq.answer && (
+                      <div className="mt-2 py-2 px-3 bg-[#1A1A1A] border border-[#252525] rounded-[6px]">
+                        <p className="text-[12px] font-bold text-[#FF6B2B]">Answer: {mcq.answer}</p>
+                      </div>
+                    )}
 
                     <hr className="border-[#252525] my-2" />
 

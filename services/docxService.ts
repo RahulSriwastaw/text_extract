@@ -50,16 +50,14 @@ const LATEX_SYMBOLS: Record<string, string> = {
     'ell': 'ℓ', 'Re': 'ℜ', 'Im': 'ℑ', 'aleph': 'ℵ', 'hbar': 'ℏ',
     'vert': '|', 'mid': '|', 'dots': '…', 'cdots': '⋯',
     'parallel': '∥', 'cong': '≅', 'equiv': '≡', 'propto': '∝',
-    'surd': '√', 'triangle': '△',
-    'square': '□', 'blacksquare': '■', 'bullet': '•', 'ast': '∗', 'star': '★', 'oplus': '⊕', 'ominus': '⊖',
+    'surd': '√', 'triangle': '△', 'triangledown': '▽', 'square': '□', 'blacksquare': '■',
+    'dot': '⋅', 'vdots': '⋮', 'ddots': '⋱', 'checkmark': '✓',
+    'bullet': '•', 'ast': '∗', 'star': '★', 'oplus': '⊕', 'ominus': '⊖',
     'otimes': '⊗', 'oslash': '⊘', 'odot': '⊙', 'dagger': '†', 'ddagger': '‡',
-    'uplus': '⊎', 'sqcap': '⊓', 'sqcup': '⊔',
-    'setminus': '∖', 'wr': '≀', 'diamond': '⋄',
+    'uplus': '⊎', 'sqcap': '⊓', 'sqcup': '⊔', 'setminus': '∖', 'wr': '≀', 'diamond': '⋄',
     'top': '⊤', 'bottom': '⊥', 'models': '⊧', 'vdash': '⊢', 'dashv': '⊣',
     'langle': '⟨', 'rangle': '⟩', 'lceil': '⌈', 'rceil': '⌉', 'lfloor': '⌊', 'rfloor': '⌋',
-    'micro': 'μ', 'ohm': 'Ω',
-    'vdots': '⋮', 'ddots': '⋱',
-    'checkmark': '✓', 'triangledown': '▽'
+    'micro': 'μ', 'ohm': 'Ω'
 };
 
 const MATH_FUNCTIONS = [
@@ -943,18 +941,30 @@ export const generateDocx = async (
     
     const cleanLineText = line.replace(/\*\*/g, '').trim();
 
-    // Main Question: "# What is...", "Q.1", "(1) ", "1) ", "1.", "प्रश्न 1", "Q1."
-    const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s?\d+|Prashn\s?\d+|Question\s?\d+|प्रश्न\s?\d+|\d+\.|[\(\[]\d+[\)\]]|\d+[\)])\s/i.test(cleanLineText);
+    // Main Question: "# What is...", "Q.1", "(1) ", "1) ", "1.", "प्रश्न 1", "Question: 1.", "Q1."
+    const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s?\d+|Prashn\s?\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s?\d+|\d+\.|[\(\[]\d+[\)\]]|\d+[\)])\s/i.test(cleanLineText);
     
+    // Answer line: "Answer: A"
+    const isAnswerLine = /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText);
+
     // Option: "(a)", "a.", "a)", "(A)", "A.", "A)", "(E)", "E.", "E)", "(1)", "1.", "1)" if it looks like an option
     // We check for single letters or numbers followed by punctuation or inside parentheses
-    const isOption = /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanLineText);
+    const isOption = !isAnswerLine && /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanLineText);
     
     // Sub Question: "(i)", "i.", "(a)" if it looks like a list item (Roman numerals are prioritized)
     const isSubQuestion = /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
 
     if (isOption) {
         optionBuffer.push(line);
+        continue;
+    } else if (isAnswerLine) {
+        flushOptions();
+        docChildren.push(new Paragraph({
+            children: parseLineToChildren(line, true), // Bold Answer
+            spacing: { before: 60, after: 120 },
+            alignment: AlignmentType.LEFT,
+            indent: { left: 500 }
+        }));
         continue;
     } else {
         flushOptions();

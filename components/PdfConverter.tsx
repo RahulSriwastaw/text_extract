@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileDown, RefreshCw, Wand2, AlertTriangle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type } from 'lucide-react';
+import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
@@ -172,15 +172,19 @@ const PdfConverter: React.FC = () => {
         setErrorMsg(null);
         setAppState(AppState.ANALYZING);
 
-        // Select error pages and reset their state
-        setPages(prev => prev.map(p => 
-            p.status === 'error' 
-                ? { ...p, isSelected: true, status: 'processing', errorMessage: undefined } 
-                : p
-        ));
+        // Update pages and then trigger extraction
+        setPages(prev => {
+            const updated = prev.map(p => 
+                p.status === 'error' 
+                    ? { ...p, isSelected: true, status: 'processing' as const, errorMessage: undefined } 
+                    : p
+            );
+            
+            return updated;
+        });
 
-        // Note: startExtraction() will now naturally pick up these pages since they are isSelected and NOT done
-        startExtraction();
+        // Small delay to ensure state batching finishes
+        setTimeout(() => startExtraction(), 0);
     };
 
   const handleFilesSelected = async (fileList: FileList | null, append: boolean = false) => {
@@ -409,7 +413,7 @@ const PdfConverter: React.FC = () => {
     setErrorMsg(null);
 
     // Update to processing
-    setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined } : p));
+    setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined, errorMessage: undefined } : p));
 
     try {
       const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
@@ -1058,34 +1062,61 @@ const PdfConverter: React.FC = () => {
                 <AnimatePresence>
                     {errorMsg && (
                         <motion.div 
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
-                            className="p-3 bg-[#3A1A1A] text-[#F44336] rounded-[8px] border border-[#F44336]/30 flex items-start gap-3 mt-4"
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="p-4 bg-[#3A1A1A] text-[#F44336] rounded-[12px] border border-[#F44336]/30 flex flex-col gap-3 mt-4 shadow-xl"
                         >
-                            <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-[#F44336]" />
+                            <div className="flex items-start gap-3">
+                                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-[#F44336]" />
                                 <div>
-                                    <h4 className="font-bold text-[13px] uppercase tracking-wider text-[#F44336]">Processing Interrupted</h4>
-                                    <p className="text-[13px] mt-1 text-[#EFEFEF]">{errorMsg}</p>
-                                    <div className="mt-3 flex gap-2">
-                                        <button 
-                                            onClick={retryAllErrors}
-                                            className="px-3 py-1.5 bg-[#F44336] text-white rounded-[6px] text-[11px] font-bold flex items-center gap-2 hover:bg-[#d32f2f] transition-colors"
-                                        >
-                                            <RefreshCw className="w-3.5 h-3.5" />
-                                            Retry Failed Pages
-                                        </button>
-                                        <button 
-                                            onClick={() => setErrorMsg(null)}
-                                            className="px-3 py-1.5 bg-transparent border border-[#F44336]/30 text-[#F44336] rounded-[6px] text-[11px] font-bold hover:bg-[#F44336]/10 transition-colors"
-                                        >
-                                            Dismiss
-                                        </button>
-                                    </div>
+                                    <h4 className="font-bold text-[14px] uppercase tracking-wider text-[#F44336]">Processing Interrupted</h4>
+                                    <p className="text-[13px] mt-1 text-[#EFEFEF] leading-relaxed">{errorMsg}</p>
                                 </div>
+                            </div>
+                            <div className="flex gap-2 pl-8">
+                                <button 
+                                    onClick={retryAllErrors}
+                                    className="px-4 py-2 bg-[#F44336] text-white rounded-[8px] text-[12px] font-bold flex items-center gap-2 hover:bg-[#d32f2f] transition-all shadow-lg active:scale-95"
+                                >
+                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    Retry All Failed Pages
+                                </button>
+                                <button 
+                                    onClick={() => setErrorMsg(null)}
+                                    className="px-4 py-2 bg-transparent border border-[#F44336]/30 text-[#F44336] rounded-[8px] text-[12px] font-bold hover:bg-[#F44336]/10 transition-all active:scale-95"
+                                >
+                                    Dismiss
+                                </button>
+                            </div>
                         </motion.div>
                     )}
                 </AnimatePresence>
+
+                {hasErrorPages && !errorMsg && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-[#1A1111] border border-[#F44336]/20 rounded-[12px]"
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-[#3A1A1A] flex items-center justify-center">
+                                <AlertCircle className="w-4 h-4 text-[#F44336]" />
+                            </div>
+                            <div>
+                                <h5 className="text-[12px] font-bold text-[#EFEFEF]">Some pages failed to process</h5>
+                                <p className="text-[11px] text-[#888888]">You can retry them all at once or individually.</p>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={retryAllErrors}
+                            className="w-full sm:w-auto px-4 py-2 bg-[#F44336] text-white rounded-[8px] text-[12px] font-bold flex items-center justify-center gap-2 hover:bg-[#d32f2f] transition-all shadow-md active:scale-95"
+                        >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Retry {pages.filter(p => p.status === 'error').length} Failed Pages
+                        </button>
+                    </motion.div>
+                )}
 
                 {/* Grid of Pages */}
                 <ProcessingList 

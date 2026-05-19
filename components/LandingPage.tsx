@@ -217,7 +217,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
       {/* Footer */}
       <footer className="max-w-7xl mx-auto px-4 py-12 border-t border-[#252525] text-center">
         <p className="text-gray-500 text-xs">
-          © 2024 AI Paper Converter. All rights reserved. Powered by Google Gemini.
+          © 2026 AI PDF to Text Converter. All rights reserved. Powered by Google Gemini.
         </p>
       </footer>
     </div>

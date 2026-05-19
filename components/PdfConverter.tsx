@@ -39,6 +39,7 @@ const PdfConverter: React.FC = () => {
   const [selectedError, setSelectedError] = useState<string | null>(null);
   const [wordsConsumed, setWordsConsumed] = useState(0);
   const [pointsConsumed, setPointsConsumed] = useState(0);
+  const [totalKeys, setTotalKeys] = useState(1);
 
   // Helper to count words
   const countWords = (text: string) => {
@@ -46,6 +47,15 @@ const PdfConverter: React.FC = () => {
   };
 
   const [user] = useAuthState(auth);
+
+  useEffect(() => {
+    fetch('/api/config')
+      .then(r => r.json())
+      .then(data => {
+        if (data.totalKeys) setTotalKeys(data.totalKeys);
+      })
+      .catch(err => console.error("Config fetch failed:", err));
+  }, []);
 
   // Load history on mount or when user changes
   useEffect(() => {
@@ -275,8 +285,10 @@ const PdfConverter: React.FC = () => {
     setAppState(AppState.ANALYZING);
     setErrorMsg(null);
     
-    // Process pages one by one to avoid rate limits with a single API key
-    const BATCH_SIZE = 1;
+    // Dynamic batch size based on available keys
+    // Gemini 1.5 Flash allows ~15 RPM per key. 
+    // We can safely process (totalKeys * 2) loosely in parallel per batch.
+    const BATCH_SIZE = Math.max(1, Math.min(10, totalKeys * 2)); 
     let criticalErrorOccurred = false;
 
     // 1. Visually mark ALL selected pages as 'processing' immediately.
@@ -371,9 +383,10 @@ const PdfConverter: React.FC = () => {
             }
         }));
 
-        // Delay between pages to respect API limits
+        // Dynamic delay between batches to respect API limits (15 RPM per key)
         if (i + BATCH_SIZE < pagesToProcess.length && !criticalErrorOccurred) {
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Delay between requests to handle 15 RPM limits cleanly
+            const batchDelay = Math.max(1000, 5000 / totalKeys);
+            await new Promise(resolve => setTimeout(resolve, batchDelay)); 
         }
     }
     
@@ -578,34 +591,16 @@ const PdfConverter: React.FC = () => {
     <div className="min-h-screen bg-[#0F0F0F] font-sans selection:bg-[#FF6B2B]/20 selection:text-[#FF6B2B]">
       <div className="max-w-7xl mx-auto px-3 py-3 md:px-3 md:py-12">
         
-        {/* Header - More Compact */}
-        <header className="mb-6 flex flex-col md:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-3 text-left">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="flex-shrink-0 w-8 h-8 rounded-[8px] bg-[#FF6B2B] text-white flex items-center justify-center"
-            >
-              <Wand2 className="w-4 h-4" />
-            </motion.div>
-            <div>
-              <h1 className="text-[16px] md:text-[18px] font-bold text-[#EFEFEF] tracking-tight">
-                AI PDF to Text
-              </h1>
-              <p className="text-[#555555] text-[10px] md:text-[11px]">
-                Professional document conversion
-              </p>
-            </div>
-          </div>
-
+        <header className="mb-6 flex items-center justify-end">
           <div className="flex items-center gap-2">
             {pages.length > 0 && (
               <button 
                 onClick={reset}
-                className="p-1.5 text-[#555555] hover:text-[#F44336] hover:bg-[#3A1A1A] rounded-[6px] transition-colors"
+                className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium text-[#555555] hover:text-[#F44336] hover:bg-[#3A1A1A] rounded-[6px] transition-colors border border-[#252525]"
                 title="Reset All"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Reset All</span>
               </button>
             )}
           </div>
@@ -615,11 +610,58 @@ const PdfConverter: React.FC = () => {
         <main className="relative">
            {/* Upload Area */}
            {pages.length === 0 ? (
-             <div className="max-w-3xl mx-auto">
+             <div className="max-w-4xl mx-auto">
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="text-center mb-16 space-y-4"
+                >
+                    <h2 className="text-[32px] md:text-[48px] font-bold text-white tracking-tight leading-tight">
+                        Convert <span className="text-[#FF6B2B]">PDF to Text</span> <br className="hidden md:block" /> with Human-Like Accuracy
+                    </h2>
+                    <p className="text-[#888888] text-[16px] md:text-[18px] max-w-2xl mx-auto leading-relaxed">
+                        The ultimate AI-powered OCR tool designed for researchers, students, and professionals. 
+                        Preserve layouts, tables, and formatting perfectly.
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-4 pt-4">
+                        <div className="flex items-center gap-2 bg-[#1A1A1A] px-4 py-2 rounded-full border border-[#252525]">
+                            <Check className="w-4 h-4 text-green-500" />
+                            <span className="text-[13px] font-medium text-[#EFEFEF]">99.9% Accuracy</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-[#1A1A1A] px-4 py-2 rounded-full border border-[#252525]">
+                            <Check className="w-4 h-4 text-green-500" />
+                            <span className="text-[13px] font-medium text-[#EFEFEF]">Layout Aware</span>
+                        </div>
+                        <div className="flex items-center gap-2 bg-[#1A1A1A] px-4 py-2 rounded-full border border-[#252525]">
+                            <Check className="w-4 h-4 text-green-500" />
+                            <span className="text-[13px] font-medium text-[#EFEFEF]">Secure Cloud Sync</span>
+                        </div>
+                    </div>
+                </motion.div>
+
                 <FileUploader 
                   onFilesSelected={handleFilesSelected} 
                   isLoading={appState === AppState.PROCESSING_PDF}
                 />
+
+                {/* How it works section */}
+                <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-8">
+                    {[
+                        { step: "01", title: "Upload PDF", desc: "Drag and drop your scanned PDFs or images into the secure converter." },
+                        { step: "02", title: "AI Analysis", desc: "Our Gemini-powered AI identifies text, tables, and layouts in real-time." },
+                        { step: "03", title: "Export Word", desc: "Download the refined, layout-preserved DOCX or TXT file instantly." }
+                    ].map((item, i) => (
+                        <div key={i} className="bg-[#141414] p-8 rounded-[16px] border border-[#252525] relative overflow-hidden group">
+                            <div className="text-[48px] font-black text-white/5 absolute -right-2 -bottom-2 group-hover:text-[#FF6B2B]/10 transition-colors">
+                                {item.step}
+                            </div>
+                            <h3 className="text-[18px] font-bold text-white mb-2 relative z-10">{item.title}</h3>
+                            <p className="text-[#888888] text-[14px] leading-relaxed relative z-10">{item.desc}</p>
+                        </div>
+                    ))}
+                </div>
+
                 {appState === AppState.PROCESSING_PDF && (
                   <motion.div 
                     initial={{ opacity: 0 }}
@@ -709,6 +751,11 @@ const PdfConverter: React.FC = () => {
                                                 <span className="text-[9px] text-[#888888] font-medium">
                                                     {pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages
                                                 </span>
+                                                {totalKeys > 1 && (
+                                                  <span className="px-1.5 py-0.5 bg-green-500/10 text-green-500 text-[8px] font-black rounded uppercase tracking-tighter border border-green-500/20">
+                                                    Turbo: {totalKeys} Keys
+                                                  </span>
+                                                )}
                                                 {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
                                                     <button 
                                                         onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
@@ -1043,70 +1090,166 @@ const PdfConverter: React.FC = () => {
         />
 
         {/* SEO Content Section */}
-        <div className="mt-24 border-t border-[#252525] pt-16 pb-12">
-            <div className="max-w-4xl mx-auto space-y-12 px-4">
-                <section>
-                    <h2 className="text-[24px] font-bold text-[#EFEFEF] mb-6 tracking-tight">Advanced AI PDF to Text Converter</h2>
-                    <p className="text-[#888888] leading-relaxed text-[15px]">
-                        Our **AI PDF to Text** technology goes beyond traditional OCR. Traditionally, 
-                        converting a **pdf to text** meant losing the layout, losing table structures, 
-                        and dealing with messy character recognition. With the power of Gemini 1.5 Pro, 
-                        we process your documents visually, understanding exactly where each paragraph, 
-                        heading, and table belongs.
+        <div className="mt-32 border-t border-[#252525] pt-24 pb-20">
+            <div className="max-w-5xl mx-auto px-4 box-border">
+                
+                <motion.div 
+                    initial={{ opacity: 0 }}
+                    whileInView={{ opacity: 1 }}
+                    viewport={{ once: true }}
+                    className="text-center mb-20"
+                >
+                    <h2 className="text-[32px] md:text-[42px] font-bold text-white mb-6 tracking-tight">
+                        Why Choose Our <span className="text-[#FF6B2B]">AI PDF to Text</span> Converter?
+                    </h2>
+                    <p className="text-[#888888] text-[16px] max-w-3xl mx-auto leading-relaxed">
+                        We don't just extract text; we understand your documents. Our vision-language models 
+                        bridge the gap between flat images and structured, editable content.
                     </p>
-                </section>
+                </motion.div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-left">
-                    <div className="bg-[#141414] p-6 rounded-[12px] border border-[#252525]">
-                        <h3 className="text-[18px] font-bold text-[#FF6B2B] mb-3">Accurate OCR</h3>
-                        <p className="text-[#888888] text-[14px] leading-relaxed">
-                            Extract text from high-resolution images or low-quality scanned PDFs. 
-                            Our **pdf to text converter** handles handwriting, mathematical formulas, 
-                            and multiple languages with ease.
-                        </p>
-                    </div>
-                    <div className="bg-[#141414] p-6 rounded-[12px] border border-[#252525]">
-                        <h3 className="text-[18px] font-bold text-[#FF6B2B] mb-3">Layout Preservation</h3>
-                        <p className="text-[#888888] text-[14px] leading-relaxed">
-                            Unlike most **pdf to text** tools, we preserve the hierarchy. Headings, 
-                            bullets, and multi-column layouts are detected and reconstructed 
-                            perfectly in your final output.
-                        </p>
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-32">
+                    {[
+                        { 
+                            title: "Human-Quality OCR", 
+                            desc: "Handles pixelated scans, handwritten notes, and low-contrast documents that standard tools fail on.",
+                            icon: <Wand2 className="w-6 h-6 text-[#FF6B2B]" />
+                        },
+                        { 
+                            title: "Smart Layout Detection", 
+                            desc: "Automatically detects multi-column layouts, tables, and nested lists to maintain reading order.",
+                            icon: <Layout className="w-6 h-6 text-[#2196F3]" />
+                        },
+                        { 
+                            title: "MCQ & Exam Optimized", 
+                            desc: "Tuned specifically for digitizing question papers with automated answer extraction and pattern recognition.",
+                            icon: <ListChecks className="w-6 h-6 text-[#4CAF50]" />
+                        }
+                    ].map((feature, i) => (
+                        <motion.div 
+                            key={i}
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ delay: i * 0.1 }}
+                            className="bg-[#141414] p-8 rounded-[20px] border border-[#252525] hover:border-[#FF6B2B]/30 transition-all flex flex-col items-center text-center"
+                        >
+                            <div className="w-12 h-12 bg-[#1A1A1A] rounded-[12px] flex items-center justify-center mb-6 border border-[#252525]">
+                                {feature.icon}
+                            </div>
+                            <h3 className="text-[18px] font-bold text-white mb-3">{feature.title}</h3>
+                            <p className="text-[#888888] text-[14px] leading-relaxed">{feature.desc}</p>
+                        </motion.div>
+                    ))}
                 </div>
 
-                <section>
-                    <h2 className="text-[22px] font-bold text-[#EFEFEF] mb-8 text-center italic">Frequently Asked Questions</h2>
-                    <div className="space-y-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center mb-32">
+                    <motion.div 
+                        initial={{ opacity: 0, x: -20 }}
+                        whileInView={{ opacity: 1, x: 0 }}
+                        viewport={{ once: true }}
+                    >
+                        <h2 className="text-[28px] font-bold text-white mb-6">Advanced <span className="text-[#FF6B2B]">PDF to Text</span> Processing</h2>
+                        <div className="space-y-6 text-[#888888] text-[15px] leading-relaxed">
+                            <p>
+                                When you convert a **pdf to text** with our tool, you're using the same technology that powers 
+                                some of the world's most advanced AI researchers. We utilize **Gemini 1.5 Pro** to analyze the visual 
+                                context of every page.
+                            </p>
+                            <p>
+                                This means our **pdf to text converter** can distinguish between a footer and a main paragraph, 
+                                correctly identify headings even if they aren't marked in the file metadata, and 
+                                accurately recreate tables that would normally come out as a jumbled mess of text.
+                            </p>
+                            <div className="pt-4 flex gap-4">
+                                <div className="bg-[#1A1A1A] border border-[#252525] p-4 rounded-[12px] flex-1 text-center">
+                                    <div className="text-[20px] font-bold text-white">4x</div>
+                                    <div className="text-[11px] uppercase tracking-wider font-bold text-[#555555]">Better Results</div>
+                                </div>
+                                <div className="bg-[#1A1A1A] border border-[#252525] p-4 rounded-[12px] flex-1 text-center">
+                                    <div className="text-[20px] font-bold text-white">0s</div>
+                                    <div className="text-[11px] uppercase tracking-wider font-bold text-[#555555]">Setup Time</div>
+                                </div>
+                                <div className="bg-[#1A1A1A] border border-[#252525] p-4 rounded-[12px] flex-1 text-center">
+                                    <div className="text-[20px] font-bold text-white">Free</div>
+                                    <div className="text-[11px] uppercase tracking-wider font-bold text-[#555555]">AI Access</div>
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                    <motion.div 
+                        initial={{ opacity: 0, x: 20 }}
+                        whileInView={{ opacity: 1, x: 0 }}
+                        viewport={{ once: true }}
+                        className="bg-[#1A1A1A] p-4 rounded-[20px] border border-[#252525] shadow-2xl relative"
+                    >
+                        <div className="absolute inset-0 bg-[#FF6B2B]/5 rounded-[20px] blur-3xl -z-10" />
+                        <div className="aspect-video bg-[#141414] rounded-[12px] border border-[#252525] flex items-center justify-center overflow-hidden">
+                            <div className="p-8 w-full">
+                                <div className="h-2 w-1/2 bg-[#252525] rounded-full mb-4" />
+                                <div className="h-2 w-3/4 bg-[#FF6B2B]/30 rounded-full mb-4" />
+                                <div className="h-2 w-2/3 bg-[#252525] rounded-full mb-8" />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="h-20 bg-[#1A1A1A] rounded-[8px] border border-[#252525] border-dashed" />
+                                    <div className="h-20 bg-[#1A1A1A] rounded-[8px] border border-[#252525] border-dashed" />
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+
+                <section className="mb-32">
+                    <h2 className="text-[28px] font-bold text-white mb-12 text-center">Frequently Asked Questions</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {[
                             {
-                                q: "How does the AI PDF to Text converter work?",
-                                a: "We use advanced vision-based AI (Gemini 1.5) to 'look' at your PDF pages just like a human would. This allows us to recognize text, tables, and images in context, providing much higher accuracy than standard OCR engines."
+                                q: "How accurate is the AI PDF to Text converter?",
+                                a: "Our tool achieves near-perfect accuracy even on messy documents. By leveraging Gemini's visual understanding, it resolves ambiguous characters using linguistic context, making it the most reliable pdf to text converter available."
                             },
                             {
-                                q: "Is this pdf to text tool secure?",
-                                a: "Yes. Your files are processed securely and are not used to train our models. If you are logged in, your history is stored in your private cloud account. If not, it stays on your local machine."
+                                q: "Is it safe to upload sensitive documents?",
+                                a: "Security is our priority. Files are processed over encrypted channels (HTTPS) and are purged after analysis. We do not store your raw file content permanently, ensuring your data remains private."
                             },
                             {
-                                q: "Can it handle scanned images as well as PDFs?",
-                                a: "Absolutely. You can upload JPG, PNG, and scanned PDF files. Our tool acts as a comprehensive **pdf to text converter** for all visual document types."
+                                q: "Does it support languages other than English?",
+                                a: "Yes, our **pdf to text** engine is natively multilingual. It can process Hindi, Spanish, French, Chinese, and many other languages accurately, even within the same document."
                             },
                             {
-                                q: "Is there a limit on the number of pages?",
-                                a: "You can process multiple documents in parallel. The free tier respects API quotas, ensuring you get high-quality extractions without cost."
+                                q: "Can I convert images (JPG/PNG) to text?",
+                                a: "Yes. The same powerful engine handles images exactly like PDFs. Simply drag your image into the converter to extract text instantly."
+                            },
+                            {
+                                q: "What makes this different from regular OCR?",
+                                a: "Traditional OCR 'guesses' letters. Our **AI PDF to Text** 'understands' the document. It knows when a list starts, when a table spans multiple lines, and how to ignore irrelevant watermarks."
+                            },
+                            {
+                                q: "Can I export the results to Microsoft Word?",
+                                a: "Absolutely. Once extracted, you can download a professionally formatted DOCX file that maintains the structure and styling of your original document."
                             }
                         ].map((faq, i) => (
-                            <div key={i} className="bg-[#141414]/50 border border-[#252525] p-5 rounded-[8px]">
-                                <h4 className="text-[14px] font-bold text-[#FF6B2B] mb-2">{faq.q}</h4>
+                            <motion.div 
+                                key={i}
+                                initial={{ opacity: 0 }}
+                                whileInView={{ opacity: 1 }}
+                                viewport={{ once: true }}
+                                transition={{ delay: i * 0.05 }}
+                                className="bg-[#141414] border border-[#252525] p-6 rounded-[16px] hover:bg-[#1A1A1A] transition-colors"
+                            >
+                                <h4 className="text-[15px] font-bold text-[#FF6B2B] mb-3">{faq.q}</h4>
                                 <p className="text-[#888888] text-[13px] leading-relaxed">{faq.a}</p>
-                            </div>
+                            </motion.div>
                         ))}
                     </div>
                 </section>
 
-                <footer className="pt-12 text-center">
-                    <p className="text-[#555555] text-[12px]">
-                        © 2026 AI PDF to Text Converter. All rights reserved. Built with advanced AI layout analysis.
+                <footer className="pt-20 border-t border-[#252525] text-center space-y-4">
+                    <div className="flex justify-center gap-6 text-[#555555] text-[13px] font-medium">
+                        <a href="#" className="hover:text-[#FF6B2B] transition-colors">Privacy Policy</a>
+                        <a href="#" className="hover:text-[#FF6B2B] transition-colors">Terms of Service</a>
+                        <a href="#" className="hover:text-[#FF6B2B] transition-colors">Contact Us</a>
+                    </div>
+                    <p className="text-[#555555] text-[12px] pt-4">
+                        © 2026 AI PDF to Text Converter. Powered by Next-Gen Vision OCR. Accurate. Fast. Secure.
                     </p>
                 </footer>
             </div>

@@ -5,32 +5,48 @@ import { NumberingStyle } from '../types.js';
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
+app.get('/api/config', (req, res) => {
+  try {
+    const { totalKeys } = getGeminiClient();
+    res.json({ totalKeys });
+  } catch (error) {
+    res.json({ totalKeys: 0 });
+  }
+});
+
 app.get('/api/debug-key', (req, res) => {
   const k = process.env.GEMINI_API_KEY || '';
   res.json({ key: k, length: k.length });
 });
 
-const getGeminiClient = () => {
-  let apiKey = process.env.GEMINI_API_KEY;
-  if (apiKey) {
-    apiKey = apiKey.replace(/['"\s]/g, '');
-  }
+let keyIndex = 0;
 
-  // Fallback to GEMINI_API_KEYS if user still has it in their env and GEMINI_API_KEY is invalid
-  if (!apiKey || !apiKey.startsWith('AI')) {
-    const keysString = process.env.GEMINI_API_KEYS || '';
-    const keys = keysString.split(',').map(k => k.replace(/['"\s]/g, '')).filter(k => k);
-    if (keys.length > 0) {
-      const randomIndex = Math.floor(Math.random() * keys.length);
-      apiKey = keys[randomIndex];
+const getGeminiClient = () => {
+  const primaryKey = process.env.GEMINI_API_KEY;
+  const keysString = process.env.GEMINI_API_KEYS || '';
+  
+  // Combine all provided keys into a unique set
+  let allKeys = keysString
+    .split(',')
+    .map(k => k.replace(/['"\s]/g, ''))
+    .filter(k => k && k.startsWith('AI'));
+    
+  if (primaryKey && primaryKey.startsWith('AI')) {
+    const cleanPrimary = primaryKey.replace(/['"\s]/g, '');
+    if (!allKeys.includes(cleanPrimary)) {
+      allKeys.unshift(cleanPrimary);
     }
   }
 
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please set the GEMINI_API_KEY environment variable.");
+  if (allKeys.length === 0) {
+    throw new Error("API Key is missing. Please set GEMINI_API_KEY or GEMINI_API_KEYS environment variable.");
   }
 
-  return { client: new GoogleGenAI({ apiKey }), key: apiKey };
+  // Round-robin rotation
+  const apiKey = allKeys[keyIndex % allKeys.length];
+  keyIndex++;
+
+  return { client: new GoogleGenAI({ apiKey }), key: apiKey, totalKeys: allKeys.length };
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

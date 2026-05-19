@@ -2,7 +2,7 @@ import React from 'react';
 import { auth, googleProvider } from '../services/firebase';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { LogIn, LogOut, FileText, User as UserIcon } from 'lucide-react';
+import { LogIn, LogOut, FileText, User as UserIcon, Wand2 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 const Navbar: React.FC = () => {
@@ -35,9 +35,9 @@ const Navbar: React.FC = () => {
               transition={{ duration: 0.5 }}
               className="bg-[#FF6B2B] p-1.5 rounded-[6px]"
             >
-              <FileText className="w-[18px] h-[18px] text-white" />
+              <Wand2 className="w-[18px] h-[18px] text-white" />
             </motion.div>
-            <span className="text-white font-bold text-[20px] tracking-tight">AI Paper Converter</span>
+            <span className="text-white font-bold text-[18px] tracking-tight">AI PDF to Text Converter</span>
           </div>
 
           <div className="flex items-center gap-4">

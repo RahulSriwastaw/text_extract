@@ -176,7 +176,7 @@ const PdfConverter: React.FC = () => {
         setPages(prev => {
             const updated = prev.map(p => 
                 p.status === 'error' 
-                    ? { ...p, isSelected: true, status: 'processing' as const, errorMessage: undefined } 
+                    ? { ...p, isSelected: true, status: 'processing' as const, errorMessage: undefined, elements: undefined, extractedText: undefined } 
                     : p
             );
             
@@ -332,8 +332,8 @@ const PdfConverter: React.FC = () => {
         await Promise.all(batch.map(async (page, index) => {
             if (criticalErrorOccurred) return;
 
-            // Stagger requests by 300ms to avoid burst limits
-            await new Promise(resolve => setTimeout(resolve, index * 300));
+            // Stagger requests by 600ms to avoid burst limits
+            await new Promise(resolve => setTimeout(resolve, index * 600));
 
             try {
                 const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
@@ -376,7 +376,7 @@ const PdfConverter: React.FC = () => {
                   if (parsed.message) displayError = parsed.message;
                 } catch(e) {}
 
-                setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: displayError } : p));
+                setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: displayError, elements: undefined, extractedText: undefined } : p));
 
                 if (isRateLimit && totalKeys <= 1) {
                     setErrorMsg("API limit reached. Please wait a moment or add more keys."); 

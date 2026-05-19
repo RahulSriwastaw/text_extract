@@ -20,7 +20,14 @@ app.get('/api/debug-key', (req, res) => {
 });
 
 let keyIndex = 0;
-const keyHealth = new Map<string, { lastErrorTime: number, consecutiveErrors: number }>();
+const keyHealth = new Map<string, { 
+  lastErrorTime: number, 
+  lastSuccessTime: number, 
+  consecutiveErrors: number, 
+  totalErrors: number, 
+  totalSuccesses: number,
+  errorType?: string 
+}>();
 const deadKeys = new Set<string>();
 
 const getAllKeys = () => {
@@ -41,50 +48,174 @@ const getAllKeys = () => {
   return allKeys.filter(k => !deadKeys.has(k));
 };
 
-const getGeminiClient = (skipKey?: string) => {
+// Admin Auth Middleware
+const checkAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const authHeader = req.headers.authorization;
+  const adminUser = process.env.ADMIN_USERNAME || 'admin';
+  const adminPass = process.env.ADMIN_PASSWORD || 'password123';
+
+  if (!authHeader) {
+    return res.status(401).json({ error: "Authorization required" });
+  }
+
+  const encoded = authHeader.split(' ')[1];
+  const decoded = Buffer.from(encoded, 'base64').toString().split(':');
+  const user = decoded[0];
+  const pass = decoded[1];
+
+  if (user === adminUser && pass === adminPass) {
+    next();
+  } else {
+    res.status(403).json({ error: "Invalid credentials" });
+  }
+};
+
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body;
+  const adminUser = process.env.ADMIN_USERNAME || 'admin';
+  const adminPass = process.env.ADMIN_PASSWORD || 'password123';
+
+  if (username === adminUser && password === adminPass) {
+    res.json({ success: true });
+  } else {
+    res.status(401).json({ error: "Invalid username or password" });
+  }
+});
+
+app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
   const allKeys = getAllKeys();
+  const stats = allKeys.map(k => {
+    const health = keyHealth.get(k) || { 
+      lastErrorTime: 0, 
+      lastSuccessTime: 0, 
+      consecutiveErrors: 0, 
+      totalErrors: 0, 
+      totalSuccesses: 0 
+    };
+    return {
+      keyPrefix: k.substring(0, 8) + '...',
+      key: k,
+      ...health,
+      isDead: deadKeys.has(k)
+    };
+  });
+  
+  // Also include dead keys
+  const deadStats = Array.from(deadKeys).map(k => {
+    const health = keyHealth.get(k) || { lastErrorTime: 0, lastSuccessTime: 0, consecutiveErrors: 0, totalErrors: 0, totalSuccesses: 0 };
+    return {
+      keyPrefix: k.substring(0, 8) + '...',
+      key: k,
+      ...health,
+      isDead: true
+    };
+  });
+
+  res.json({ keys: stats, deadKeys: deadStats });
+});
+
+app.post('/api/admin/dead-key', checkAdminAuth, (req, res) => {
+  const { key } = req.body;
+  if (key) {
+    deadKeys.add(key);
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: "Key required" });
+  }
+});
+
+const getGeminiClient = (skipKeys: string[] = []) => {
+  const allKeys = getAllKeys();
+  const now = Date.now();
 
   if (allKeys.length === 0) {
     throw new Error("No valid API keys found. Please verify your keys in the Settings menu (GEMINI_API_KEY or GEMINI_API_KEYS).");
   }
 
-  // Find a healthy key
-  const now = Date.now();
+  // Filter out dead/skip keys
+  let candidates = allKeys.filter(k => !skipKeys.includes(k));
+
+  if (candidates.length === 0 && skipKeys.length > 0) {
+    candidates = allKeys.filter(k => k !== skipKeys[skipKeys.length - 1]);
+  }
+
+  if (candidates.length === 0) candidates = allKeys;
+
   let selectedKey = '';
   
-  // Attempt to find a key that is NOT on cooldown (60s cooldown after error)
-  for (let i = 0; i < allKeys.length; i++) {
-    const candidate = allKeys[(keyIndex + i) % allKeys.length];
-    const health = keyHealth.get(candidate);
-    
-    if (candidate === skipKey) continue;
-    
-    // Skip if on cooldown
-    if (!health || (now - health.lastErrorTime > 60000)) {
-      selectedKey = candidate;
-      keyIndex = (keyIndex + i + 1) % allKeys.length;
-      break;
+  // 1. Prioritize keys that have NEVER errored or haven't errored in 2 min
+  const healthyCandidates = candidates.filter(c => {
+    const health = keyHealth.get(c);
+    return !health || (now - health.lastErrorTime > 120000);
+  });
+
+  if (healthyCandidates.length > 0) {
+    // Pick the one used least recently for success (to distribute load)
+    selectedKey = healthyCandidates.sort((a, b) => {
+      const hA = keyHealth.get(a)?.lastSuccessTime || 0;
+      const hB = keyHealth.get(b)?.lastSuccessTime || 0;
+      return hA - hB;
+    })[0];
+  }
+
+  // 2. Fallback: try any key not recently errored (60s)
+  if (!selectedKey) {
+    const okayCandidates = candidates.filter(c => {
+      const health = keyHealth.get(c);
+      return !health || (now - health.lastErrorTime > 60000);
+    });
+    if (okayCandidates.length > 0) {
+      selectedKey = okayCandidates.sort((a, b) => {
+        const hA = keyHealth.get(a)?.lastSuccessTime || 0;
+        const hB = keyHealth.get(b)?.lastSuccessTime || 0;
+        return hA - hB;
+      })[0];
     }
   }
 
-  // Fallback: if all are on cooldown, just take the next round-robin one
+  // 3. Last resort: pick the one with most distant lastErrorTime among candidates
   if (!selectedKey) {
-    selectedKey = allKeys[keyIndex % allKeys.length];
-    keyIndex++;
+    selectedKey = candidates.sort((a, b) => {
+      const hA = keyHealth.get(a)?.lastErrorTime || 0;
+      const hB = keyHealth.get(b)?.lastErrorTime || 0;
+      return hA - hB;
+    })[0];
   }
 
   return { client: new GoogleGenAI({ apiKey: selectedKey }), key: selectedKey, totalKeys: allKeys.length };
 };
 
-const reportKeyError = (key: string, isPermanent = false) => {
+const reportKeySuccess = (key: string) => {
+  const health = keyHealth.get(key) || { 
+    lastErrorTime: 0, 
+    lastSuccessTime: 0, 
+    consecutiveErrors: 0, 
+    totalErrors: 0, 
+    totalSuccesses: 0 
+  };
+  health.lastSuccessTime = Date.now();
+  health.consecutiveErrors = 0;
+  health.totalSuccesses++;
+  keyHealth.set(key, health);
+};
+
+const reportKeyError = (key: string, type?: string, isPermanent = false) => {
   if (isPermanent) {
     deadKeys.add(key);
     console.error(`Key ${key.substring(0, 8)}... marked as PERMANENTLY DEAD (Invalid or Denied)`);
     return;
   }
-  const health = keyHealth.get(key) || { lastErrorTime: 0, consecutiveErrors: 0 };
+  const health = keyHealth.get(key) || { 
+    lastErrorTime: 0, 
+    lastSuccessTime: 0, 
+    consecutiveErrors: 0, 
+    totalErrors: 0, 
+    totalSuccesses: 0 
+  };
   health.lastErrorTime = Date.now();
   health.consecutiveErrors++;
+  health.totalErrors++;
+  health.errorType = type;
   keyHealth.set(key, health);
 };
 
@@ -92,46 +223,51 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: number) {
   const allKeys = getAllKeys();
-  const effectiveRetries = maxRetries ?? Math.max(10, allKeys.length);
-  let lastUsedKey = '';
+  const effectiveRetries = maxRetries ?? Math.max(8, allKeys.length * 2);
+  let triedKeys: string[] = [];
   let lastError: any = null;
 
   for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
-    const { client, key } = getGeminiClient(lastUsedKey);
-    lastUsedKey = key;
+    const { client, key, totalKeys } = getGeminiClient(triedKeys);
+    triedKeys.push(key);
+    if (triedKeys.length > 5) triedKeys.shift();
 
     try {
-      return await action(client);
+      const result = await action(client);
+      reportKeySuccess(key);
+      return result;
     } catch (error: any) {
       lastError = error;
-      const errorStr = error?.message || String(error);
+      const errorStr = (error?.message || String(error)).toUpperCase();
+      
       const isQuotaError = errorStr.includes("429") || 
                            errorStr.includes("RESOURCE_EXHAUSTED") ||
-                           errorStr.includes("limit") ||
-                           errorStr.includes("quota");
+                           errorStr.includes("QUOTA") ||
+                           errorStr.includes("LIMIT");
       
       const isServerOverloaded = errorStr.includes("503") || 
                                  errorStr.includes("500") ||
                                  errorStr.includes("UNAVAILABLE") ||
-                                 errorStr.includes("fetch failed") ||
+                                 errorStr.includes("FETCH FAILED") ||
                                  errorStr.includes("ECONNRESET") ||
                                  errorStr.includes("ETIMEDOUT");
 
-      const isInvalidKey = errorStr.includes("API key not valid") || 
+      const isInvalidKey = errorStr.includes("API KEY NOT VALID") || 
                            errorStr.includes("PERMISSION_DENIED") ||
                            errorStr.includes("API_KEY_INVALID");
 
       if (isInvalidKey) {
-        reportKeyError(key, true);
-        continue; // Immediately try next key without backoff if key is dead
+        reportKeyError(key, 'INVALID', true);
+        continue; 
       }
 
       if (isQuotaError || isServerOverloaded) {
-        console.warn(`Key ${key.substring(0, 8)}... matched error (${isQuotaError ? 'Quota' : 'Overload'}). Attempt ${attempt + 1}/${effectiveRetries + 1}`);
-        reportKeyError(key);
+        const errType = isQuotaError ? 'Quota' : 'Overload';
+        console.warn(`Key ${key.substring(0, 8)}... error (${errType}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Active keys: ${totalKeys}`);
+        reportKeyError(key, errType);
         
-        // Exponential backoff: 1s, 2s, 4s... with jitter
-        const backoffMs = Math.pow(2, Math.min(attempt, 4)) * 1000 + Math.random() * 1000;
+        // Exponential backoff: 1.5s, 3s, 6s... with jitter
+        const backoffMs = Math.pow(2, Math.min(attempt, 4)) * 1500 + Math.random() * 1000;
         await delay(backoffMs); 
         continue;
       }
@@ -140,8 +276,7 @@ async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: n
     }
   }
   
-  // Custom error for UI to recognize exhausted keys
-  const finalError = new Error(lastError?.message || "All available API keys are currently exhausted or limited. Please wait a minute and try again.");
+  const finalError = new Error(`Exhausted ${triedKeys.length} attempts across available keys. ${lastError?.message || "Service unavailable"}.`);
   (finalError as any).status = 429;
   throw finalError;
 }

@@ -175,10 +175,10 @@ const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, on
                                 </button>
                                 <button 
                                     onClick={() => onRetry(page.id)}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-[#1A1A1A] border border-[#252525] text-[#EFEFEF] text-[10px] font-semibold rounded hover:bg-[#141414] transition-colors "
-                                    title="Regenerate Page"
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-[#1A1A1A] border border-[#252525] text-[#888888] text-[10px] font-semibold rounded hover:bg-[#111111] hover:text-[#EFEFEF] transition-colors "
+                                    title="Redo Extraction"
                                 >
-                                    <RefreshCw className="w-3 h-3" /> Regenerate
+                                    <RefreshCw className="w-3 h-3" /> Redo
                                 </button>
                             </>
                         )}

@@ -20,36 +20,107 @@ app.get('/api/debug-key', (req, res) => {
 });
 
 let keyIndex = 0;
+const keyHealth = new Map<string, { lastErrorTime: number, consecutiveErrors: number }>();
 
-const getGeminiClient = () => {
+const getAllKeys = () => {
   const primaryKey = process.env.GEMINI_API_KEY;
   const keysString = process.env.GEMINI_API_KEYS || '';
   
-  // Combine all provided keys into a unique set
   let allKeys = keysString
     .split(',')
-    .map(k => k.replace(/['"\s]/g, ''))
-    .filter(k => k && k.startsWith('AI'));
+    .map(k => k.trim().replace(/['"\s]/g, ''))
+    .filter(k => k && k.length > 20);
     
-  if (primaryKey && primaryKey.startsWith('AI')) {
-    const cleanPrimary = primaryKey.replace(/['"\s]/g, '');
+  if (primaryKey && primaryKey.length > 20) {
+    const cleanPrimary = primaryKey.trim().replace(/['"\s]/g, '');
     if (!allKeys.includes(cleanPrimary)) {
       allKeys.unshift(cleanPrimary);
     }
   }
+  return allKeys;
+};
+
+const getGeminiClient = (skipKey?: string) => {
+  const allKeys = getAllKeys();
 
   if (allKeys.length === 0) {
     throw new Error("API Key is missing. Please set GEMINI_API_KEY or GEMINI_API_KEYS environment variable.");
   }
 
-  // Round-robin rotation
-  const apiKey = allKeys[keyIndex % allKeys.length];
-  keyIndex++;
+  // Find a healthy key
+  const now = Date.now();
+  let selectedKey = '';
+  
+  // Attempt to find a key that is NOT on cooldown (60s cooldown after error)
+  for (let i = 0; i < allKeys.length; i++) {
+    const candidate = allKeys[(keyIndex + i) % allKeys.length];
+    const health = keyHealth.get(candidate);
+    
+    if (candidate === skipKey) continue;
+    
+    if (!health || (now - health.lastErrorTime > 60000)) {
+      selectedKey = candidate;
+      keyIndex = (keyIndex + i + 1) % allKeys.length;
+      break;
+    }
+  }
 
-  return { client: new GoogleGenAI({ apiKey }), key: apiKey, totalKeys: allKeys.length };
+  // Fallback: if all are on cooldown, just take the next round-robin one
+  if (!selectedKey) {
+    selectedKey = allKeys[keyIndex % allKeys.length];
+    keyIndex++;
+  }
+
+  return { client: new GoogleGenAI({ apiKey: selectedKey }), key: selectedKey, totalKeys: allKeys.length };
+};
+
+const reportKeyError = (key: string) => {
+  const health = keyHealth.get(key) || { lastErrorTime: 0, consecutiveErrors: 0 };
+  health.lastErrorTime = Date.now();
+  health.consecutiveErrors++;
+  keyHealth.set(key, health);
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function runAIAction(action: (client: any) => Promise<any>, maxRetries = 3) {
+  let lastUsedKey = '';
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const { client, key } = getGeminiClient(lastUsedKey);
+    lastUsedKey = key;
+
+    try {
+      return await action(client);
+    } catch (error: any) {
+      lastError = error;
+      const errorStr = error?.message || String(error);
+      const isQuotaError = errorStr.includes("429") || 
+                           errorStr.includes("RESOURCE_EXHAUSTED") ||
+                           errorStr.includes("limit") ||
+                           errorStr.includes("quota");
+      
+      const isServerOverloaded = errorStr.includes("503") || 
+                                 errorStr.includes("UNAVAILABLE") ||
+                                 errorStr.includes("fetch failed") ||
+                                 errorStr.includes("ECONNRESET") ||
+                                 errorStr.includes("ETIMEDOUT");
+
+      if (isQuotaError || isServerOverloaded) {
+        console.warn(`Key ${key.substring(0, 8)}... matched error. Marking as unhealthy and switching key.`);
+        reportKeyError(key);
+        // Wait a bit before trying next key to allow transient issues to settle
+        await delay(1000); 
+        continue;
+      }
+      
+      // If it's a structural error (like JSON parse or prompt rejection), don't retry with next key immediately unless it might be model-specific
+      throw error;
+    }
+  }
+  throw lastError;
+}
 
 const extractLayoutWithRetry = async (
   base64Image: string,
@@ -58,12 +129,8 @@ const extractLayoutWithRetry = async (
   includeImages: boolean,
   isBilingual: boolean,
   mcqMode: boolean,
-  refineMode: boolean = false,
-  retryCount = 0
+  refineMode: boolean = false
 ): Promise<any> => {
-  const MAX_RETRIES = 5;
-  const { client, key: currentKey } = getGeminiClient();
-  
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
   let numberingInstruction = '';
@@ -136,7 +203,7 @@ const extractLayoutWithRetry = async (
     : `**FULLY EXTRACTION MODE (A TO Z)**:
 - Extract EVERY piece of text from the page, including headers, footers, page numbers, and small boilerplate text. Leave nothing out.`;
 
-  try {
+  return runAIAction(async (client) => {
     const response = await client.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: [
@@ -219,99 +286,34 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
     }
 
     let parsedElements;
-    try {
-      const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-      parsedElements = JSON.parse(cleanedText);
-      if (!Array.isArray(parsedElements)) {
-        throw new Error("Response is not a JSON array");
-      }
-      
-      parsedElements = parsedElements.map((el: any) => {
-        let bboxObj = el.bbox;
-        if (Array.isArray(el.bbox) && el.bbox.length === 4) {
-          bboxObj = {
-            ymin: el.bbox[0],
-            xmin: el.bbox[1],
-            ymax: el.bbox[2],
-            xmax: el.bbox[3]
-          };
-        }
-
-        return {
-          ...el,
-          id: Math.random().toString(36).substring(2, 11),
-          bbox: bboxObj,
-          content: Array.isArray(el.content) ? el.content.join('\n') : (el.content ? String(el.content) : '')
-        };
-      });
-    } catch (parseError) {
-      console.error("Failed to parse Gemini response as JSON:", responseText);
-      throw new Error("Invalid JSON response from AI model");
-    }
-
-    return parsedElements;
-  } catch (error: any) {
-    const errorStr = error?.message || String(error);
-    const isQuotaError = errorStr.includes("429") || 
-                         errorStr.includes("RESOURCE_EXHAUSTED") ||
-                         errorStr.includes("quota") ||
-                         errorStr.includes("limit") ||
-                         errorStr.includes("503") ||
-                         errorStr.includes("UNAVAILABLE") ||
-                         errorStr.includes("Unexpected token") ||
-                         errorStr.includes("JSON") ||
-                         errorStr.includes("fetch failed") ||
-                         errorStr.includes("ECONNRESET") ||
-                         errorStr.includes("ETIMEDOUT");
-
-    let extractedJsonObj: any = null;
-    const jsonMatch = errorStr.match(/\{.*\}/s);
-    if (jsonMatch) {
-      try {
-        extractedJsonObj = JSON.parse(jsonMatch[0]);
-      } catch(e) {}
+    const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    parsedElements = JSON.parse(cleanedText);
+    if (!Array.isArray(parsedElements)) {
+      throw new Error("Response is not a JSON array");
     }
     
-    if (isQuotaError && retryCount < MAX_RETRIES) {
-      let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
-      
-      const retryInMatch = errorStr.match(/retry in ([\d\.]+)s/i);
-      if (retryInMatch && retryInMatch[1]) {
-        waitTime = (parseFloat(retryInMatch[1]) * 1000) + 1000;
+    return parsedElements.map((el: any) => {
+      let bboxObj = el.bbox;
+      if (Array.isArray(el.bbox) && el.bbox.length === 4) {
+        bboxObj = {
+          ymin: el.bbox[0],
+          xmin: el.bbox[1],
+          ymax: el.bbox[2],
+          xmax: el.bbox[3]
+        };
       }
 
-      // Attempt to extract recommended retry delay if provided in Google RPC error
-      if (extractedJsonObj?.error?.details) {
-        const details = extractedJsonObj.error.details;
-        const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
-        if (retryInfo && retryInfo.retryDelay) {
-          const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
-          if (!isNaN(delaySecs)) {
-            waitTime = (delaySecs * 1000) + 1000; // Use recommended delay + 1s buffer
-          }
-        }
-      }
-
-      console.warn(`Quota or network issue. Wait time: ${Math.round(waitTime/1000)}s...`);
-      throw new Error(JSON.stringify({ isQuotaError: true, waitTime, originalError: errorStr }));
-    }
-
-    if (errorStr.includes("API key not valid")) {
-      throw new Error("API key not valid. Please verify your GEMINI_API_KEY in the AI Studio Settings menu.");
-    }
-
-    // Clean up output message if it's a raw JSON string
-    if (extractedJsonObj?.error?.message) {
-      throw new Error(extractedJsonObj.error.message);
-    }
-    throw error;
-  }
+      return {
+        ...el,
+        id: Math.random().toString(36).substring(2, 11),
+        bbox: bboxObj,
+        content: Array.isArray(el.content) ? el.content.join('\n') : (el.content ? String(el.content) : '')
+      };
+    });
+  });
 };
 
-const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false, retryCount = 0): Promise<any> => {
-  const MAX_RETRIES = 5;
-  const { client, key: currentKey } = getGeminiClient();
-
+const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false): Promise<any> => {
   const bilingualAddon = isBilingual 
     ? `
     IMPORTANT: This document is BILINGUAL (Hindi and English).
@@ -343,7 +345,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
     If no MCQs are found, return {"questions": []}.
   `;
 
-  try {
+  return runAIAction(async (client) => {
     const response = await client.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
@@ -361,60 +363,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
     const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleanedText);
     return parsed.questions || [];
-  } catch (error: any) {
-    const errorStr = error?.message || String(error);
-    const isQuotaError = errorStr.includes("429") || 
-                         errorStr.includes("RESOURCE_EXHAUSTED") ||
-                         errorStr.includes("quota") ||
-                         errorStr.includes("limit") ||
-                         errorStr.includes("503") ||
-                         errorStr.includes("UNAVAILABLE") ||
-                         errorStr.includes("Unexpected token") ||
-                         errorStr.includes("JSON") ||
-                         errorStr.includes("fetch failed") ||
-                         errorStr.includes("ECONNRESET") ||
-                         errorStr.includes("ETIMEDOUT");
-
-    let extractedJsonObj: any = null;
-    const jsonMatch = errorStr.match(/\{.*\}/s);
-    if (jsonMatch) {
-      try {
-        extractedJsonObj = JSON.parse(jsonMatch[0]);
-      } catch(e) {}
-    }
-    
-    if (isQuotaError && retryCount < MAX_RETRIES) {
-      let waitTime = Math.pow(2, retryCount) * 2000 + Math.random() * 2000; 
-      
-      const retryInMatch = errorStr.match(/retry in ([\d\.]+)s/i);
-      if (retryInMatch && retryInMatch[1]) {
-        waitTime = (parseFloat(retryInMatch[1]) * 1000) + 1000;
-      }
-
-      if (extractedJsonObj?.error?.details) {
-        const details = extractedJsonObj.error.details;
-        const retryInfo = details.find((d: any) => d['@type'] === 'type.googleapis.com/google.rpc.RetryInfo');
-        if (retryInfo && retryInfo.retryDelay) {
-          const delaySecs = parseFloat(retryInfo.retryDelay.replace('s', ''));
-          if (!isNaN(delaySecs)) {
-            waitTime = (delaySecs * 1000) + 1000; // Use recommended delay + 1s buffer
-          }
-        }
-      }
-
-      console.warn(`Quota or network issue. Wait time: ${Math.round(waitTime/1000)}s...`);
-      throw new Error(JSON.stringify({ isQuotaError: true, waitTime, originalError: errorStr }));
-    }
-
-    if (errorStr.includes("API key not valid")) {
-      throw new Error("API key not valid. Please verify your GEMINI_API_KEY in the AI Studio Settings menu.");
-    }
-
-    if (extractedJsonObj?.error?.message) {
-      throw new Error(extractedJsonObj.error.message);
-    }
-    throw error;
-  }
+  });
 };
 
 app.post('/api/extract', async (req, res) => {

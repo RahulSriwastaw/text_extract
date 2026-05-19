@@ -285,10 +285,10 @@ const PdfConverter: React.FC = () => {
     setAppState(AppState.ANALYZING);
     setErrorMsg(null);
     
-    // Dynamic batch size based on available keys
-    // Gemini 1.5 Flash allows ~15 RPM per key. 
-    // We can safely process (totalKeys * 2) loosely in parallel per batch.
-    const BATCH_SIZE = Math.max(1, Math.min(10, totalKeys * 2)); 
+    // Process pages in parallel batches
+    // We can confidently process up to 10 pages in parallel if multiple keys are available
+    // Even with 1 key, Gemini 1.5 Flash supports concurrent requests well (up to 15 RPM).
+    const BATCH_SIZE = Math.min(10, pages.filter(p => p.isSelected).length);
     let criticalErrorOccurred = false;
 
     // 1. Visually mark ALL selected pages as 'processing' immediately.
@@ -385,7 +385,9 @@ const PdfConverter: React.FC = () => {
 
         // Dynamic delay between batches to respect API limits (15 RPM per key)
         if (i + BATCH_SIZE < pagesToProcess.length && !criticalErrorOccurred) {
-            const batchDelay = Math.max(1000, 5000 / totalKeys);
+            // If we have multiple keys, we can be much faster. 
+            // 2000ms is a safe "cooldown" for 15RPM (1 req every 4s) when spread across multiple keys.
+            const batchDelay = totalKeys > 1 ? 1000 : 4000;
             await new Promise(resolve => setTimeout(resolve, batchDelay)); 
         }
     }

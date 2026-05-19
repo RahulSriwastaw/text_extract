@@ -21,6 +21,7 @@ app.get('/api/debug-key', (req, res) => {
 
 let keyIndex = 0;
 const keyHealth = new Map<string, { lastErrorTime: number, consecutiveErrors: number }>();
+const deadKeys = new Set<string>();
 
 const getAllKeys = () => {
   const primaryKey = process.env.GEMINI_API_KEY;
@@ -37,14 +38,14 @@ const getAllKeys = () => {
       allKeys.unshift(cleanPrimary);
     }
   }
-  return allKeys;
+  return allKeys.filter(k => !deadKeys.has(k));
 };
 
 const getGeminiClient = (skipKey?: string) => {
   const allKeys = getAllKeys();
 
   if (allKeys.length === 0) {
-    throw new Error("API Key is missing. Please set GEMINI_API_KEY or GEMINI_API_KEYS environment variable.");
+    throw new Error("No valid API keys found. Please verify your keys in the Settings menu (GEMINI_API_KEY or GEMINI_API_KEYS).");
   }
 
   // Find a healthy key
@@ -58,6 +59,7 @@ const getGeminiClient = (skipKey?: string) => {
     
     if (candidate === skipKey) continue;
     
+    // Skip if on cooldown
     if (!health || (now - health.lastErrorTime > 60000)) {
       selectedKey = candidate;
       keyIndex = (keyIndex + i + 1) % allKeys.length;
@@ -74,7 +76,12 @@ const getGeminiClient = (skipKey?: string) => {
   return { client: new GoogleGenAI({ apiKey: selectedKey }), key: selectedKey, totalKeys: allKeys.length };
 };
 
-const reportKeyError = (key: string) => {
+const reportKeyError = (key: string, isPermanent = false) => {
+  if (isPermanent) {
+    deadKeys.add(key);
+    console.error(`Key ${key.substring(0, 8)}... marked as PERMANENTLY DEAD (Invalid or Denied)`);
+    return;
+  }
   const health = keyHealth.get(key) || { lastErrorTime: 0, consecutiveErrors: 0 };
   health.lastErrorTime = Date.now();
   health.consecutiveErrors++;
@@ -83,11 +90,13 @@ const reportKeyError = (key: string) => {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function runAIAction(action: (client: any) => Promise<any>, maxRetries = 3) {
+async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: number) {
+  const allKeys = getAllKeys();
+  const effectiveRetries = maxRetries ?? Math.max(10, allKeys.length);
   let lastUsedKey = '';
   let lastError: any = null;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
     const { client, key } = getGeminiClient(lastUsedKey);
     lastUsedKey = key;
 
@@ -102,24 +111,39 @@ async function runAIAction(action: (client: any) => Promise<any>, maxRetries = 3
                            errorStr.includes("quota");
       
       const isServerOverloaded = errorStr.includes("503") || 
+                                 errorStr.includes("500") ||
                                  errorStr.includes("UNAVAILABLE") ||
                                  errorStr.includes("fetch failed") ||
                                  errorStr.includes("ECONNRESET") ||
                                  errorStr.includes("ETIMEDOUT");
 
+      const isInvalidKey = errorStr.includes("API key not valid") || 
+                           errorStr.includes("PERMISSION_DENIED") ||
+                           errorStr.includes("API_KEY_INVALID");
+
+      if (isInvalidKey) {
+        reportKeyError(key, true);
+        continue; // Immediately try next key without backoff if key is dead
+      }
+
       if (isQuotaError || isServerOverloaded) {
-        console.warn(`Key ${key.substring(0, 8)}... matched error. Marking as unhealthy and switching key.`);
+        console.warn(`Key ${key.substring(0, 8)}... matched error (${isQuotaError ? 'Quota' : 'Overload'}). Attempt ${attempt + 1}/${effectiveRetries + 1}`);
         reportKeyError(key);
-        // Wait a bit before trying next key to allow transient issues to settle
-        await delay(1000); 
+        
+        // Exponential backoff: 1s, 2s, 4s... with jitter
+        const backoffMs = Math.pow(2, Math.min(attempt, 4)) * 1000 + Math.random() * 1000;
+        await delay(backoffMs); 
         continue;
       }
       
-      // If it's a structural error (like JSON parse or prompt rejection), don't retry with next key immediately unless it might be model-specific
       throw error;
     }
   }
-  throw lastError;
+  
+  // Custom error for UI to recognize exhausted keys
+  const finalError = new Error(lastError?.message || "All available API keys are currently exhausted or limited. Please wait a minute and try again.");
+  (finalError as any).status = 429;
+  throw finalError;
 }
 
 const extractLayoutWithRetry = async (

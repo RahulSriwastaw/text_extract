@@ -164,6 +164,25 @@ const PdfConverter: React.FC = () => {
     return () => window.removeEventListener('paste', handleGlobalPaste);
   }, [appState]);
 
+    // Triggers selection and processing for all failed pages
+    const retryAllErrors = async () => {
+        const errorPages = pages.filter(p => p.status === 'error');
+        if (errorPages.length === 0) return;
+        
+        setErrorMsg(null);
+        setAppState(AppState.ANALYZING);
+
+        // Select error pages and reset their state
+        setPages(prev => prev.map(p => 
+            p.status === 'error' 
+                ? { ...p, isSelected: true, status: 'processing', errorMessage: undefined } 
+                : p
+        ));
+
+        // Note: startExtraction() will now naturally pick up these pages since they are isSelected and NOT done
+        startExtraction();
+    };
+
   const handleFilesSelected = async (fileList: FileList | null, append: boolean = false) => {
     if (!fileList || fileList.length === 0) return;
 
@@ -306,12 +325,11 @@ const PdfConverter: React.FC = () => {
 
         const batch = pagesToProcess.slice(i, i + BATCH_SIZE);
         
-        // Process current batch in parallel with a slight stagger
         await Promise.all(batch.map(async (page, index) => {
             if (criticalErrorOccurred) return;
 
-            // Stagger requests by 250ms to avoid hitting API rate limits on the exact same millisecond
-            await new Promise(resolve => setTimeout(resolve, index * 250));
+            // Stagger requests by 300ms to avoid burst limits
+            await new Promise(resolve => setTimeout(resolve, index * 300));
 
             try {
                 const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
@@ -320,16 +338,15 @@ const PdfConverter: React.FC = () => {
                 const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
                 const pageWords = countWords(pageText);
                 setWordsConsumed(prev => prev + pageWords);
-                setPointsConsumed(prev => prev + 1); // 1 point per page
+                setPointsConsumed(prev => prev + 1);
 
-                // Process images & tables: Crop them from the original page
+                // Process images & tables
                 const processedElements = await Promise.all(elements.map(async (el) => {
                     if (includeImages && (el.type === 'image' || el.type === 'table') && el.bbox) {
                         try {
                             const croppedB64 = await cropImage(page.imageUrl, el.bbox);
                             return { ...el, imageB64: croppedB64 };
                         } catch (cropErr) {
-                            console.error("Cropping failed for element:", el.id, cropErr);
                             return el;
                         }
                     }
@@ -345,40 +362,27 @@ const PdfConverter: React.FC = () => {
                 } : p));
             } catch (e: any) {
                 console.error(`Error processing page ${page.pageNumber}:`, e);
-                
                 const errorStr = e?.message || String(e);
-
                 const errorLower = errorStr.toLowerCase();
-                const isRateLimit = errorStr.includes("429") || 
-                                     errorStr.includes("RESOURCE_EXHAUSTED") ||
-                                     errorStr.includes("quota") ||
-                                     errorStr.includes("limit");
+                const isRateLimit = errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("exhausted");
 
-                // Try to extract a clean message if it's JSON
                 let displayError = errorStr;
                 try {
                   const parsed = JSON.parse(errorStr);
-                  if (parsed.error && typeof parsed.error === 'string') {
-                    try {
-                      const inner = JSON.parse(parsed.error);
-                      if (inner.error?.message) displayError = inner.error.message;
-                    } catch(e) {
-                      displayError = parsed.error;
-                    }
-                  } else if (parsed.message) {
-                    displayError = parsed.message;
-                  }
+                  if (parsed.message) displayError = parsed.message;
                 } catch(e) {}
 
-                // Mark page as error
                 setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: displayError } : p));
 
-                if (isRateLimit) {
-                    setErrorMsg("Gemini Free Tier Quota Reached. The AI is currently overwhelmed by high demand. Please try again in a few minutes or process pages one by one."); 
+                if (isRateLimit && totalKeys <= 1) {
+                    setErrorMsg("API limit reached. Please wait a moment or add more keys."); 
                     criticalErrorOccurred = true; 
-                } else if (errorLower.includes("api key") || errorLower.includes("authentication")) {
-                    setErrorMsg(`Authentication Error: ${displayError}`);
-                    criticalErrorOccurred = true; 
+                } else if (errorLower.includes("authentication") || errorLower.includes("api key not valid")) {
+                    // Only stop if we have no keys left
+                    if (totalKeys <= 1) {
+                        setErrorMsg(`Authentication Error: ${displayError}`);
+                        criticalErrorOccurred = true; 
+                    }
                 }
             }
         }));
@@ -759,12 +763,21 @@ const PdfConverter: React.FC = () => {
                                                   </span>
                                                 )}
                                                 {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
-                                                    <button 
-                                                        onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
-                                                        className="text-[9px] text-[#F44336] font-bold hover:underline"
-                                                    >
-                                                        {pages.filter(p => p.isSelected && p.status === 'error').length} errors
-                                                    </button>
+                                                    <div className="flex items-center gap-2">
+                                                        <button 
+                                                            onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
+                                                            className="text-[9px] text-[#F44336] font-bold hover:underline"
+                                                        >
+                                                            {pages.filter(p => p.isSelected && p.status === 'error').length} errors
+                                                        </button>
+                                                        <button 
+                                                            onClick={retryAllErrors}
+                                                            className="flex items-center gap-1.5 px-2 py-0.5 bg-[#3A1A1A] border border-[#F44336]/30 text-[#F44336] rounded-[6px] hover:bg-[#F44336]/20 transition-all text-[9px] font-bold"
+                                                        >
+                                                            <RefreshCw className="w-2.5 h-2.5" />
+                                                            Retry All
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -1051,10 +1064,25 @@ const PdfConverter: React.FC = () => {
                             className="p-3 bg-[#3A1A1A] text-[#F44336] rounded-[8px] border border-[#F44336]/30 flex items-start gap-3 mt-4"
                         >
                             <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-[#F44336]" />
-                            <div>
-                                <h4 className="font-bold text-[13px] uppercase tracking-wider text-[#F44336]">Processing Error</h4>
-                                <p className="text-[13px] mt-1 text-[#EFEFEF]">{errorMsg}</p>
-                            </div>
+                                <div>
+                                    <h4 className="font-bold text-[13px] uppercase tracking-wider text-[#F44336]">Processing Interrupted</h4>
+                                    <p className="text-[13px] mt-1 text-[#EFEFEF]">{errorMsg}</p>
+                                    <div className="mt-3 flex gap-2">
+                                        <button 
+                                            onClick={retryAllErrors}
+                                            className="px-3 py-1.5 bg-[#F44336] text-white rounded-[6px] text-[11px] font-bold flex items-center gap-2 hover:bg-[#d32f2f] transition-colors"
+                                        >
+                                            <RefreshCw className="w-3.5 h-3.5" />
+                                            Retry Failed Pages
+                                        </button>
+                                        <button 
+                                            onClick={() => setErrorMsg(null)}
+                                            className="px-3 py-1.5 bg-transparent border border-[#F44336]/30 text-[#F44336] rounded-[6px] text-[11px] font-bold hover:bg-[#F44336]/10 transition-colors"
+                                        >
+                                            Dismiss
+                                        </button>
+                                    </div>
+                                </div>
                         </motion.div>
                     )}
                 </AnimatePresence>

@@ -5,7 +5,10 @@ declare global {
   }
 }
 
-export const convertPdfToImages = async (file: File): Promise<string[]> => {
+export const convertPdfToImages = async (
+  file: File, 
+  onProgress?: (current: number, total: number, percentage: number) => void
+): Promise<string[]> => {
   if (!window.pdfjsLib) {
     throw new Error("PDF.js library is not loaded. Please check your internet connection and try again.");
   }
@@ -19,6 +22,10 @@ export const convertPdfToImages = async (file: File): Promise<string[]> => {
     
     const pageCount = pdf.numPages;
     const images: string[] = [];
+
+    if (onProgress) {
+      onProgress(0, pageCount, 0);
+    }
 
     for (let i = 1; i <= pageCount; i++) {
       const page = await pdf.getPage(i);
@@ -46,6 +53,11 @@ export const convertPdfToImages = async (file: File): Promise<string[]> => {
       // Convert to JPEG to massively reduce base64 size for faster network transfer
       const base64 = canvas.toDataURL('image/jpeg', 0.8);
       images.push(base64);
+
+      if (onProgress) {
+        const percent = Math.round((i / pageCount) * 100);
+        onProgress(i, pageCount, percent);
+      }
     }
 
     return images;

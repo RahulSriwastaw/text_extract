@@ -5,6 +5,7 @@ import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
 import HistorySidebar from './HistorySidebar';
 import McqSidebar from './McqSidebar';
+import UploadProgressBar, { UploadProgressData } from './UploadProgressBar';
 import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem } from '../types';
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
@@ -37,6 +38,7 @@ const PdfConverter: React.FC = () => {
   const [wordsConsumed, setWordsConsumed] = useState(0);
   const [pointsConsumed, setPointsConsumed] = useState(0);
   const [totalKeys, setTotalKeys] = useState(1);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressData | null>(null);
 
   // Helper to count words
   const countWords = (text: string) => {
@@ -173,7 +175,6 @@ const PdfConverter: React.FC = () => {
     if (validFiles.length === 0) return;
 
     if (!append) {
-      // Capture the name of the first file for saving later
       const firstFile = validFiles[0];
       const namePart = firstFile.name.substring(0, firstFile.name.lastIndexOf('.')) || firstFile.name;
       setFileName(namePart);
@@ -192,16 +193,45 @@ const PdfConverter: React.FC = () => {
         const file = validFiles[i];
         
         if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-          const images = await convertPdfToImages(file);
+          setUploadProgress({
+            fileName: file.name,
+            fileSize: file.size,
+            current: 0,
+            total: 0,
+            percentage: 5,
+            statusText: 'Loading PDF document...'
+          });
+
+          const images = await convertPdfToImages(file, (current, total, percentage) => {
+            setUploadProgress({
+              fileName: file.name,
+              fileSize: file.size,
+              current,
+              total,
+              percentage: Math.max(5, percentage),
+              statusText: `Rendering page ${current} of ${total} (2.5x high-res)...`
+            });
+          });
+
           images.forEach(img => {
             newPages.push({
               id: generateId(),
               imageUrl: img,
               status: 'pending',
-              isSelected: true // Default selected
+              isSelected: true
             });
           });
-        } else if (file.type.startsWith('image/') || /\.(jpg|jpeg|png)$/i.test(file.name)) {
+        } else if (file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(file.name)) {
+          const percent = Math.round(((i + 1) / validFiles.length) * 100);
+          setUploadProgress({
+            fileName: file.name,
+            fileSize: file.size,
+            current: i + 1,
+            total: validFiles.length,
+            percentage: percent,
+            statusText: `Processing image ${i + 1} of ${validFiles.length}...`
+          });
+
           const base64 = await readFileAsBase64(file);
           newPages.push({
             id: generateId(),
@@ -217,11 +247,23 @@ const PdfConverter: React.FC = () => {
         const mappedNewPages = newPages.map(p => ({ ...p, pageNumber: currentCounter++ } as ScannedPage));
         return append ? [...prev, ...mappedNewPages] : mappedNewPages;
       });
+
+      setUploadProgress(prev => prev ? {
+        ...prev,
+        percentage: 100,
+        statusText: `Ready! Loaded ${newPages.length} pages.`
+      } : null);
+
+      setTimeout(() => {
+        setUploadProgress(null);
+      }, 1000);
+
       setAppState(AppState.IDLE); // Ready to start AI
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err?.message || "Failed to process files. Please check if the file is valid.");
       setAppState(AppState.ERROR);
+      setUploadProgress(null);
     }
   };
 
@@ -681,18 +723,11 @@ const PdfConverter: React.FC = () => {
                     ))}
                 </div>
 
-                {appState === AppState.PROCESSING_PDF && (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="mt-8 flex flex-col items-center gap-3"
-                  >
-                    <div className="w-8 h-8 border-2 border-white/[0.1] border-t-[#FF6B2B] rounded-full animate-spin shadow-lg shadow-[#FF6B2B]/20" />
-                    <p className="text-slate-200 font-bold tracking-wider uppercase text-xs">
-                      Analyzing document structure...
-                    </p>
-                  </motion.div>
-                )}
+                <AnimatePresence>
+                  {uploadProgress && (
+                    <UploadProgressBar progress={uploadProgress} />
+                  )}
+                </AnimatePresence>
              </div>
            ) : (
              <motion.div
@@ -700,6 +735,11 @@ const PdfConverter: React.FC = () => {
                animate={{ opacity: 1, y: 0 }}
                className="space-y-6"
              >
+                <AnimatePresence>
+                  {uploadProgress && (
+                    <UploadProgressBar progress={uploadProgress} />
+                  )}
+                </AnimatePresence>
 
                 {/* Error Modal */}
                 <AnimatePresence>

@@ -305,13 +305,23 @@ async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: n
         continue; 
       }
 
-      if (isQuotaError || isServerOverloaded) {
-        const errType = isQuotaError ? 'Quota' : 'Overload';
-        console.warn(`Key ${key.substring(0, 8)}... error (${errType}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Active keys: ${totalKeys}`);
+      const isRetryable = isQuotaError || 
+                          isServerOverloaded || 
+                          errorStr.includes("EMPTY RESPONSE") || 
+                          errorStr.includes("FAILED TO PARSE") ||
+                          errorStr.includes("JSON") ||
+                          errorStr.includes("SAFETY") ||
+                          errorStr.includes("BLOCKED") ||
+                          errorStr.includes("CANDIDATES") ||
+                          errorStr.includes("MAX_TOKENS");
+
+      if (isRetryable) {
+        const errType = isQuotaError ? 'Quota' : (isServerOverloaded ? 'Overload' : 'Transient/Empty');
+        console.warn(`Key ${key.substring(0, 8)}... transient error (${errType}: ${error?.message || errorStr}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Rotating to next key. Active keys: ${totalKeys}`);
         reportKeyError(key, errType);
         
-        // Exponential backoff: 1.5s, 3s, 6s... with jitter
-        const backoffMs = Math.pow(2, Math.min(attempt, 4)) * 1500 + Math.random() * 1000;
+        // Backoff: 800ms, 1600ms, 2400ms... with jitter
+        const backoffMs = Math.min(attempt * 800, 3000) + Math.random() * 500;
         await delay(backoffMs); 
         continue;
       }
@@ -804,9 +814,14 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
       }
     });
 
-    const responseText = response.text;
-    if (!responseText) {
-      throw new Error("Empty response from Gemini API");
+    let responseText = response?.text;
+    if (!responseText && response?.candidates?.[0]?.content?.parts) {
+      responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+    }
+
+    if (!responseText || !responseText.trim()) {
+      const finishReason = response?.candidates?.[0]?.finishReason;
+      throw new Error(`Empty response from Gemini API (finishReason: ${finishReason || 'none'})`);
     }
 
     const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
@@ -820,8 +835,18 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
       try {
         parsedElements = JSON.parse(cleanedText);
       } catch (e2) {
-        console.error("JSON parse error:", cleanedText);
-        throw new Error("Failed to parse AI response as JSON");
+        const jsonMatch = cleanedText.match(/\[[\s\S]*\]/);
+        if (jsonMatch) {
+          try {
+            parsedElements = JSON.parse(jsonMatch[0]);
+          } catch(e3) {
+            console.error("JSON parse error:", cleanedText);
+            throw new Error("Failed to parse AI response as JSON");
+          }
+        } else {
+          console.error("JSON parse error:", cleanedText);
+          throw new Error("Failed to parse AI response as JSON");
+        }
       }
     }
 

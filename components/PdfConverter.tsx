@@ -726,7 +726,7 @@ const PdfConverter: React.FC = () => {
                 </AnimatePresence>
 
                 {/* Main Tool Header - Combined Progress & Actions */}
-                <div className="bg-[#1A1A1A] rounded-[8px] border border-[#252525] sticky top-0 z-50 overflow-hidden">
+                <div className="bg-[#11141F]/90 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl sticky top-16 z-40 overflow-hidden">
                    {/* Integrated Progress Bar (Top edge) */}
                    <AnimatePresence>
                         {appState === AppState.ANALYZING && (
@@ -734,37 +734,36 @@ const PdfConverter: React.FC = () => {
                                 initial={{ height: 0 }}
                                 animate={{ height: 4 }}
                                 exit={{ height: 0 }}
-                                className="w-full bg-[#141414] relative overflow-hidden"
+                                className="w-full bg-white/[0.05] relative overflow-hidden"
                             >
                                 <motion.div 
-                                    className="h-full bg-[#FF6B2B] relative"
+                                    className="h-full bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] shadow-[0_0_12px_#FF6B2B]"
                                     initial={{ width: 0 }}
                                     animate={{ width: `${Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%` }}
                                     transition={{ type: "spring", bounce: 0, duration: 0.5 }}
-                                >
-                                </motion.div>
+                                />
                             </motion.div>
                         )}
                    </AnimatePresence>
 
-                   <div className="p-3 flex flex-col gap-3">
-                        {/* Top Row: Processing Info (Conditional) & Main Actions */}
-                        <div className="flex flex-col md:flex-row justify-between items-center gap-3">
-                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                   <div className="p-3 sm:p-4 flex flex-col gap-3">
+                        {/* Top Row: Processing Info & Main Actions */}
+                        <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3">
+                            <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-1 min-w-0">
                                 {appState === AppState.ANALYZING ? (
-                                    <div className="flex items-center gap-3 bg-[#1A1A1A] px-3 py-1.5 rounded-[8px] border border-[#252525] min-w-0 max-w-md">
+                                    <div className="flex items-center gap-3 bg-white/[0.04] px-3 py-1.5 rounded-xl border border-white/[0.08] min-w-0 max-w-md">
                                         <RefreshCw className="w-4 h-4 text-[#FF6B2B] animate-spin flex-shrink-0" />
                                         <div className="flex flex-col min-w-0">
-                                            <span className="text-[10px] font-bold text-[#EFEFEF] truncate">Processing: {fileName}</span>
+                                            <span className="text-xs font-bold text-white truncate">Processing: {fileName}</span>
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[9px] text-[#FF6B2B] font-bold tabular-nums">
+                                                <span className="text-[10px] text-[#FF884D] font-bold tabular-nums">
                                                     {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
                                                 </span>
-                                                <span className="text-[9px] text-[#888888] font-medium">
+                                                <span className="text-[10px] text-slate-400 font-medium">
                                                     {pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages
                                                 </span>
                                                 {totalKeys > 1 && (
-                                                  <span className="px-1.5 py-0.5 bg-green-500/10 text-green-500 text-[8px] font-black rounded uppercase tracking-tighter border border-green-500/20">
+                                                  <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded uppercase tracking-wider border border-emerald-500/20">
                                                     Turbo: {totalKeys} Keys
                                                   </span>
                                                 )}
@@ -772,13 +771,13 @@ const PdfConverter: React.FC = () => {
                                                     <div className="flex items-center gap-2">
                                                         <button 
                                                             onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
-                                                            className="text-[9px] text-[#F44336] font-bold hover:underline"
+                                                            className="text-[10px] text-rose-400 font-bold hover:underline"
                                                         >
                                                             {pages.filter(p => p.isSelected && p.status === 'error').length} errors
                                                         </button>
                                                         <button 
                                                             onClick={retryAllErrors}
-                                                            className="flex items-center gap-1.5 px-2 py-0.5 bg-[#3A1A1A] border border-[#F44336]/30 text-[#F44336] rounded-[6px] hover:bg-[#F44336]/20 transition-all text-[9px] font-bold"
+                                                            className="flex items-center gap-1 px-2 py-0.5 bg-rose-500/15 border border-rose-500/30 text-rose-400 rounded-lg hover:bg-rose-500/25 transition-all text-[10px] font-bold"
                                                         >
                                                             <RefreshCw className="w-2.5 h-2.5" />
                                                             Retry All
@@ -789,18 +788,18 @@ const PdfConverter: React.FC = () => {
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="flex items-center gap-2 px-2 py-1 bg-[#141414] rounded-[8px]">
-                                        <span className="text-[11px] font-bold text-[#EFEFEF]">{selectedCount}/{totalCount}</span>
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white/[0.04] rounded-xl border border-white/[0.06]">
+                                        <span className="text-xs font-bold text-white tabular-nums px-1">{selectedCount}/{totalCount}</span>
                                         <div className="flex gap-1">
                                             <button 
                                                 onClick={() => toggleAllSelection(true)}
-                                                className="text-[10px] font-bold text-[#EFEFEF] hover:bg-[#1A1A1A] px-2 py-0.5 rounded  transition-all"
+                                                className="text-[10px] font-bold text-white hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
                                             >
                                                 ALL
                                             </button>
                                             <button 
                                                 onClick={() => toggleAllSelection(false)}
-                                                className="text-[10px] font-bold text-[#555555] hover:bg-[#1A1A1A] px-2 py-0.5 rounded  transition-all"
+                                                className="text-[10px] font-bold text-slate-400 hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
                                             >
                                                 NONE
                                             </button>
@@ -809,23 +808,23 @@ const PdfConverter: React.FC = () => {
                                 )}
 
                                 {/* Live Consumption Stats */}
-                                <div className="hidden sm:flex items-center gap-2">
-                                    <div className="flex items-center gap-1.5 bg-[#1A1A1A] px-2 py-1 rounded-[8px] border border-[#252525]">
-                                        <Type className="w-3 h-3 text-[#2196F3]" />
-                                        <span className="text-[10px] font-bold text-[#EFEFEF] tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[8px] text-[#555555]">WORDS</span></span>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5 bg-white/[0.03] px-2.5 py-1 rounded-xl border border-white/[0.05]">
+                                        <Type className="w-3.5 h-3.5 text-blue-400" />
+                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[9px] text-slate-500 uppercase">Words</span></span>
                                     </div>
-                                    <div className="flex items-center gap-1.5 bg-[#1A1A1A] px-2 py-1 rounded-[8px] border border-[#252525]">
-                                        <Zap className="w-3 h-3 text-[#FF6B2B]" />
-                                        <span className="text-[10px] font-bold text-[#EFEFEF] tabular-nums">{pointsConsumed} <span className="text-[8px] text-[#555555]">POINTS</span></span>
+                                    <div className="flex items-center gap-1.5 bg-white/[0.03] px-2.5 py-1 rounded-xl border border-white/[0.05]">
+                                        <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{pointsConsumed} <span className="text-[9px] text-slate-500 uppercase">Points</span></span>
                                     </div>
                                 </div>
 
                                 <div className="relative">
-                                    <Filter className="w-3 h-3 text-[#555555] absolute left-2 top-1/2 -translate-y-1/2" />
+                                    <Filter className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
                                     <input 
                                         type="text" 
                                         placeholder="Range (e.g. 1-5)" 
-                                        className="pl-6 pr-2 py-1 text-[11px] bg-[#111111] border border-[#252525] rounded-[8px] focus:outline-none focus:border-[#FF6B2B] focus:ring-2 focus:ring-slate-200 transition-all w-28"
+                                        className="pl-7 pr-2.5 py-1 text-xs bg-white/[0.03] border border-white/[0.08] rounded-xl focus:outline-none focus:border-[#FF6B2B] focus:ring-1 focus:ring-[#FF6B2B]/50 transition-all w-28 text-white placeholder:text-slate-500"
                                         value={rangeInput}
                                         onChange={(e) => setRangeInput(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
@@ -833,30 +832,30 @@ const PdfConverter: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-2 w-full md:w-auto">
+                            <div className="flex items-center gap-2 justify-end">
                                 {hasCompletedPages && (
-                                    <div className="flex gap-2 mr-2">
+                                    <div className="flex gap-2">
                                         <button 
                                             onClick={copyAllText}
-                                            className="p-2 text-[#555555] hover:bg-[#141414] rounded-[8px] transition-colors"
+                                            className="p-2 text-slate-400 hover:text-white bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] rounded-xl transition-all"
                                             title="Copy All"
                                         >
-                                            {copySuccess ? <Check className="w-4 h-4 text-[#4CAF50]" /> : <Copy className="w-4 h-4" />}
+                                            {copySuccess ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                                         </button>
                                         <button 
                                             onClick={downloadDocx}
-                                            className="px-3 py-2 transparent text-[#EFEFEF] border border-[#2A2A2A] hover:bg-[#1A1A1A] rounded-[6px] text-[11px] font-bold flex items-center gap-2 transition-all "
+                                            className="px-3.5 py-2 text-white bg-gradient-to-r from-blue-600/20 to-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm"
                                         >
-                                            <FileDown className="w-4 h-4" />
+                                            <FileDown className="w-4 h-4 text-blue-400" />
                                             DOCX
                                         </button>
                                     </div>
                                 )}
 
                                 {appState !== AppState.ANALYZING ? (
-                                    <div className="flex gap-2 flex-1 md:flex-none">
-                                        <label className="px-3 py-2 transparent text-[#EFEFEF] border border-[#2A2A2A] hover:bg-[#1A1A1A] rounded-[6px] text-[11px] font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors">
-                                            <Plus className="w-4 h-4" />
+                                    <div className="flex gap-2 flex-1 sm:flex-none">
+                                        <label className="px-3.5 py-2 text-slate-200 bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all">
+                                            <Plus className="w-4 h-4 text-[#FF6B2B]" />
                                             ADD
                                             <input 
                                                 type="file" 
@@ -869,10 +868,10 @@ const PdfConverter: React.FC = () => {
                                         <button
                                             onClick={startExtraction}
                                             disabled={selectedPendingCount === 0 && !hasErrorPages}
-                                            className={`flex-1 md:flex-none px-3 py-2 rounded-[6px] flex items-center justify-center gap-2 text-[11px] font-bold transition-all ${
+                                            className={`px-4 py-2 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-md ${
                                                 selectedPendingCount === 0 && !hasErrorPages
-                                                    ? 'bg-[#141414] text-[#555555] cursor-not-allowed'
-                                                    : 'bg-[#FF6B2B] text-white hover:bg-[#E55A1A]'
+                                                    ? 'bg-white/[0.05] text-slate-500 border border-white/[0.04] cursor-not-allowed'
+                                                    : 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white hover:shadow-lg hover:shadow-[#FF6B2B]/25 hover:scale-[1.02] active:scale-[0.98]'
                                             }`}
                                         >
                                             <Wand2 className="w-4 h-4" /> 
@@ -883,19 +882,19 @@ const PdfConverter: React.FC = () => {
                                         </button>
                                     </div>
                                 ) : (
-                                    <div className="flex gap-2 flex-1 md:flex-none">
+                                    <div className="flex gap-2 flex-1 sm:flex-none">
                                         {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
                                             <button 
                                                 onClick={() => {
                                                     setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending', elements: undefined, extractedText: undefined } : p));
                                                     startExtraction();
                                                 }}
-                                                className="px-3 py-2 bg-[#3A1A1A] text-[#F44336] border border-[#F44336]/30 text-white rounded-[8px] text-[11px] font-bold hover:bg-[#F44336]/20 transition-colors "
+                                                className="px-3 py-2 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold hover:bg-rose-500/30 transition-all"
                                             >
                                                 Retry Failed
                                             </button>
                                         )}
-                                        <div className="px-3 py-2 bg-[#141414] text-[#EFEFEF] rounded-[8px] text-[11px] font-bold flex items-center justify-center gap-2">
+                                        <div className="px-4 py-2 bg-[#FF6B2B]/15 border border-[#FF6B2B]/30 text-[#FF884D] rounded-xl text-xs font-bold flex items-center justify-center gap-2">
                                             <RefreshCw className="w-4 h-4 animate-spin" />
                                             PROCESSING...
                                         </div>
@@ -905,159 +904,139 @@ const PdfConverter: React.FC = () => {
                         </div>
 
                         {/* Bottom Row: Tools & Settings Grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 pt-2 border-t border-[#252525]">
-                        {/* MCQ Mode */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">MCQ Mode</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{mcqMode ? 'Active' : 'Disabled'}</span>
-                                <button
-                                    onClick={() => setMcqMode(!mcqMode)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${mcqMode ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2 pt-2.5 border-t border-white/[0.06]">
+                            {/* MCQ Mode */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-amber-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">MCQ Mode</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{mcqMode ? 'Active' : 'General'}</span>
+                                    <button
+                                        onClick={() => setMcqMode(!mcqMode)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${mcqMode ? 'bg-amber-500' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Auto Proofread */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Proofread</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
+                                    <button
+                                        onClick={() => setAutoProofread(!autoProofread)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoProofread ? 'bg-purple-500' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${autoProofread ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Numbering Style */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-blue-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Pattern</span>
+                                <select 
+                                    value={numberingStyle}
+                                    onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
+                                    className="text-[10px] font-bold bg-[#0B0D13] border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
                                 >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
+                                    <option value={NumberingStyle.Q_DOT} className="bg-[#11141F] text-slate-200">Q1.</option>
+                                    <option value={NumberingStyle.HASH} className="bg-[#11141F] text-slate-200">#1.</option>
+                                    <option value={NumberingStyle.QUESTION_DOT} className="bg-[#11141F] text-slate-200">Question 1.</option>
+                                    <option value={NumberingStyle.NUMBER_DOT} className="bg-[#11141F] text-slate-200">1.</option>
+                                </select>
+                            </div>
+
+                            {/* Bilingual */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-emerald-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Bilingual</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{isBilingual ? 'On' : 'Off'}</span>
+                                    <button
+                                        onClick={() => setIsBilingual(!isBilingual)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${isBilingual ? 'bg-emerald-500' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${isBilingual ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Images */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-cyan-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">Images</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
+                                    <button
+                                        onClick={() => setIncludeImages(!includeImages)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${includeImages ? 'bg-cyan-500' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${includeImages ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Auto Save */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-teal-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-teal-400 uppercase tracking-wider">Auto Save</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{autoDownload ? 'On' : 'Off'}</span>
+                                    <button
+                                        onClick={() => setAutoDownload(!autoDownload)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoDownload ? 'bg-teal-500' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${autoDownload ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Refine Mode */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-rose-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Refine</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{refineMode ? 'Active' : 'A-Z'}</span>
+                                    <button
+                                        onClick={() => setRefineMode(!refineMode)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${refineMode ? 'bg-rose-500' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${refineMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Answers Toggle */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-[#FF6B2B]/30 transition-all">
+                                <span className="text-[10px] font-bold text-[#FF884D] uppercase tracking-wider">Answers</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{showAnswers ? 'On' : 'Off'}</span>
+                                    <button
+                                        onClick={() => setShowAnswers(!showAnswers)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showAnswers ? 'bg-[#FF6B2B]' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${showAnswers ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
-                        {/* Auto Proofread */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-purple-600 uppercase tracking-wider">Proofread</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
-                                <button
-                                    onClick={() => setAutoProofread(!autoProofread)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${autoProofread ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
-                                >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${autoProofread ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Numbering Style */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#2196F3] uppercase tracking-wider">Pattern</span>
-                            <select 
-                                value={numberingStyle}
-                                onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
-                                className="text-[10px] font-bold bg-[#141414] border border-[#333333] rounded-[4px] px-1.5 py-1 text-[#EFEFEF] cursor-pointer focus:outline-none focus:border-[#2196F3]"
-                            >
-                                <option value={NumberingStyle.Q_DOT} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">Q1.</option>
-                                <option value={NumberingStyle.HASH} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">#1.</option>
-                                <option value={NumberingStyle.QUESTION_DOT} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">Question 1.</option>
-                                <option value={NumberingStyle.NUMBER_DOT} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">1.</option>
-                            </select>
-                        </div>
-
-                        {/* Bilingual */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#4CAF50] uppercase tracking-wider">Bilingual</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{isBilingual ? 'On' : 'Off'}</span>
-                                <button
-                                    onClick={() => setIsBilingual(!isBilingual)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${isBilingual ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
-                                >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${isBilingual ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Images */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#111111] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#EFEFEF] uppercase tracking-wider">Images</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
-                                <button
-                                    onClick={() => setIncludeImages(!includeImages)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${includeImages ? 'bg-[#141414]' : 'bg-[#2A2A2A]'}`}
-                                >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${includeImages ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Auto Save */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#111111] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#EFEFEF] uppercase tracking-wider">Auto Save</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{autoDownload ? 'On' : 'Off'}</span>
-                                <button
-                                    onClick={() => setAutoDownload(!autoDownload)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${autoDownload ? 'bg-[#141414]' : 'bg-[#2A2A2A]'}`}
-                                >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${autoDownload ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* History */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#111111] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#EFEFEF] uppercase tracking-wider">History</span>
+                        {/* Extra Navigation Badges */}
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.04]">
                             <button
                                 onClick={() => setIsHistoryOpen(true)}
-                                className="flex items-center justify-between text-[#EFEFEF] hover:text-[#EFEFEF] transition-colors"
+                                className="flex items-center gap-1.5 px-3 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/[0.06] transition-all"
                             >
-                                <span className="text-[10px] font-medium">View Past</span>
-                                <Clock className="w-3.5 h-3.5" />
+                                <Clock className="w-3.5 h-3.5 text-blue-400" />
+                                <span>History</span>
                             </button>
-                        </div>
-
-                        {/* MCQ Bank */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">MCQ Bank</span>
                             <button
                                 onClick={() => setIsMcqSidebarOpen(true)}
-                                className="flex items-center justify-between text-orange-700 hover:text-orange-900 transition-colors"
+                                className="flex items-center gap-1.5 px-3 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/[0.06] transition-all"
                             >
-                                <span className="text-[10px] font-medium">Open Bank</span>
-                                <ListChecks className="w-3.5 h-3.5" />
+                                <ListChecks className="w-3.5 h-3.5 text-[#FF6B2B]" />
+                                <span>MCQ Bank</span>
                             </button>
                         </div>
-
-                        {/* MCQ Numbers */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">Numbers</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{showMcqNumbers ? 'On' : 'Off'}</span>
-                                <button
-                                    onClick={() => setShowMcqNumbers(!showMcqNumbers)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${showMcqNumbers ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
-                                >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${showMcqNumbers ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Refine Mode */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">Refine</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{refineMode ? 'Active' : 'A-Z'}</span>
-                                <button
-                                    onClick={() => setRefineMode(!refineMode)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${refineMode ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
-                                >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${refineMode ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Answers Toggle */}
-                        <div className="flex flex-col gap-1.5 p-2 rounded-[8px] bg-[#1A1A1A] border border-[#252525]">
-                            <span className="text-[10px] font-bold text-[#FF6B2B] uppercase tracking-wider">Answers</span>
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-[#555555] font-medium">{showAnswers ? 'On' : 'Off'}</span>
-                                <button
-                                    onClick={() => setShowAnswers(!showAnswers)}
-                                    className={`w-8 h-4 rounded-[20px] transition-all flex items-center px-0.5 ${showAnswers ? 'bg-[#FF6B2B]' : 'bg-[#2A2A2A]'}`}
-                                >
-                                    <div className={`w-3 h-3 rounded-[20px] bg-[#1A1A1A]  transition-transform ${showAnswers ? 'translate-x-4' : 'translate-x-0'}`} />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                   </div>
                 </div>
 
                 {/* Error Banner */}

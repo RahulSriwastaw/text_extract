@@ -1,15 +1,16 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { 
   FileText, 
   ArrowRight, 
   Sparkles, 
   Zap, 
   Shield, 
-  Clock, 
-  Type, 
-  Image as ImageIcon, 
-  Grid 
+  Layers, 
+  Calculator, 
+  Table as TableIcon,
+  Languages,
+  CheckCircle2
 } from 'lucide-react';
 
 interface LandingPageProps {
@@ -17,14 +18,13 @@ interface LandingPageProps {
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
-
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
       transition: {
         staggerChildren: 0.1,
-        delayChildren: 0.2,
+        delayChildren: 0.15,
       },
     },
   };
@@ -42,178 +42,118 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
 
   const features = [
     {
-      icon: <Sparkles className="w-5 h-5 text-blue-400" />,
-      title: "AI Layout Analysis",
-      desc: "Gemini 2.5 Flash precisely identifies headers, text, images, and tables.",
+      icon: <Calculator className="w-5 h-5 text-amber-400" />,
+      title: "Real Word Math (OMML)",
+      desc: "Converts complex LaTeX fractions, radicals, powers, and equations into native editable Word math objects.",
     },
     {
-      icon: <Zap className="w-5 h-5 text-yellow-400" />,
-      title: "Fast Conversion",
-      desc: "Convert entire exam papers to editable Word documents in seconds.",
+      icon: <TableIcon className="w-5 h-5 text-blue-400" />,
+      title: "Full Table Extraction",
+      desc: "Extracts tables of any size with borders, clean rows, and headers directly into Microsoft Word tables.",
     },
     {
-      icon: <Grid className="w-5 h-5 text-purple-400" />,
-      title: "Format Support",
-      desc: "Supports MCQs, bilingual papers, and complex numbering styles.",
+      icon: <Languages className="w-5 h-5 text-emerald-400" />,
+      title: "Bilingual Translation",
+      desc: "Translates Hindi & English question papers with separate lines for questions and single-line options.",
     },
     {
-      icon: <ImageIcon className="w-5 h-5 text-green-400" />,
-      title: "Image Extraction",
-      desc: "Automatically crops and embeds diagrams directly into your Word file.",
+      icon: <Sparkles className="w-5 h-5 text-purple-400" />,
+      title: "Smart Refine Mode",
+      desc: "Automatically removes unwanted previous year exam tags, shift dates, and watermarks to keep content pure.",
     },
     {
-      icon: <Shield className="w-5 h-5 text-red-400" />,
-      title: "Private & Secure",
-      desc: "Your documents are processed securely and deleted from transient storage.",
+      icon: <Zap className="w-5 h-5 text-orange-400" />,
+      title: "Batch High-Speed OCR",
+      desc: "Parallel processing with intelligent auto key-rotation for high-volume exam and book digitization.",
     },
     {
-      icon: <Clock className="w-5 h-5 text-orange-400" />,
-      title: "History Search",
-      desc: "Access your previous conversions anytime from your cloud history.",
+      icon: <Shield className="w-5 h-5 text-rose-400" />,
+      title: "100% Client Privacy",
+      desc: "Enterprise-grade processing with instant local exports in DOCX and clean Markdown formats.",
     },
   ];
 
   return (
-    <div className="min-h-screen bg-[#0F0F0F] text-[#EFEFEF] overflow-hidden relative selection:bg-[#FF6B2B]/30">
-      {/* Background Glow */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[500px] bg-[#FF6B2B]/10 blur-[120px] pointer-events-none rounded-full" />
-      <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-purple-600/5 blur-[100px] pointer-events-none rounded-full" />
+    <div className="min-h-screen bg-[#0B0D13] text-slate-100 overflow-hidden relative selection:bg-[#FF6B2B]/30">
+      {/* Dynamic Ambient Background Glows */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-[520px] bg-gradient-to-b from-[#FF6B2B]/15 via-purple-600/10 to-transparent blur-[140px] pointer-events-none rounded-full" />
+      <div className="absolute bottom-10 right-10 w-96 h-96 bg-blue-600/10 blur-[130px] pointer-events-none rounded-full" />
+      <div className="absolute top-1/3 left-10 w-80 h-80 bg-emerald-600/10 blur-[120px] pointer-events-none rounded-full" />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32 relative z-10">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-20 lg:pt-32 relative z-10">
         <motion.div
           variants={containerVariants}
           initial="hidden"
           animate="visible"
-          className="text-center"
+          className="text-center max-w-4xl mx-auto"
         >
           {/* Badge */}
           <motion.div 
             variants={itemVariants}
-            className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#1A1A1A] border border-[#252525] text-[#FF6B2B] text-[11px] uppercase tracking-wider font-bold mb-8"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-[#FF884D] text-xs uppercase tracking-wider font-bold mb-8 shadow-inner"
           >
-            <Sparkles className="w-3 h-3" />
-            <span>AI-Powered Exam Paper OCR</span>
+            <Sparkles className="w-3.5 h-3.5 text-[#FF6B2B]" />
+            <span>Universal AI Document & Exam Digitizer</span>
           </motion.div>
 
+          {/* Heading */}
           <motion.h1 
             variants={itemVariants}
-            className="text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-b from-[#EFEFEF] to-[#888888]"
+            className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 font-display text-white leading-tight"
           >
-            Convert PDF Papers <br /> to <span className="text-[#FF6B2B]">Editable Word</span>
+            Convert PDFs & Exams to{' '}
+            <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#FF6B2B] via-[#FFA477] to-amber-300">
+              Editable Word
+            </span>
           </motion.h1>
 
+          {/* Subtitle */}
           <motion.p 
             variants={itemVariants}
-            className="text-[#888888] text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-[1.5]"
+            className="text-base sm:text-lg lg:text-xl text-slate-400 mb-10 max-w-2xl mx-auto leading-relaxed"
           >
-            The world's most advanced AI-powered converter for complex exam papers. 
-            Extract text, images, and tables with pixel-perfect precision.
+            Extract multiple-choice questions, complex math equations, full tables, and bilingual exam papers into perfectly formatted <strong className="text-white">.docx</strong> files in seconds.
           </motion.p>
 
+          {/* Call to Action Button */}
           <motion.div 
             variants={itemVariants}
-            className="flex flex-col sm:flex-row items-center justify-center gap-4"
+            className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16"
           >
             <button
               onClick={onStart}
-              className="group relative flex items-center gap-2 bg-[#FF6B2B] hover:bg-[#E55A1A] text-white px-8 py-4 rounded-xl transition-all text-[13px] font-bold shadow-xl shadow-[#FF6B2B]/20"
-              id="hero-start-btn"
+              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white font-bold text-base shadow-xl shadow-[#FF6B2B]/25 hover:shadow-[#FF6B2B]/40 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 group"
             >
-              Get Started for Free
+              <span>Launch Converter</span>
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
-            <button 
-              className="px-8 py-4 rounded-xl text-[#888888] hover:text-[#EFEFEF] transition-colors border border-[#252525] hover:bg-[#1A1A1A] text-[13px] font-bold"
-              onClick={() => {
-                const featuresSection = document.getElementById('features');
-                featuresSection?.scrollIntoView({ behavior: 'smooth' });
-              }}
-              id="hero-features-btn"
-            >
-              See Features
-            </button>
-          </motion.div>
-
-          {/* Floating UI Element Preview */}
-          <motion.div
-            variants={itemVariants}
-            className="mt-20 relative px-4"
-          >
-            <div className="relative max-w-5xl mx-auto rounded-3xl border border-[#252525] bg-[#111111] shadow-2xl p-2 overflow-hidden">
-               <div className="absolute top-0 left-0 right-0 h-10 bg-[#141414] border-b border-[#252525] flex items-center px-4 gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-red-500/50" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/50" />
-                  <div className="ml-4 h-5 w-48 rounded bg-[#2A2A2A]" />
-               </div>
-               <div className="pt-12 pb-2 px-1">
-                 <img 
-                   src="https://images.unsplash.com/photo-1614064641938-3bbee52942c7?auto=format&fit=crop&q=80&w=2000" 
-                   alt="App Preview" 
-                   className="w-full rounded-2xl opacity-40 mix-blend-luminosity grayscale shadow-inner h-[300px] object-cover"
-                   referrerPolicy="no-referrer"
-                 />
-                 <div className="absolute inset-0 bg-gradient-to-t from-[#111111] via-transparent to-transparent flex items-center justify-center">
-                    <div className="bg-[#1A1A1A]/50 backdrop-blur-md rounded-2xl border border-[#252525] p-8 shadow-2xl">
-                       <Type className="w-12 h-12 text-[#FF6B2B] mx-auto mb-4" />
-                       <p className="text-[#FF6B2B] font-mono text-[13px] font-bold">Initializing Neural Layout Engine...</p>
-                    </div>
-                 </div>
-               </div>
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span>Supports PDF, JPG, PNG & Scanned Papers</span>
             </div>
           </motion.div>
-        </motion.div>
 
-        {/* Features Grid */}
-        <section id="features" className="py-32">
+          {/* Feature Grid */}
           <motion.div 
-            initial={{ opacity: 0, y: 40 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
+            variants={containerVariants}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 text-left"
           >
-            {features.map((feature, idx) => (
+            {features.map((feat, idx) => (
               <motion.div
                 key={idx}
-                whileHover={{ y: -5, borderColor: '#FF6B2B' }}
-                className="p-4 md:p-6 rounded-2xl bg-[#1A1A1A] border border-[#252525] transition-all duration-300"
+                variants={itemVariants}
+                className="p-5 sm:p-6 rounded-2xl glass-panel glass-panel-hover"
               >
-                <div className="w-10 h-10 rounded-xl bg-[#141414] flex items-center justify-center mb-6 border border-[#252525]">
-                  {feature.icon}
+                <div className="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center mb-4">
+                  {feat.icon}
                 </div>
-                <h3 className="text-[16px] font-bold mb-3 text-[#EFEFEF]">{feature.title}</h3>
-                <p className="text-[#888888] leading-[1.5] text-[13px]">
-                  {feature.desc}
-                </p>
+                <h3 className="text-base font-bold text-white mb-2 font-display">{feat.title}</h3>
+                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">{feat.desc}</p>
               </motion.div>
             ))}
           </motion.div>
-        </section>
-
-        {/* Trust Section */}
-        <motion.div 
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          transition={{ duration: 1 }}
-          className="text-center py-20 border-t border-[#252525]"
-        >
-          <p className="text-gray-600 text-sm uppercase tracking-widest mb-8">Built on Next-Gen Technology</p>
-          <div className="flex flex-wrap justify-center items-center gap-12 grayscale opacity-30 invert">
-            <span className="text-2xl font-black italic tracking-tighter">GEMINI AI</span>
-            <span className="text-2xl font-black italic tracking-tighter">FIRESTORE</span>
-            <span className="text-2xl font-black italic tracking-tighter">REACT 19</span>
-            <span className="text-2xl font-black italic tracking-tighter">TAILWIND</span>
-          </div>
         </motion.div>
       </main>
-
-      {/* Footer */}
-      <footer className="max-w-7xl mx-auto px-4 py-12 border-t border-[#252525] text-center">
-        <p className="text-gray-500 text-xs">
-          © 2026 AI PDF to Text Converter. All rights reserved. Powered by Google Gemini.
-        </p>
-      </footer>
     </div>
   );
 };

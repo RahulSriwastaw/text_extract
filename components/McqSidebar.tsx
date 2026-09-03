@@ -324,24 +324,24 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-[#0F0F0F]/20 backdrop-blur-sm z-40"
+            className="fixed inset-0 bg-[#0B0D13]/70 backdrop-blur-md z-50"
           />
           <motion.div
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="fixed inset-y-0 right-0 w-full max-w-md bg-[#141414] z-50 flex flex-col border-l border-[#252525]"
+            transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+            className="fixed inset-y-0 right-0 w-full max-w-md bg-[#11141F] z-50 flex flex-col border-l border-white/[0.08] shadow-2xl"
           >
-            <div className="flex flex-col gap-3 p-3 bg-[#1A1A1A] border-b border-[#252525]">
+            <div className="flex flex-col gap-3 p-4 bg-white/[0.02] border-b border-white/[0.08]">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-[16px] font-bold text-[#EFEFEF]">MCQ Bank</h2>
-                  <p className="text-[11px] text-[#555555]">{mcqs.length} questions extracted</p>
+                  <h2 className="text-sm font-bold text-white font-display">MCQ Question Bank</h2>
+                  <p className="text-[10px] text-slate-400">{mcqs.length} questions digitized</p>
                 </div>
                 <button
                   onClick={onClose}
-                  className="p-2 text-[#555555] hover:text-[#EFEFEF] hover:bg-[#141414] rounded-[20px] transition-colors"
+                  className="p-2 text-slate-400 hover:text-white hover:bg-white/[0.08] rounded-xl transition-all"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -349,20 +349,20 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
               
               {/* Export Actions */}
               {mcqs.length > 0 && (
-                <div className="flex flex-col gap-2 pt-2 border-t border-[#252525]">
+                <div className="flex flex-col gap-2 pt-2 border-t border-white/[0.06]">
                   <div className="flex items-center gap-2">
                     <button 
                       onClick={exportToWord}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-transparent border border-[#2A2A2A] text-[#EFEFEF] hover:bg-[#1A1A1A] rounded-[6px] text-[13px] font-medium transition-colors"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white/[0.04] border border-white/[0.08] text-slate-200 hover:bg-white/[0.08] rounded-xl text-xs font-bold transition-all"
                     >
-                      <FileText className="w-4 h-4" />
+                      <FileText className="w-3.5 h-3.5 text-blue-400" />
                       Export Word
                     </button>
                     <button 
                       onClick={exportToPdf}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-transparent border border-[#2A2A2A] text-[#EFEFEF] hover:bg-[#1A1A1A] rounded-[6px] text-[13px] font-medium transition-colors"
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white/[0.04] border border-white/[0.08] text-slate-200 hover:bg-white/[0.08] rounded-xl text-xs font-bold transition-all"
                     >
-                      <FileDown className="w-4 h-4" />
+                      <FileDown className="w-3.5 h-3.5 text-emerald-400" />
                       Export PDF
                     </button>
                   </div>
@@ -370,12 +370,12 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                   <button 
                     onClick={handleProofread}
                     disabled={isProofreading}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-[#FF6B2B] text-white hover:bg-[#E55A1A] rounded-[6px] text-[13px] font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white hover:shadow-lg hover:shadow-[#FF6B2B]/25 rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isProofreading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        AI Proofreading...
+                        AI Proofreading Questions...
                       </>
                     ) : (
                       <>
@@ -388,7 +388,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                   {manualMcqs && (
                     <button 
                       onClick={() => setManualMcqs(null)}
-                      className="text-[10px] text-[#555555] hover:text-[#EFEFEF] text-center underline"
+                      className="text-[10px] text-slate-500 hover:text-slate-300 text-center underline"
                     >
                       Reset to auto-extracted version
                     </button>
@@ -397,95 +397,57 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
               {!mcqMode ? (
-                <div className="text-center py-12 text-[#555555]">
-                  <BookOpen className="w-12 h-12 mx-auto mb-3 text-[#555555]" />
-                  <p className="font-bold">MCQ Mode is Disabled</p>
-                  <p className="text-[13px] mt-1">Enable MCQ Mode from the top bar to extract questions.</p>
+                <div className="text-center py-16 text-slate-500">
+                  <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-25" />
+                  <p className="font-bold text-slate-300 text-xs">MCQ Mode is General</p>
+                  <p className="text-[11px] mt-1 text-slate-500">Enable MCQ Mode from the top toolbar to automatically index questions.</p>
                 </div>
               ) : mcqs.length === 0 ? (
-                <div className="text-center py-12 text-[#555555]">
-                  <BookOpen className="w-12 h-12 mx-auto mb-3 text-[#555555]" />
-                  <p>No MCQs found yet.</p>
-                  <p className="text-[13px] mt-1">Convert a document containing multiple choice questions.</p>
+                <div className="text-center py-16 text-slate-500">
+                  <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-25" />
+                  <p className="font-bold text-slate-300 text-xs">No MCQs Indexed</p>
+                  <p className="text-[11px] mt-1 text-slate-500">Extract an exam paper containing multiple choice questions to see them here.</p>
                 </div>
               ) : (
                 mcqs.map((mcq, idx) => (
-                  <div key={idx} className="bg-[#1A1A1A] rounded-[8px] border border-[#252525]  p-3 flex flex-col gap-3">
+                  <div key={idx} className="glass-panel rounded-xl p-3.5 flex flex-col gap-2.5 hover:border-white/[0.15] transition-all">
                     {/* Top Row */}
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <input type="checkbox" className="w-4 h-4 rounded border-[#252525] text-[#FF6B2B] focus:ring-[#FF6B2B]" />
-                        <div className="min-w-[24px] h-6 px-1.5 rounded-[20px] bg-[#1A1A1A] text-[#FF6B2B] flex items-center justify-center text-[11px] font-bold border border-[#252525]">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-[#FF6B2B]/15 border border-[#FF6B2B]/30 text-[#FF884D] flex items-center justify-center text-xs font-bold font-mono">
                           {idx + 1}
                         </div>
+                        <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          Page {mcq.pageNumber}
+                        </span>
                       </div>
-                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#111111] border border-[#252525] rounded-[20px]">
-                        <div className="w-2 h-2 rounded-[20px] bg-[#2A2A2A]" />
-                        <span className="text-[10px] font-bold text-[#EFEFEF] uppercase tracking-wider">{mcq.status}</span>
-                      </div>
-                    </div>
-
-                    {/* Tags - Centered */}
-                    <div className="flex flex-col items-center gap-1.5 -mt-2 mb-1">
-                      <span className="px-[9px] py-[3px] bg-[#1A2A3A] text-[#2196F3] rounded-[20px] text-[11px] font-bold uppercase tracking-wider">
-                        MCQ
-                      </span>
-                      <span className="px-[9px] py-[3px] bg-[#1A2A3A] text-[#2196F3] rounded-[20px] text-[11px] font-bold uppercase tracking-wider">
-                        PAGE {mcq.pageNumber}
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase">
+                        {mcq.status}
                       </span>
                     </div>
 
                     {/* Question Text */}
-                    <p className="text-[#EFEFEF] text-[13px] font-medium line-clamp-3 whitespace-pre-wrap">
-                      Question: {showMcqNumbers ? (idx + 1) + '. ' : ''}{mcq.questionText}
+                    <p className="text-slate-100 text-xs font-medium leading-relaxed">
+                      {showMcqNumbers ? (idx + 1) + '. ' : ''}{mcq.questionText}
                     </p>
 
                     {/* Options */}
-                    <div className="mt-1">
-                      <h4 className="text-[10px] font-bold text-[#555555] uppercase tracking-wider mb-2">Options:</h4>
-                      <div className="space-y-2">
-                        {mcq.options.map((opt, oIdx) => (
-                          <div key={oIdx} className="flex items-start gap-2 text-[13px]">
-                            <span className="font-bold text-[#555555] w-4">({opt.label.toLowerCase()}).</span>
-                            <span className="text-[#EFEFEF]">{opt.text}</span>
-                          </div>
-                        ))}
-                      </div>
+                    <div className="space-y-1.5 pt-1">
+                      {mcq.options.map((opt, oIdx) => (
+                        <div key={oIdx} className="flex items-start gap-2 text-xs bg-white/[0.02] p-1.5 rounded-lg border border-white/[0.04]">
+                          <span className="font-bold text-[#FF884D] w-4 font-mono">({opt.label.toLowerCase()})</span>
+                          <span className="text-slate-300">{opt.text}</span>
+                        </div>
+                      ))}
                     </div>
 
                     {mcq.answer && showAnswers && (
-                      <div className="mt-2 py-2 px-3 bg-[#1A1A1A] border border-[#252525] rounded-[6px]">
-                        <p className="text-[12px] font-bold text-[#FF6B2B]">Answer: {mcq.answer}</p>
+                      <div className="py-1.5 px-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                        <p className="text-xs font-bold text-emerald-400">Answer: {mcq.answer}</p>
                       </div>
                     )}
-
-                    <hr className="border-[#252525] my-2" />
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2">
-                      <button className="flex-1 flex items-center justify-center gap-1.5 py-1.5 border border-[#252525] rounded-[8px] text-[13px] font-medium text-[#EFEFEF] hover:bg-[#111111] transition-colors">
-                        <Edit className="w-4 h-4" />
-                        Edit
-                      </button>
-                      <button className="flex-1 flex items-center justify-center gap-1.5 py-1.5 border border-[#252525] text-[#F44336] rounded-[8px] text-[13px] font-medium hover:bg-[#3A1A1A] transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                        Delete
-                      </button>
-                    </div>
-
-                    {/* Bottom Tags */}
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#111111] border border-[#252525] rounded-[8px] text-[11px] text-[#555555]">
-                        <BookOpen className="w-3.5 h-3.5" />
-                        Question Bank
-                      </div>
-                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#111111] border border-[#252525] rounded-[8px] text-[11px] text-[#555555]">
-                        <FileText className="w-3.5 h-3.5" />
-                        1 Test
-                      </div>
-                    </div>
                   </div>
                 ))
               )}

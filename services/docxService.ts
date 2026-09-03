@@ -872,6 +872,71 @@ function createDocxTable(tableLines: string[]): any {
     });
 }
 
+const cleanRefinedText = (text: string): string => {
+  if (!text) return text;
+  
+  let res = text;
+
+  const examKeywords = [
+    'SSC\\s*(?:CGL|CHSL|MTS|CPO|GD|JE)?',
+    'CGL', 'CHSL', 'MTS', 'CPO', 'GD',
+    'RRB\\s*(?:NTPC|ALP|JE|Group\\s*D)?',
+    'NTPC', 'ALP', 'Group\\s*D',
+    'UPSC\\s*(?:CSE|IAS|IPS|NDA|CDS|CAPF)?',
+    'BPSC', 'UPPSC', 'MPPSC', 'HSSC', 'RAS', 'RPSC', 'UKPSC', 'JPSC', 'CGPSC',
+    'IBPS\\s*(?:PO|Clerk)?', 'SBI\\s*(?:PO|Clerk)?',
+    'CTET', 'TET', 'REET', 'HTET', 'UPTET', 'NET', 'JRF', 'CSIR', 'GATE',
+    'Tier\\s*[-–—]?\\s*(?:I|II|III|IV|1|2|3|4)',
+    'Shift\\s*[-–—]?\\s*(?:I|II|III|IV|1|2|3|4)',
+    'CBE', 'CBSE', 'NTA',
+    'प्रथम\\s*पाली', 'द्वितीय\\s*पाली', 'तृतीय\\s*पाली', 'पाली',
+    'परीक्?षा', 'स्मृति\\s*पर\\s*आधारित', 'Memory\\s*Based'
+  ];
+
+  const examPattern = `(?:${examKeywords.join('|')})`;
+  const examRegex = new RegExp(`\\b${examPattern}`, 'i');
+
+  const lines = res.split('\n');
+  const cleanedLines: string[] = [];
+
+  for (let line of lines) {
+    let trimmed = line.trim();
+    if (!trimmed) {
+      cleanedLines.push('');
+      continue;
+    }
+
+    if (examRegex.test(trimmed)) {
+      const isQuestion = /^#?(?:Question|Q)\.?\s*[:\-]?\s*\d+/i.test(trimmed);
+      const isOption = /^(\([a-eA-E0-9]\)|[a-eA-E0-9][\.\)])\s+/i.test(trimmed);
+
+      if (!isQuestion && !isOption) {
+        continue;
+      }
+    }
+
+    if (examRegex.test(trimmed)) {
+      const slashTagMatch = trimmed.match(/\s*\/+\s*[\(\[](.*)$/);
+      if (slashTagMatch && examRegex.test(slashTagMatch[1])) {
+        trimmed = trimmed.substring(0, slashTagMatch.index).trim();
+      } else {
+        const parenTagMatch = trimmed.match(/\s+[\(\[](.*)$/);
+        if (parenTagMatch && examRegex.test(parenTagMatch[1])) {
+          trimmed = trimmed.substring(0, parenTagMatch.index).trim();
+        }
+      }
+    }
+
+    if (/^(?:Page\s*\d+|\d+\s*\|\s*Page|Chapter\s*\d+|www\.[a-z0-9\.\-_]+|t\.me\/[a-z0-9\-_]+|Telegram\s*:|Join\s*Telegram)/i.test(trimmed)) {
+      continue;
+    }
+
+    cleanedLines.push(trimmed);
+  }
+
+  return cleanedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+};
+
 export const generateDocx = async (
     elements: ExtractedElement[],
     optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
@@ -1020,7 +1085,7 @@ export const generateDocx = async (
 
     if (!element.content) continue;
     
-    let content = cleanBilingualDuplicates(element.content || '');
+    let content = cleanRefinedText(cleanBilingualDuplicates(element.content || ''));
     if (!showAnswers) {
         content = content
             .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')

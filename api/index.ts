@@ -554,6 +554,74 @@ const formatMcqText = (text: string): string => {
   return fixedLines.join('\n');
 };
 
+const cleanRefinedText = (text: string): string => {
+  if (!text) return text;
+  
+  let res = text;
+
+  const examKeywords = [
+    'SSC\\s*(?:CGL|CHSL|MTS|CPO|GD|JE)?',
+    'CGL', 'CHSL', 'MTS', 'CPO', 'GD',
+    'RRB\\s*(?:NTPC|ALP|JE|Group\\s*D)?',
+    'NTPC', 'ALP', 'Group\\s*D',
+    'UPSC\\s*(?:CSE|IAS|IPS|NDA|CDS|CAPF)?',
+    'BPSC', 'UPPSC', 'MPPSC', 'HSSC', 'RAS', 'RPSC', 'UKPSC', 'JPSC', 'CGPSC',
+    'IBPS\\s*(?:PO|Clerk)?', 'SBI\\s*(?:PO|Clerk)?',
+    'CTET', 'TET', 'REET', 'HTET', 'UPTET', 'NET', 'JRF', 'CSIR', 'GATE',
+    'Tier\\s*[-–—]?\\s*(?:I|II|III|IV|1|2|3|4)',
+    'Shift\\s*[-–—]?\\s*(?:I|II|III|IV|1|2|3|4)',
+    'CBE', 'CBSE', 'NTA',
+    'प्रथम\\s*पाली', 'द्वितीय\\s*पाली', 'तृतीय\\s*पाली', 'पाली',
+    'परीक्?षा', 'स्मृति\\s*पर\\s*आधारित', 'Memory\\s*Based'
+  ];
+
+  const examPattern = `(?:${examKeywords.join('|')})`;
+  const examRegex = new RegExp(`\\b${examPattern}`, 'i');
+
+  const lines = res.split('\n');
+  const cleanedLines: string[] = [];
+
+  for (let line of lines) {
+    let trimmed = line.trim();
+    if (!trimmed) {
+      cleanedLines.push('');
+      continue;
+    }
+
+    // 1. If entire line is an exam tag, skip it
+    if (examRegex.test(trimmed)) {
+      const isQuestion = /^#?(?:Question|Q)\.?\s*[:\-]?\s*\d+/i.test(trimmed);
+      const isOption = /^(\([a-eA-E0-9]\)|[a-eA-E0-9][\.\)])\s+/i.test(trimmed);
+
+      if (!isQuestion && !isOption) {
+        continue;
+      }
+    }
+
+    // 2. If line is an option, strip trailing exam tag
+    if (examRegex.test(trimmed)) {
+      const slashTagMatch = trimmed.match(/\s*\/+\s*[\(\[](.*)$/);
+      if (slashTagMatch && examRegex.test(slashTagMatch[1])) {
+        trimmed = trimmed.substring(0, slashTagMatch.index).trim();
+      } else {
+        const parenTagMatch = trimmed.match(/\s+[\(\[](.*)$/);
+        if (parenTagMatch && examRegex.test(parenTagMatch[1])) {
+          trimmed = trimmed.substring(0, parenTagMatch.index).trim();
+        }
+      }
+    }
+
+    // 3. Skip header/footer junk
+    if (/^(?:Page\s*\d+|\d+\s*\|\s*Page|Chapter\s*\d+|www\.[a-z0-9\.\-_]+|t\.me\/[a-z0-9\-_]+|Telegram\s*:|Join\s*Telegram)/i.test(trimmed)) {
+      continue;
+    }
+
+    cleanedLines.push(trimmed);
+  }
+
+  return cleanedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+};
+
 const extractLayoutWithRetry = async (
   base64Image: string,
   ocrText: string,
@@ -648,11 +716,13 @@ ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
 - Extract text as it appears. Maintain paragraphs and structure.`;
 
   const refineInstruction = refineMode
-    ? `**REFINE MODE ENABLED (SMART CONTENT FILTERING)**:
-- YOUR GOAL: Extract ONLY the primary subject matter content.
-- **REMOVE JUNK**: Automatically identify and EXCLUDE headers, footers, page numbers, watermark text, boilerplate instructions, exam center codes, dates, or decorative text.
-- **PRESERVE CONTENT**: Do NOT change, summarize, or rewrite the actual content. Extract the main text VERBATIM (EXACTLY as written).
-- Focus on questions, options, and main paragraphs. If a piece of text looks like it doesn't belong to the core material, SKIP IT.`
+    ? `**REFINE MODE ENABLED (STRICT CONTENT CLEANING & FILTERING)**:
+- YOUR GOAL: Extract ONLY the pure question text and pure options.
+- **STRICTLY EXCLUDE ALL EXAM METADATA & TAGS**:
+  - Completely IGNORE and DO NOT extract any previous year exam details, source tags, or shift names (e.g., "(SSC CGL Tier-I (CBE) परीक्षा, 02.12.2022 Shift-II)", "(SSC CGL Tier-II (CBE) परीक्षा, 07.03.2023)", "[RRB NTPC 2021]", "(UPSC 2020)", "(CTET 2022)", shift timings, exam dates, or test series tags).
+  - Do NOT attach exam tags to options or questions.
+- **REMOVE JUNK & BRANDING**: Exclude book chapter names, page headers/footers, page numbers, watermarks, Telegram/website links, publisher names, exam center codes, or decorative text.
+- **PRESERVE PURE CONTENT**: Extract the actual question and options cleanly and accurately.`
     : `**FULLY EXTRACTION MODE (A TO Z)**:
 - Extract EVERY piece of text from the page, including headers, footers, page numbers, and small boilerplate text. Leave nothing out.`;
 
@@ -778,6 +848,9 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         }
         if (isBilingual) {
           contentStr = cleanBilingualDuplicates(contentStr);
+        }
+        if (refineMode) {
+          contentStr = cleanRefinedText(contentStr);
         }
         if (!showAnswers) {
           contentStr = contentStr

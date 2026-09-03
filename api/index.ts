@@ -584,6 +584,14 @@ const extractLayoutWithRetry = async (
       numberingInstruction = 'Replace the question number at the start of a question with the number followed by a dot.';
   }
 
+  const answerInstruction = showAnswers
+    ? `**ANSWER EXTRACTION ENABLED**:
+- Identify the correct answer from the paper or deduce it, and add "Answer: [Correct Option Letter]" (e.g., "Answer: C") on its own new line after the options.`
+    : `**STRICT NO-ANSWER RULE (ANSWERS DISABLED)**:
+- DO NOT extract, deduce, guess, or output any answers!
+- Under NO circumstances should you include "Answer: ...", solutions, or answer keys.
+- For each MCQ, end immediately after the last option (d).`;
+
   const bilingualInstruction = isBilingual
     ? `**MANDATORY BILINGUAL TRANSLATION (HINDI + ENGLISH)**:
 - YOU MUST OUTPUT EVERY QUESTION AND TEXTUAL OPTION IN BOTH HINDI AND ENGLISH.
@@ -604,7 +612,7 @@ const extractLayoutWithRetry = async (
   (d) [Hindi Option] / [English Option]
 - **STRICT RULE FOR NUMBERS & FORMULAS (DO NOT DUPLICATE)**:
   - If an option is a pure number, percentage, unit, or math formula (e.g. "0", "1", "2", "3", "45%", "$$x=2$$"), write it ONLY ONCE without slash (e.g. "(a) 0", "(b) 2", "(c) 1", "(d) 3").
-- **ANSWER FORMAT**: After options, add "Answer: [Label]" (e.g. "Answer: C") on its OWN NEW LINE.`
+${showAnswers ? '- **ANSWER FORMAT**: After options, add "Answer: [Label]" (e.g. "Answer: C") on its OWN NEW LINE.' : '- **NO ANSWERS**: Do not include answers or answer lines.'}`
     : `**CRITICAL RULE: NO TRANSLATION**:
 - Extract the text EXACTLY in the language it is written.
 - If it is in Hindi, output ONLY Hindi.
@@ -634,7 +642,7 @@ const extractLayoutWithRetry = async (
   (b) [Option B]
   (c) [Option C]
   (d) [Option D]
-  Answer: [Correct Option Letter]
+${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
 - NEVER put all options on the same line. Always put each option on a new line.`
     : `**GENERAL DOCUMENT MODE**:
 - Extract text as it appears. Maintain paragraphs and structure.`;
@@ -663,6 +671,7 @@ const extractLayoutWithRetry = async (
 
 ${bilingualInstruction}
 ${mcqInstruction}
+${answerInstruction}
 ${refineInstruction}
 
 **CRITICAL RULE: COMPLETE EXTRACTION**:

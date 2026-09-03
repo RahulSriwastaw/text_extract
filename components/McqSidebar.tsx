@@ -37,6 +37,46 @@ interface McqSidebarProps {
   showAnswers: boolean;
 }
 
+const cleanBilingualDuplicates = (text: string): string => {
+  if (!text) return text;
+  let cleaned = text.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+\.?|#\d+\.?|\d+\.)\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
+    const lNorm = left.trim();
+    const rNorm = right.trim();
+    if (lNorm.toLowerCase() === rNorm.toLowerCase()) {
+      return prefix + lNorm;
+    }
+    return match;
+  });
+  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n/]+?)\s*\/+\s*([A-Za-z\$\\\(\[\{\d][^\n]+)$/gm, (match, hindiPart, engPart) => {
+    const cleanHindi = hindiPart.replace(/\s*\/+$/, '').trim();
+    const cleanEng = engPart.trim();
+    if (/[\u0900-\u097F]/.test(cleanHindi) || /[a-zA-Z]/.test(cleanEng)) {
+      return cleanHindi + '\n' + cleanEng;
+    }
+    return match;
+  });
+  cleaned = cleaned.replace(/^(\s*\([a-eA-E]\)\s+[^\n/]+?)\r?\n\s*([a-zA-Z][^\n]+)$/gm, (match, optHindi, optEng) => {
+    return optHindi.trim() + ' / ' + optEng.trim();
+  });
+  cleaned = cleaned.replace(/^(\s*(?:\([a-zA-Z0-9]+\)|[a-zA-Z0-9]+[\.\)])\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
+    const lNorm = left.trim();
+    const rNorm = right.trim();
+    if (lNorm.toLowerCase() === rNorm.toLowerCase() || lNorm.replace(/\s+/g, '').toLowerCase() === rNorm.replace(/\s+/g, '').toLowerCase()) {
+      return prefix + lNorm;
+    }
+    return match;
+  });
+  cleaned = cleaned.replace(/([^\n/]+?)\s*\/\s*([^\n/]+)/g, (match, left, right) => {
+    const lTrim = left.trim();
+    const rTrim = right.trim();
+    if (lTrim && rTrim && lTrim.toLowerCase() === rTrim.toLowerCase()) {
+      return lTrim;
+    }
+    return match;
+  });
+  return cleaned;
+};
+
 const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode, autoProofread, isBilingual, showMcqNumbers, showAnswers }) => {
   const [isProofreading, setIsProofreading] = useState(false);
   const [manualMcqs, setManualMcqs] = useState<McqItem[] | null>(null);
@@ -82,7 +122,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
               id: `mcq-${page.id}-${i}`,
               pageNumber: page.pageNumber,
               questionNumber: qNum,
-              questionText: qText,
+              questionText: isBilingual ? cleanBilingualDuplicates(qText) : qText,
               options: [],
               status: 'DRAFT'
             };
@@ -99,9 +139,10 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
           // Match options: (A) text, a. text, Ans A. text, X A. text, ✓ A. text, A . text
           const optMatch = cleanLine.match(/^(?:Ans(?:wer)?\s*)?(?:[X✓x]\s*)?[\(\[]?([A-Ea-e])\s*[\.\)\]]\s*(.*)/);
           if (optMatch && currentQuestion) {
+            const optText = isBilingual ? cleanBilingualDuplicates(optMatch[2]) : optMatch[2];
             currentQuestion.options!.push({
               label: optMatch[1].toUpperCase(),
-              text: optMatch[2]
+              text: optText
             });
             continue;
           }
@@ -214,7 +255,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      setTimeout(() => window.URL.revokeObjectURL(url), 10000);
     } catch (e) {
       console.error(e);
       alert("Failed to export Word document.");

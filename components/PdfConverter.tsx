@@ -9,9 +9,6 @@ import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem }
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
 import { generateDocx } from '../services/docxService';
-import { auth, db } from '../services/firebase';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { collection, query, orderBy, limit, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 // Fallback UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -46,8 +43,6 @@ const PdfConverter: React.FC = () => {
     return text.trim().split(/\s+/).filter(Boolean).length;
   };
 
-  const [user] = useAuthState(auth);
-
   useEffect(() => {
     fetch('/api/config')
       .then(r => r.json())
@@ -57,42 +52,18 @@ const PdfConverter: React.FC = () => {
       .catch(err => console.error("Config fetch failed:", err));
   }, []);
 
-  // Load history on mount or when user changes
+  // Load history on mount
   useEffect(() => {
-    if (user) {
-      // Load from Firestore
-      const historyQuery = query(
-        collection(db, `users/${user.uid}/history`),
-        orderBy('timestamp', 'desc'),
-        limit(20)
-      );
-
-      const unsubscribe = onSnapshot(historyQuery, (snapshot) => {
-        const cloudHistory = snapshot.docs.map(doc => ({
-          ...doc.data(),
-          id: doc.id
-        })) as HistoryItem[];
-        setHistory(cloudHistory);
-      }, (error) => {
-        console.error("Firestore history error:", error);
-      });
-
-      return () => unsubscribe();
-    } else {
-      // Load from localStorage for anonymous users
-      const savedHistory = localStorage.getItem('conversion_history');
-      if (savedHistory) {
-        try { setHistory(JSON.parse(savedHistory)); } catch (e) { console.error("Failed to load history", e); }
-      }
+    const savedHistory = localStorage.getItem('conversion_history');
+    if (savedHistory) {
+      try { setHistory(JSON.parse(savedHistory)); } catch (e) { console.error("Failed to load history", e); }
     }
-  }, [user]);
+  }, []);
 
-  // Save history when it changes (only for anonymous users, Firestore handles its own)
+  // Save history to localStorage
   useEffect(() => {
-    if (!user) {
-      try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
-    }
-  }, [history, user]);
+    try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
+  }, [history]);
 
   // Auto-save to history effect
   useEffect(() => {
@@ -109,18 +80,7 @@ const PdfConverter: React.FC = () => {
           elements: completedElements
         };
 
-        if (user) {
-          // Save to Firestore
-          const historyId = generateId();
-          setDoc(doc(db, `users/${user.uid}/history`, historyId), {
-            ...newItem,
-            id: historyId,
-            userId: user.uid
-          }).catch(err => console.error("Failed to save to Firestore:", err));
-        } else {
-          // Save to state (which saves to localStorage via effect)
-          setHistory(prev => [{ ...newItem, id: generateId() } as HistoryItem, ...prev].slice(0, 20));
-        }
+        setHistory(prev => [{ ...newItem, id: generateId() } as HistoryItem, ...prev].slice(0, 20));
       }
 
       if (autoDownload) {
@@ -461,14 +421,43 @@ const PdfConverter: React.FC = () => {
     setPages(prev => prev.map(p => p.id === id ? { ...p, extractedText: newText } : p));
   };
 
+  const formatPrefix = (num: string | number, style: NumberingStyle) => {
+    switch (style) {
+      case NumberingStyle.Q_DOT: return `Q${num}. `;
+      case NumberingStyle.HASH: return `#${num}. `;
+      case NumberingStyle.NUMBER_DOT: return `${num}. `;
+      case NumberingStyle.QUESTION_DOT:
+      default: return `Question: ${num}. `;
+    }
+  };
+
   const getFullText = () => {
+    let qCounter = 1;
     return pages
       .filter(p => p.isSelected && p.status === 'done')
       .map(p => {
         if (p.elements) {
           return p.elements
             .filter(el => includeImages || el.type !== 'image')
-            .map(el => el.type === 'text' || el.type === 'table' ? el.content : `[Image: ${el.content}]`)
+            .map(el => {
+              if (el.type === 'text' || el.type === 'table') {
+                let content = el.content || '';
+                if (showMcqNumbers && content) {
+                  content = content.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)?([\.\)\-:]?\s+)/gim, (_m, prefix, num) => {
+                    if (/Question|Q|Prashn|प्रश्न|#/i.test(prefix) || num) {
+                      return formatPrefix(qCounter++, numberingStyle);
+                    }
+                    return _m;
+                  });
+                } else if (!showMcqNumbers && content) {
+                  content = content.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)([\.\)\-:]?\s+)/gim, (_m, _prefix, num) => {
+                    return formatPrefix(num, numberingStyle);
+                  });
+                }
+                return content;
+              }
+              return `[Image: ${el.content}]`;
+            })
             .join('\n\n');
         }
         return p.extractedText || '';
@@ -489,7 +478,7 @@ const PdfConverter: React.FC = () => {
     }
 
     try {
-      const blob = await generateDocx(allElements, optionArrangement);
+      const blob = await generateDocx(allElements, optionArrangement, showMcqNumbers, numberingStyle);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -497,7 +486,7 @@ const PdfConverter: React.FC = () => {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      setTimeout(() => window.URL.revokeObjectURL(url), 10000);
     } catch (e) {
       console.error(e);
       setErrorMsg("Failed to generate DOCX file.");
@@ -563,7 +552,7 @@ const PdfConverter: React.FC = () => {
           setErrorMsg("No content found in this history item.");
           return;
         }
-        const blob = await generateDocx(elements, optionArrangement);
+        const blob = await generateDocx(elements, optionArrangement, showMcqNumbers);
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -571,7 +560,7 @@ const PdfConverter: React.FC = () => {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
+        setTimeout(() => window.URL.revokeObjectURL(url), 10000);
       } catch (e) {
         console.error(e);
         setErrorMsg("Failed to generate DOCX from history.");
@@ -582,11 +571,7 @@ const PdfConverter: React.FC = () => {
   };
 
   const handleDeleteHistoryItem = (id: string) => {
-    if (user) {
-      deleteDoc(doc(db, `users/${user.uid}/history`, id)).catch(err => console.error("Failed to delete history:", err));
-    } else {
-      setHistory(prev => prev.filter(item => item.id !== id));
-    }
+    setHistory(prev => prev.filter(item => item.id !== id));
   };
 
   const hasCompletedPages = pages.some(p => p.status === 'done' && (p.extractedText || p.elements));
@@ -938,12 +923,12 @@ const PdfConverter: React.FC = () => {
                             <select 
                                 value={numberingStyle}
                                 onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
-                                className="text-[10px] font-bold bg-transparent border-none p-0 focus:ring-0 text-[#EFEFEF] cursor-pointer"
+                                className="text-[10px] font-bold bg-[#141414] border border-[#333333] rounded-[4px] px-1.5 py-1 text-[#EFEFEF] cursor-pointer focus:outline-none focus:border-[#2196F3]"
                             >
-                                <option value={NumberingStyle.Q_DOT}>Q1.</option>
-                                <option value={NumberingStyle.HASH}>#1.</option>
-                                <option value={NumberingStyle.QUESTION_DOT}>Question 1.</option>
-                                <option value={NumberingStyle.NUMBER_DOT}>1.</option>
+                                <option value={NumberingStyle.Q_DOT} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">Q1.</option>
+                                <option value={NumberingStyle.HASH} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">#1.</option>
+                                <option value={NumberingStyle.QUESTION_DOT} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">Question 1.</option>
+                                <option value={NumberingStyle.NUMBER_DOT} className="bg-[#1A1A1A] text-[#EFEFEF] py-1">1.</option>
                             </select>
                         </div>
 

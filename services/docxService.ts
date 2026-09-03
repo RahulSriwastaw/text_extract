@@ -22,7 +22,72 @@ import {
   TabStopType
 } from "docx";
 
-import { ExtractedElement, OptionArrangement } from "../types";
+import { ExtractedElement, OptionArrangement, NumberingStyle } from "../types";
+
+const formatQuestionPrefix = (num: string | number, style: NumberingStyle = NumberingStyle.QUESTION_DOT): string => {
+  switch (style) {
+    case NumberingStyle.Q_DOT:
+      return `Q${num}. `;
+    case NumberingStyle.HASH:
+      return `#${num}. `;
+    case NumberingStyle.NUMBER_DOT:
+      return `${num}. `;
+    case NumberingStyle.QUESTION_DOT:
+    default:
+      return `Question: ${num}. `;
+  }
+};
+
+const cleanBilingualDuplicates = (text: string): string => {
+  if (!text) return text;
+
+  // 1. Question level identical text
+  let cleaned = text.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+\.?|#\d+\.?|\d+\.)\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
+    const lNorm = left.trim();
+    const rNorm = right.trim();
+    if (lNorm.toLowerCase() === rNorm.toLowerCase()) {
+      return prefix + lNorm;
+    }
+    return match;
+  });
+
+  // 2. Format bilingual question on two lines WITHOUT slash (ONLY FOR QUESTIONS)
+  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n/]+?)\s*\/+\s*([A-Za-z\$\\\(\[\{\d][^\n]+)$/gm, (match, hindiPart, engPart) => {
+    const cleanHindi = hindiPart.replace(/\s*\/+$/, '').trim();
+    const cleanEng = engPart.trim();
+    if (/[\u0900-\u097F]/.test(cleanHindi) || /[a-zA-Z]/.test(cleanEng)) {
+      return cleanHindi + '\n' + cleanEng;
+    }
+    return match;
+  });
+
+  // 3. Ensure bilingual options stay on ONE single line with ' / ' (e.g. '(b) सम / Even')
+  cleaned = cleaned.replace(/^(\s*\([a-eA-E]\)\s+[^\n/]+?)\r?\n\s*([a-zA-Z][^\n]+)$/gm, (match, optHindi, optEng) => {
+    return optHindi.trim() + ' / ' + optEng.trim();
+  });
+
+  // 4. Option level clean: '(a) 123 / 123' -> '(a) 123'
+  cleaned = cleaned.replace(/^(\s*(?:\([a-zA-Z0-9]+\)|[a-zA-Z0-9]+[\.\)])\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
+    const lNorm = left.trim();
+    const rNorm = right.trim();
+    if (lNorm.toLowerCase() === rNorm.toLowerCase() || lNorm.replace(/\s+/g, '').toLowerCase() === rNorm.replace(/\s+/g, '').toLowerCase()) {
+      return prefix + lNorm;
+    }
+    return match;
+  });
+
+  // 5. Inline duplicates: '123 / 123' -> '123'
+  cleaned = cleaned.replace(/([^\n/]+?)\s*\/\s*([^\n/]+)/g, (match, left, right) => {
+    const lTrim = left.trim();
+    const rTrim = right.trim();
+    if (lTrim && rTrim && lTrim.toLowerCase() === rTrim.toLowerCase()) {
+      return lTrim;
+    }
+    return match;
+  });
+
+  return cleaned;
+};
 
 // --- LaTeX Parser Helpers ---
 
@@ -395,6 +460,15 @@ function parseLatex(latex: string): any[] {
                      continue;
                  }
 
+                 // 5.1 Handle text blocks inside math mode (e.g. \text{...}, \mathrm{...})
+                 if (['text', 'mathrm', 'mathbf', 'mathit', 'operatorname', 'mbox', 'textbf', 'textit'].includes(cmd)) {
+                     i += 1 + cmd.length;
+                     const [textArg, nextI] = extractArg(processedLatex, i);
+                     i = nextI;
+                     nodes.push(new MathRun(textArg));
+                     continue;
+                 }
+
                  // 5.5 Handle Accents and Decorations
                  const accentMap: Record<string, string> = {
                      'vec': '\u20D7', 'hat': '\u0302', 'bar': '\u0304',
@@ -508,6 +582,135 @@ function parseLatex(latex: string): any[] {
     return nodes;
 }
 
+function cleanMixedMathText(text: string): string {
+    if (!text) return text;
+
+    // 1. Fix $\text{Hindi\nEnglish} math$ or $\text{...}$ spanning lines
+    let cleaned = text.replace(/\$+\s*\\text\{([\s\S]*?)\}\s*([\s\S]*?)\$+/g, (_m, textContent, mathContent) => {
+        const trimmedMath = mathContent.trim();
+        if (trimmedMath) {
+            return `${textContent.trim()} $$${trimmedMath}$$`;
+        }
+        return textContent.trim();
+    });
+
+    // 2. Fix broken $\text{... across lines e.g.
+    cleaned = cleaned.replace(/\$+\s*\\text\{([^\n\}]+)\n\s*([^\}:]+)\s*:\s*\}\s*([^\$]+)\$+/g, (_m, hindi, eng, math) => {
+        return `${hindi.trim()}\n${eng.trim()}: $$${math.trim()}$$`;
+    });
+
+    // 3. Fix standalone \text{...} in normal sentences
+    cleaned = cleaned.replace(/\\text\{([^\}]+)\}/g, '$1');
+
+    return cleaned;
+}
+
+function wrapAllLatexExpressions(text: string): string {
+    if (!text) return text;
+
+    // 1. Repair double backslashes, control characters & raw/corrupted frac
+    let s = text
+        .replace(/\\\\+(frac|sqrt|times|beta|rho|neq|alpha|theta|overline|underline|pm|div|cdot|left|right|sum|int|pi|infty|circ|deg|text|mathbf|mathrm|ge|le|approx|quad|to|sim|partial|Delta|lambda|mu|sigma|omega|phi|sin|cos|tan|log|ln|lim|binom)/g, '\\$1')
+        .replace(/[\x0c\f]rac/g, '\\frac')
+        .replace(/[\x08\b]eta/g, '\\beta')
+        .replace(/(^|[^\\a-zA-Z])rac\{/g, '$1\\frac{')
+        .replace(/(^|[^\\a-zA-Z])sqrt\{/g, '$1\\sqrt{')
+        .replace(/(^|[^\\a-zA-Z])overline\{/g, '$1\\overline{')
+        .replace(/(^|[^\\a-zA-Z])times(\s|\d|\$)/g, '$1\\times$2')
+        .replace(/(^|[^\\a-zA-Z])frac(\d{2})(\d{2})/g, '$1\\frac{$2}{$3}')
+        .replace(/(^|[^\\a-zA-Z])frac(\d)(\d{2})/g, '$1\\frac{$2}{$3}')
+        .replace(/(^|[^\\a-zA-Z])frac(\d)(\d)(?!\d)/g, '$1\\frac{$2}{$3}')
+        .replace(/\${3,}/g, '$$')
+        .replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+
+    const lines = s.split('\n');
+    const resultLines = lines.map(line => {
+        // Split line by existing $$...$$ blocks
+        const parts = line.split(/(\$\$[\s\S]*?\$\$)/g);
+
+        const processedParts = parts.map((part) => {
+            // If part is already a math block, keep it as is
+            if (part.startsWith('$$') && part.endsWith('$$')) {
+                return part;
+            }
+
+            // Check if part contains unwrapped LaTeX commands
+            if (!part.includes('\\')) {
+                return part;
+            }
+
+            // Find and wrap all LaTeX expressions in this text segment
+            let segment = part;
+            let result = '';
+            
+            while (segment.length > 0) {
+                const match = segment.match(/\\(frac|binom|sqrt|overline|underline|times|div|pm|cdot|alpha|beta|theta|sum|int|pi|sin|cos|tan)/);
+                if (!match || match.index === undefined) {
+                    result += segment;
+                    break;
+                }
+
+                const cmd = match[1];
+                const latexIdx = match.index;
+                const requiredBraceGroups = ['frac', 'binom'].includes(cmd) ? 2 : (['sqrt', 'overline', 'underline'].includes(cmd) ? 1 : 0);
+
+                // Move backwards to capture math prefix (e.g. "4 - ")
+                let startIdx = latexIdx;
+                while (startIdx > 0) {
+                    const prevChar = segment[startIdx - 1];
+                    if (/[\d\s\+\-\*\/\=\(\)\.\^\_]/.test(prevChar)) {
+                        const prefixSoFar = segment.substring(0, startIdx);
+                        if (/^\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?\d+[\.\)\-:]?\s*$/i.test(prefixSoFar) ||
+                            /(?:is|are|of|than|value|and|तथा|से|का|मान|है|कौन|बड़ा|छोटा|ज्ञात|सरल|कीजिए)\s*$/i.test(prefixSoFar) ||
+                            /^\s*\([a-eA-E]\)\s*$/.test(prefixSoFar)) {
+                            break;
+                        }
+                        startIdx--;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Move forwards to balance braces
+                let endIdx = latexIdx + 1 + cmd.length;
+                if (requiredBraceGroups > 0) {
+                    let completedGroups = 0;
+                    let braceDepth = 0;
+                    let foundFirstBrace = false;
+
+                    for (let i = latexIdx; i < segment.length; i++) {
+                        const char = segment[i];
+                        if (char === '{') {
+                            braceDepth++;
+                            foundFirstBrace = true;
+                        } else if (char === '}') {
+                            braceDepth--;
+                            if (braceDepth === 0 && foundFirstBrace) {
+                                completedGroups++;
+                                if (completedGroups === requiredBraceGroups) {
+                                    endIdx = i + 1;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                const beforeMath = segment.substring(0, startIdx);
+                const mathExpr = segment.substring(startIdx, endIdx).trim();
+                result += beforeMath + `$$${mathExpr}$$`;
+                segment = segment.substring(endIdx);
+            }
+
+            return result;
+        });
+
+        return processedParts.join('');
+    });
+
+    return resultLines.join('\n');
+}
+
 // --- Content Parsing Logic ---
 
 /**
@@ -519,16 +722,21 @@ function parseLatex(latex: string): any[] {
  * Returns an array of Docx Children (TextRun, Math, etc.)
  */
 function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?: { isBlockquote?: boolean }): any[] {
-    let content = trimmed;
-    if (trimmed.startsWith('>')) {
+    let content = cleanMixedMathText(trimmed);
+    if (content.startsWith('>')) {
         if (meta) meta.isBlockquote = true;
-        content = trimmed.substring(1).trim();
+        content = content.substring(1).trim();
     }
 
-    // Normalize LaTeX delimiters
-    let processed = content.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$ $1 $$$$');
-    processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, '$$$$ $1 $$$$');
-    processed = processed.replace(/(?<!\$)\$(?!\$)([^\$]+?)(?<!\$)\$(?!\$)/g, '$$$$ $1 $$$$');
+    // Normalize LaTeX delimiters into $$...$$ BEFORE running the bare-LaTeX repair/wrap
+    // pass. Doing it after (the old order) let wrapAllLatexExpressions' heuristic
+    // backslash-command scanner mis-split already-delimited math like
+    // "$\displaystyle 4 - \frac{...}$" (it doesn't recognize \displaystyle), leaving the
+    // leading "$\displaystyle" and a stray "$" behind as literal, unrendered text.
+    let processed = content.replace(/\\\[([\s\S]*?)\\\]/g, (_m, p1) => `$$${p1}$$`);
+    processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_m, p1) => `$$${p1}$$`);
+    processed = processed.replace(/(?<!\$)\$(?!\$)([^\$]+?)(?<!\$)\$(?!\$)/g, (_m, p1) => `$$${p1}$$`);
+    processed = wrapAllLatexExpressions(processed);
 
     // Split by Math ($$)
     const parts = processed.split(/(\$\$[\s\S]*?\$\$)/g); 
@@ -571,16 +779,23 @@ function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?:
                     cleanText = subPart.slice(2, -2); // Remove **
                 }
 
-                return new TextRun({ 
-                    text: cleanText, 
-                    font: "Arial", 
-                    size: 22, // 11pt
-                    bold: isBold,
-                    noProof: true 
+                const subLines = cleanText.split('\n');
+                return subLines.map((lineText, lIdx) => {
+                    const runProps: any = {
+                        text: lineText,
+                        font: "Arial",
+                        size: 22,
+                        bold: isBold,
+                        noProof: true
+                    };
+                    if (lIdx > 0) {
+                        runProps.break = 1;
+                    }
+                    return new TextRun(runProps);
                 });
             });
         }
-    }).flat().filter(Boolean);
+    }).flat(Infinity).filter(Boolean);
 }
 
 // --- Table Generation ---
@@ -659,11 +874,14 @@ function createDocxTable(tableLines: string[]): any {
 
 export const generateDocx = async (
     elements: ExtractedElement[],
-    optionArrangement: OptionArrangement = OptionArrangement.VERTICAL
+    optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
+    showSerialNumbers: boolean = true,
+    numberingStyle: NumberingStyle = NumberingStyle.QUESTION_DOT
 ): Promise<Blob> => {
   const docChildren: any[] = [];
   let tableBuffer: string[] = [];
   let optionBuffer: string[] = [];
+  let qSerialCounter = 1;
   
   const flushTable = () => {
     if (tableBuffer.length > 0) {
@@ -803,7 +1021,7 @@ export const generateDocx = async (
     
     // Pre-process lines to merge those that don't start a new block
     // Also protect multi-line math blocks
-    const content = element.content || '';
+    const content = cleanBilingualDuplicates(element.content || '');
     
     // Protection for multi-line math: join sections between $$ and $$
     let blockMathRestored = content;
@@ -833,19 +1051,32 @@ export const generateDocx = async (
         const isInstruction = /^(Note|Instructions?|General\s*Instructions?)\s*[:\-]/i.test(cleanLineText);
         const isSeparator = /^(\(OR\)|OR|अथवा|Athava|[\/]\s*OR|OR\s*[\/]|\s)+$/i.test(cleanLineText.replace(/[^a-zA-Z\u0900-\u097F\/]/g, '').trim());
         const isFullEquation = line.includes('$$');
-        const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s?\d+|Prashn\s?\d+|Question\s?\d+|प्रश्न\s?\d+|\d+\.|[\(\[]\d+[\)\]]|\d+[\)])\s/i.test(cleanLineText);
+        const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s*\d+|Prashn\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText);
         const isSubQuestion = /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
         const isOption = /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanLineText);
+        const isAnswerLine = /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText);
         const isTableRow = (line.startsWith('|') && line.endsWith('|')) || (line.startsWith('|') && line.split('|').length > 2);
         const isBlockquote = line.startsWith('>');
 
-        const isNewBlock = isHeader || isMetadata || isInstruction || isSeparator || isFullEquation || isMainQuestion || isSubQuestion || isOption || isTableRow || isBlockquote;
+        const isNewBlock = isHeader || isMetadata || isInstruction || isSeparator || isFullEquation || isMainQuestion || isSubQuestion || isOption || isAnswerLine || isTableRow || isBlockquote;
 
         if (isNewBlock) {
             if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
             currentLineBuffer = line;
         } else {
-            currentLineBuffer += (currentLineBuffer ? " " : "") + line;
+            const cleanBuf = currentLineBuffer.replace(/\*\*/g, '').trim();
+            const isPrevQuestion = /^#\s/i.test(cleanBuf) || /^(Q\.?\s*\d+|Prashn\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanBuf);
+            const isPrevOption = /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanBuf);
+            
+            if (isPrevOption) {
+                // If previous line was an option, ALWAYS join with ' / ' on the same line!
+                currentLineBuffer += " / " + line;
+            } else if (isPrevQuestion) {
+                // If previous line was a question, join with newline '\n' to place English below Hindi!
+                currentLineBuffer += "\n" + line;
+            } else {
+                currentLineBuffer += (currentLineBuffer ? " " : "") + line;
+            }
         }
     }
     if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
@@ -942,7 +1173,7 @@ export const generateDocx = async (
     const cleanLineText = line.replace(/\*\*/g, '').trim();
 
     // Main Question: "# What is...", "Q.1", "(1) ", "1) ", "1.", "प्रश्न 1", "Question: 1.", "Q1."
-    const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s?\d+|Prashn\s?\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s?\d+|\d+\.|[\(\[]\d+[\)\]]|\d+[\)])\s/i.test(cleanLineText);
+    const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s*\d+|Prashn\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText);
     
     // Answer line: "Answer: A"
     const isAnswerLine = /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText);
@@ -955,7 +1186,7 @@ export const generateDocx = async (
     const isSubQuestion = /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
 
     if (isOption) {
-        optionBuffer.push(line);
+        optionBuffer.push(cleanBilingualDuplicates(line));
         continue;
     } else if (isAnswerLine) {
         flushOptions();
@@ -983,6 +1214,52 @@ export const generateDocx = async (
     }
 
     const meta = { isBlockquote: false };
+
+    if (isMainQuestion) {
+        let processedLine = cleanBilingualDuplicates(line);
+        if (showSerialNumbers) {
+            processedLine = processedLine.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)?([\.\)\-:]?\s+)/i, (_m, prefix, num) => {
+                if (/Question|Q|Prashn|प्रश्न|#/i.test(prefix) || num) {
+                    return formatQuestionPrefix(qSerialCounter++, numberingStyle);
+                }
+                return _m;
+            });
+        } else {
+            processedLine = processedLine.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)([\.\)\-:]?\s+)/i, (_m, _prefix, num) => {
+                return formatQuestionPrefix(num, numberingStyle);
+            });
+        }
+        const subLines = processedLine.split('\n');
+        if (subLines.length > 1) {
+            // First line: Hindi Question (with hanging indent)
+            docChildren.push(new Paragraph({
+                children: parseLineToChildren(subLines[0], false, meta) as any[],
+                alignment: AlignmentType.BOTH,
+                spacing: { before: 80, after: 20, line: 276 },
+                indent: { left: 500, hanging: 500 }
+            }));
+            // Subsequent lines: English translation (with left indent aligned under question text)
+            for (let s = 1; s < subLines.length; s++) {
+                if (!subLines[s].trim()) continue;
+                docChildren.push(new Paragraph({
+                    children: parseLineToChildren(subLines[s], false, meta) as any[],
+                    alignment: AlignmentType.BOTH,
+                    spacing: { before: 0, after: 80, line: 276 },
+                    indent: { left: 500 }
+                }));
+            }
+            continue;
+        } else {
+            docChildren.push(new Paragraph({
+                children: parseLineToChildren(subLines[0], false, meta) as any[],
+                alignment: AlignmentType.BOTH,
+                spacing: { before: 80, after: 80, line: 276 },
+                indent: { left: 500, hanging: 500 }
+            }));
+            continue;
+        }
+    }
+
     const children = parseLineToChildren(line, false, meta);
 
     if (meta.isBlockquote) {

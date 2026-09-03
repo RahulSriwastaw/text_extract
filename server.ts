@@ -1,5 +1,10 @@
 import express from "express";
 import path from "path";
+
+try {
+  process.loadEnvFile();
+} catch (e) {}
+
 import apiApp from "./api/index.js";
 
 async function startServer() {

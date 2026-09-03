@@ -223,7 +223,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, on
                                         )}
                                         {el.type === 'text' || el.type === 'table' ? (
                                             <div className="flex flex-col gap-1.5 pr-8">
-                                                <div className="markdown-body prose prose-slate prose-sm max-w-none text-[#EFEFEF] leading-relaxed">
+                                                <div className="markdown-body prose prose-slate prose-sm max-w-none text-[#EFEFEF] leading-relaxed whitespace-pre-wrap font-sans">
                                                     <ReactMarkdown 
                                                         remarkPlugins={[remarkMath, remarkGfm]} 
                                                         rehypePlugins={[rehypeKatex]}

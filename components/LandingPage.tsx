@@ -1,7 +1,5 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, googleProvider } from '../services/firebase';
-import { signInWithPopup } from 'firebase/auth';
 import { 
   FileText, 
   ArrowRight, 
@@ -19,10 +17,6 @@ interface LandingPageProps {
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
-  const loginAndStart = async () => {
-    // Bypassing login for testing
-    onStart();
-  };
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -121,7 +115,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
             className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
             <button
-              onClick={loginAndStart}
+              onClick={onStart}
               className="group relative flex items-center gap-2 bg-[#FF6B2B] hover:bg-[#E55A1A] text-white px-8 py-4 rounded-xl transition-all text-[13px] font-bold shadow-xl shadow-[#FF6B2B]/20"
               id="hero-start-btn"
             >

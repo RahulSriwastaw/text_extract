@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment Variables & Secrets
+.env
+.env.*
+firebase-applet-config.json
+
+# Generated test files
+*.docx
+*.zip
+test_*
+unzipped_*

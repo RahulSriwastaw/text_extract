@@ -1,6 +1,12 @@
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle } from '../types.js';
+import fs from 'fs';
+import path from 'path';
+
+try {
+  process.loadEnvFile();
+} catch (e) {}
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -30,11 +36,43 @@ const keyHealth = new Map<string, {
 }>();
 const deadKeys = new Set<string>();
 
+const FALLBACK_KEYS: string[] = [];
+
 const getAllKeys = () => {
-  const primaryKey = process.env.GEMINI_API_KEY;
-  const keysString = process.env.GEMINI_API_KEYS || '';
+  try {
+    process.loadEnvFile();
+  } catch(e) {}
+
+  let primaryKey = process.env.GEMINI_API_KEY;
+  let keysString = process.env.GEMINI_API_KEYS || '';
+
+  // Direct read from .env if process.env is empty
+  if (!primaryKey && !keysString) {
+    const candidatePaths = [
+      path.join(process.cwd(), '.env'),
+      path.resolve('.env'),
+      'h:/Rahul Sriwastaw/Tools/Code/text_extract/.env'
+    ];
+    for (const envPath of candidatePaths) {
+      try {
+        if (fs.existsSync(envPath)) {
+          const content = fs.readFileSync(envPath, 'utf8');
+          content.split('\n').forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('GEMINI_API_KEY=')) {
+              primaryKey = trimmed.replace(/^GEMINI_API_KEY=/, '').replace(/^["']|["']$/g, '');
+            }
+            if (trimmed.startsWith('GEMINI_API_KEYS=')) {
+              keysString = trimmed.replace(/^GEMINI_API_KEYS=/, '').replace(/^["']|["']$/g, '');
+            }
+          });
+          if (keysString || primaryKey) break;
+        }
+      } catch (err) {}
+    }
+  }
   
-  let allKeys = keysString
+  let allKeys = (keysString || '')
     .split(',')
     .map(k => k.trim().replace(/['"\s]/g, ''))
     .filter(k => k && k.length > 20);
@@ -45,6 +83,12 @@ const getAllKeys = () => {
       allKeys.unshift(cleanPrimary);
     }
   }
+
+  // If no keys found from env/file, use verified fallback keys
+  if (allKeys.length === 0) {
+    allKeys = [...FALLBACK_KEYS];
+  }
+
   return allKeys.filter(k => !deadKeys.has(k));
 };
 
@@ -281,6 +325,235 @@ async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: n
   throw finalError;
 }
 
+const cleanBilingualDuplicates = (text: string): string => {
+  if (!text) return text;
+
+  // 1. Question level identical text: 'Question: 1. What is X? / What is X?' -> 'Question: 1. What is X?'
+  let cleaned = text.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+\.?|#\d+\.?|\d+\.)\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
+    const lNorm = left.trim();
+    const rNorm = right.trim();
+    if (lNorm.toLowerCase() === rNorm.toLowerCase()) {
+      return prefix + lNorm;
+    }
+    return match;
+  });
+
+  // 2. Format single line bilingual questions into two lines WITHOUT slash (ONLY FOR QUESTIONS)
+  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n/]+?)\s*\/+\s*([A-Za-z\$\\\(\[\{\d][^\n]+)$/gm, (match, hindiPart, engPart) => {
+    const cleanHindi = hindiPart.replace(/\s*\/+$/, '').trim();
+    const cleanEng = engPart.trim();
+    if (/[\u0900-\u097F]/.test(cleanHindi) || /[a-zA-Z]/.test(cleanEng)) {
+      return cleanHindi + '\n' + cleanEng;
+    }
+    return match;
+  });
+
+  // 3. Ensure bilingual options stay on ONE single line with ' / ' (e.g. '(b) सम / Even')
+  cleaned = cleaned.replace(/^(\s*\([a-eA-E]\)\s+[^\n/]+?)\r?\n\s*([a-zA-Z][^\n]+)$/gm, (match, optHindi, optEng) => {
+    return optHindi.trim() + ' / ' + optEng.trim();
+  });
+
+  // 4. Option level duplicates: e.g. '(a) 123 / 123' -> '(a) 123', '(b) 45.5% / 45.5%' -> '(b) 45.5%'
+  cleaned = cleaned.replace(/^(\s*(?:\([a-zA-Z0-9]+\)|[a-zA-Z0-9]+[\.\)])\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
+    const lNorm = left.trim();
+    const rNorm = right.trim();
+    if (lNorm.toLowerCase() === rNorm.toLowerCase()) {
+      return prefix + lNorm;
+    }
+    if (lNorm.replace(/\s+/g, '').toLowerCase() === rNorm.replace(/\s+/g, '').toLowerCase()) {
+      return prefix + lNorm;
+    }
+    return match;
+  });
+
+  // 5. Clean standalone numbers/formulas/symbols/units duplicated with / e.g. '123 / 123', '$$x=2$$ / $$x=2$$'
+  cleaned = cleaned.replace(/([^\n/]+?)\s*\/\s*([^\n/]+)/g, (match, left, right) => {
+    const lTrim = left.trim();
+    const rTrim = right.trim();
+    if (lTrim && rTrim && lTrim.toLowerCase() === rTrim.toLowerCase()) {
+      return lTrim;
+    }
+    return match;
+  });
+
+  return cleaned;
+};
+
+const cleanMixedMathText = (text: string): string => {
+  if (!text) return text;
+
+  // 1. Fix $\text{Hindi\nEnglish} math$ or $\text{...}$ spanning lines
+  let cleaned = text.replace(/\$+\s*\\text\{([\s\S]*?)\}\s*([\s\S]*?)\$+/g, (_m, textContent, mathContent) => {
+    const trimmedMath = mathContent.trim();
+    if (trimmedMath) {
+      return `${textContent.trim()} $$${trimmedMath}$$`;
+    }
+    return textContent.trim();
+  });
+
+  // 2. Fix broken $\text{... across lines e.g.
+  cleaned = cleaned.replace(/\$+\s*\\text\{([^\n\}]+)\n\s*([^\}:]+)\s*:\s*\}\s*([^\$]+)\$+/g, (_m, hindi, eng, math) => {
+    return `${hindi.trim()}\n${eng.trim()}: $$${math.trim()}$$`;
+  });
+
+  // 3. Fix standalone \text{...} in normal sentences
+  cleaned = cleaned.replace(/\\text\{([^\}]+)\}/g, '$1');
+
+  return cleaned;
+};
+
+const wrapLatexExpressions = (text: string): string => {
+  if (!text) return text;
+
+  // 0. Unwrap any mixed \text inside $
+  let s = cleanMixedMathText(text);
+
+  // 1. Repair double backslashes, control characters & keywords
+  s = s
+    .replace(/\\\\+(frac|sqrt|times|beta|rho|neq|alpha|theta|overline|underline|pm|div|cdot|left|right|sum|int|pi|infty|circ|deg|text|mathbf|mathrm|ge|le|approx|quad|to|sim|partial|Delta|lambda|mu|sigma|omega|phi|sin|cos|tan|log|ln|lim|binom)/g, '\\$1')
+    .replace(/[\x0c\f]rac/g, '\\frac')
+    .replace(/[\x08\b]eta/g, '\\beta')
+    .replace(/(^|[^\\a-zA-Z])rac\{/g, '$1\\frac{')
+    .replace(/(^|[^\\a-zA-Z])sqrt\{/g, '$1\\sqrt{')
+    .replace(/(^|[^\\a-zA-Z])overline\{/g, '$1\\overline{')
+    .replace(/(^|[^\\a-zA-Z])times(\s|\d|\$)/g, '$1\\times$2')
+    .replace(/(^|[^\\a-zA-Z])frac(\d{2})(\d{2})/g, '$1\\frac{$2}{$3}')
+    .replace(/(^|[^\\a-zA-Z])frac(\d)(\d{2})/g, '$1\\frac{$2}{$3}')
+    .replace(/(^|[^\\a-zA-Z])frac(\d)(\d)(?!\d)/g, '$1\\frac{$2}{$3}')
+    .replace(/\${3,}/g, '$$');
+
+  const lines = s.split('\n');
+  const resultLines = lines.map(line => {
+    // Split line by existing $$...$$ blocks
+    const parts = line.split(/(\$\$[\s\S]*?\$\$)/g);
+
+    const processedParts = parts.map((part) => {
+      // If part is already a math block, keep it as is
+      if (part.startsWith('$$') && part.endsWith('$$')) {
+        return part;
+      }
+
+      // Check if part contains unwrapped LaTeX commands
+      if (!part.includes('\\')) {
+        return part;
+      }
+
+      // Find and wrap all LaTeX expressions in this text segment
+      let segment = part;
+      let result = '';
+      
+      while (segment.length > 0) {
+        const match = segment.match(/\\(frac|binom|sqrt|overline|underline|times|div|pm|cdot|alpha|beta|theta|sum|int|pi|sin|cos|tan)/);
+        if (!match || match.index === undefined) {
+          result += segment;
+          break;
+        }
+
+        const cmd = match[1];
+        const latexIdx = match.index;
+        const requiredBraceGroups = ['frac', 'binom'].includes(cmd) ? 2 : (['sqrt', 'overline', 'underline'].includes(cmd) ? 1 : 0);
+
+        // Move backwards to capture math prefix (e.g. "4 - ")
+        let startIdx = latexIdx;
+        while (startIdx > 0) {
+          const prevChar = segment[startIdx - 1];
+          if (/[\d\s\+\-\*\/\=\(\)\.\^\_]/.test(prevChar)) {
+            const prefixSoFar = segment.substring(0, startIdx);
+            if (/^\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?\d+[\.\)\-:]?\s*$/i.test(prefixSoFar) ||
+                /(?:is|are|of|than|value|and|तथा|से|का|मान|है|कौन|बड़ा|छोटा|ज्ञात|सरल|कीजिए)\s*$/i.test(prefixSoFar) ||
+                /^\s*\([a-eA-E]\)\s*$/.test(prefixSoFar)) {
+              break;
+            }
+            startIdx--;
+          } else {
+            break;
+          }
+        }
+
+        // Move forwards to balance braces
+        let endIdx = latexIdx + 1 + cmd.length;
+        if (requiredBraceGroups > 0) {
+          let completedGroups = 0;
+          let braceDepth = 0;
+          let foundFirstBrace = false;
+
+          for (let i = latexIdx; i < segment.length; i++) {
+            const char = segment[i];
+            if (char === '{') {
+              braceDepth++;
+              foundFirstBrace = true;
+            } else if (char === '}') {
+              braceDepth--;
+              if (braceDepth === 0 && foundFirstBrace) {
+                completedGroups++;
+                if (completedGroups === requiredBraceGroups) {
+                  endIdx = i + 1;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
+        const beforeMath = segment.substring(0, startIdx);
+        const mathExpr = segment.substring(startIdx, endIdx).trim();
+        result += beforeMath + `$$${mathExpr}$$`;
+        segment = segment.substring(endIdx);
+      }
+
+      return result;
+    });
+
+    return processedParts.join('');
+  });
+
+  return resultLines.join('\n');
+};
+
+const formatMcqText = (text: string): string => {
+  if (!text) return text;
+  
+  // 1. First repair and wrap any un-delimited LaTeX formulas
+  let res = wrapLatexExpressions(text);
+
+  // 2. Separate squashed Answer from options e.g. '(D) $$\frac{31}{40}$$ / Answer: D' -> '(d) $$\frac{31}{40}$$\nAnswer: D'
+  res = res.replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+  res = res.replace(/([^\n])\s+(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+  res = res.replace(/([^\n])\s+(\([a-eA-E]\)\s+)/g, '$1\n$2');
+  res = res.replace(/([^\n])\s+(#?(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?\s+)/gi, '$1\n\n$2');
+
+  // 3. Normalize option labels to lowercase (a), (b), (c), (d)
+  res = res.replace(/^(\s*)\(([A-E])\)(\s+)/gm, (_m, p1, p2, p3) => `${p1}(${p2.toLowerCase()})${p3}`);
+
+  // 4. Fix unclosed / broken $$ across lines:
+  res = res.replace(/(Question\s*[:\-]?\s*\d+[\.\)\-:]?)\s*\$\$\s*\n\s*([^\n\$]+)/g, (_m, qPrefix, mathBody) => {
+    const cleanMath = mathBody.replace(/\$\$$/, '').trim();
+    return `${qPrefix}\n$$${cleanMath}$$`;
+  });
+
+  // 5. Ensure any dangling single $$ on a line gets balanced
+  const lines = res.split('\n');
+  const fixedLines: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    const dollarCount = (line.match(/\$\$/g) || []).length;
+    if (dollarCount % 2 !== 0) {
+      if (i + 1 < lines.length && (lines[i + 1].match(/\$\$/g) || []).length === 0 && /[+\-*\/=^_\\{}]/.test(lines[i + 1])) {
+        const cleanL1 = line.replace(/\$\$/, '').trim();
+        const nextMath = lines[i + 1].trim();
+        fixedLines.push(cleanL1 ? `${cleanL1}\n$$${nextMath}$$` : `$$${nextMath}$$`);
+        i++;
+        continue;
+      } else {
+        line = line + '$$';
+      }
+    }
+    fixedLines.push(line);
+  }
+
+  return fixedLines.join('\n');
+};
+
 const extractLayoutWithRetry = async (
   base64Image: string,
   ocrText: string,
@@ -311,15 +584,26 @@ const extractLayoutWithRetry = async (
   }
 
   const bilingualInstruction = isBilingual
-    ? `**CRITICAL MCQ RULE: BILINGUAL OUTPUT REQUIRED**:
-- You MUST output EVERY question and EVERY option in BOTH Hindi and English.
-- **QUESTION FORMAT**: "Question: [Number]. [Hindi Question] / [English Question]" (e.g., "Question: 1. 7.5 के प्रथम 8 गुणकों का औसत कितना होगा? / What will be the average of the first 8 multiples of 7.5?")
-- **OPTION FORMAT**: Combine Hindi and English into one line: "(a) [Hindi Option] / [English Option]". Use lowercase letters in parentheses for options: (a), (b), (c), (d).
-- **ANSWER FORMAT**: After all options, add a line like "Answer: [Label]" (e.g., "Answer: A") on its OWN NEW LINE.
-- If the source text is only in one language, translate it to the other and combine.
-- Maintain the ordering: Hindi followed by English, separated by a forward slash " / ".
-- **VERTICAL ALIGNMENT**: Ensure each question starts on a new line and each option is clearly separated.
-- **Answer Preservation**: NEVER skip the answer if it is visible on the page.`
+    ? `**MANDATORY BILINGUAL TRANSLATION (HINDI + ENGLISH)**:
+- YOU MUST OUTPUT EVERY QUESTION AND TEXTUAL OPTION IN BOTH HINDI AND ENGLISH.
+- **AUTOMATIC TRANSLATION**:
+  - If the source image contains text in HINDI ONLY, you MUST translate the question text and textual options into ENGLISH!
+  - If the source image contains text in ENGLISH ONLY, you MUST translate the question text and textual options into HINDI!
+  - If both languages are already on the page, combine and preserve both.
+- **QUESTION FORMAT (TWO-LINE FORMAT WITHOUT SLASH)**:
+  Line 1: "Question: [Number]. [Hindi Question Text]" (NO forward slash / at the end)
+  Line 2: "[English Question Text]"
+  Example:
+  Question: 1. सबसे छोटी प्राकृत संख्या कौन-सी है?
+  Which is the smallest natural number?
+- **OPTIONS FORMAT**: Each option on its OWN NEW LINE:
+  (a) [Hindi Option] / [English Option]
+  (b) [Hindi Option] / [English Option]
+  (c) [Hindi Option] / [English Option]
+  (d) [Hindi Option] / [English Option]
+- **STRICT RULE FOR NUMBERS & FORMULAS (DO NOT DUPLICATE)**:
+  - If an option is a pure number, percentage, unit, or math formula (e.g. "0", "1", "2", "3", "45%", "$$x=2$$"), write it ONLY ONCE without slash (e.g. "(a) 0", "(b) 2", "(c) 1", "(d) 3").
+- **ANSWER FORMAT**: After options, add "Answer: [Label]" (e.g. "Answer: C") on its OWN NEW LINE.`
     : `**CRITICAL RULE: NO TRANSLATION**:
 - Extract the text EXACTLY in the language it is written.
 - If it is in Hindi, output ONLY Hindi.
@@ -341,15 +625,16 @@ const extractLayoutWithRetry = async (
    - **STRICTLY IGNORE**: Do not extract any image elements.`;
 
   const mcqInstruction = mcqMode 
-    ? `**MCQ EXTRACTION MODE (STRICT FORMATTING REQUIRED)**:
+    ? `**MCQ EXTRACTION MODE (STRICT LINE-BY-LINE FORMATTING REQUIRED)**:
 - This document is an MCQ paper.
-- Every question MUST start with "Question: [Number]. "
-- Every option MUST start with a bracketed lowercase letter like "(a) ", "(b) ", etc.
-- **ANSWER FORMAT**: Every MCQ MUST end with "Answer: [Label]" (e.g., "Answer: A") on its OWN NEW LINE after all options.
-- **BILINGUAL MATCHING**: If the source document has Hindi and English versions of the same question/option as separate blocks or on different pages, YOU MUST find them and combine them into one single line using the " / " separator. NEVER output the same question twice in different languages.
-- **COMPLETE EXTRACTION**: Always check if a question is continued on the next column or page.
-- **NUMBERING**: Always use the "Question: [Number]. " prefix for questions.
-- **OPTIONS**: Always use "(a) ", "(b) ", etc. for options. Ensure labels are lowercase and bracketed.`
+- Each MCQ must be cleanly formatted on separate lines:
+  Question: 1. [Question Text]
+  (a) [Option A]
+  (b) [Option B]
+  (c) [Option C]
+  (d) [Option D]
+  Answer: [Correct Option Letter]
+- NEVER put all options on the same line. Always put each option on a new line.`
     : `**GENERAL DOCUMENT MODE**:
 - Extract text as it appears. Maintain paragraphs and structure.`;
 
@@ -364,7 +649,7 @@ const extractLayoutWithRetry = async (
 
   return runAIAction(async (client) => {
     const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-flash-lite-latest',
       contents: [
         {
           inlineData: {
@@ -375,6 +660,7 @@ const extractLayoutWithRetry = async (
         {
           text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
 
+${bilingualInstruction}
 ${mcqInstruction}
 ${refineInstruction}
 
@@ -388,19 +674,11 @@ Here is the raw text extracted by OCR:
 "${ocrText}"
 Use this as a reference to improve your accuracy, especially for math formulas and Hindi/English text.
 
-**CRITICAL RULE: LANGUAGE & SCRIPT PRESERVATION**: 
-- **ACCURATELY IDENTIFY LANGUAGES**: This document may contain multiple languages (e.g., Hindi and English) mixed together.
-- **MAINTAIN ORIGINAL SCRIPT**: Extract text exactly in the script it is written. 
-  - If a sentence is in Hindi, use Devanagari script.
-  - If a sentence or word is in English, use Latin script.
-  - For mixed-language sentences (e.g., Hindi text with English technical terms), preserve the mix exactly as it appears.
-${bilingualInstruction}
-
 **EXTRACTION RULES**:
 1. **Text Elements**:
    - Identify distinct blocks of text (paragraphs, questions, options, headers).
    - ${numberingInstruction}
-   - For multiple-choice options, ensure they are extracted as separate text elements or clearly separated within the text.
+   - For multiple-choice options, ensure each option (a), (b), (c), (d) is on a separate line.
    - Preserve mathematical formulas and scientific notations accurately.
    - **STRICT MATH RULE**: You MUST enclose ALL mathematical formulas, variables, and expressions in double dollar signs like \`$$\` ... \`$$\` (e.g., \`$$x^2 + y^2 = r^2$$\`), even for simple inline variables like \`$$x$$\`.
    - Use standard LaTeX format for all math.
@@ -444,11 +722,32 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
       throw new Error("Empty response from Gemini API");
     }
 
-    let parsedElements;
     const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-    parsedElements = JSON.parse(cleanedText);
+    // Escape unescaped LaTeX backslashes so JSON.parse doesn't interpret \f as formfeed, \t as tab, etc.
+    const latexEscaped = cleanedText.replace(/(?<!\\)\\(frac|sqrt|times|beta|rho|neq|alpha|theta|overline|pm|div|cdot|left|right|sum|int|pi|infty|circ|deg|text|mathbf|mathrm|ge|le|approx|quad|to|sim|partial|Delta|lambda|mu|sigma|omega|phi|sin|cos|tan|log|ln|lim|over|hat|vec|dots|ldots|cdots)/g, '\\\\$1');
+
+    let parsedElements: any;
+    try {
+      parsedElements = JSON.parse(latexEscaped);
+    } catch (e) {
+      try {
+        parsedElements = JSON.parse(cleanedText);
+      } catch (e2) {
+        console.error("JSON parse error:", cleanedText);
+        throw new Error("Failed to parse AI response as JSON");
+      }
+    }
+
     if (!Array.isArray(parsedElements)) {
-      throw new Error("Response is not a JSON array");
+      if (typeof parsedElements === 'object' && parsedElements !== null) {
+        if (Array.isArray(parsedElements.elements)) {
+          parsedElements = parsedElements.elements;
+        } else {
+          parsedElements = [parsedElements];
+        }
+      } else {
+        throw new Error("AI response is not an array of elements");
+      }
     }
     
     return parsedElements.map((el: any) => {
@@ -462,11 +761,21 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         };
       }
 
+      let contentStr = Array.isArray(el.content) ? el.content.join('\n') : (el.content ? String(el.content) : '');
+      if (el.type === 'text') {
+        if (mcqMode) {
+          contentStr = formatMcqText(contentStr);
+        }
+        if (isBilingual) {
+          contentStr = cleanBilingualDuplicates(contentStr);
+        }
+      }
+
       return {
         ...el,
         id: Math.random().toString(36).substring(2, 11),
         bbox: bboxObj,
-        content: Array.isArray(el.content) ? el.content.join('\n') : (el.content ? String(el.content) : '')
+        content: contentStr
       };
     });
   });
@@ -476,8 +785,12 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false)
   const bilingualAddon = isBilingual 
     ? `
     IMPORTANT: This document is BILINGUAL (Hindi and English).
-    - Preservation Rule: You MUST preserve BOTH languages for each question and its options.
-    - Format Rule: Combine them into a single line separated by " / " (e.g., "Hindi Question / English Question").
+    - DUAL-LANGUAGE RULE: Output EVERY question in BOTH Hindi and English.
+      - If input text is in Hindi only -> Translate into English and provide both.
+      - If input text is in English only -> Translate into Hindi and provide both.
+    - Question Format Rule: Output the Hindi question on Line 1 (NO slash /) and the English translation on Line 2 (e.g. "Hindi Question\\nEnglish Question").
+    - Option Format Rule: Combine textual options on one line separated by " / " (e.g. "(a) Hindi Option / English Option").
+    - NUMBERS & IDENTICAL OPTIONS RULE: NEVER duplicate pure numbers, mathematical formulas, or identical values (e.g., if option is 123, write "123", NEVER "123 / 123").
     - Consistent Labeling: Ensure options are labeled consistently (a), (b), (c), (d).`
     : ``;
 
@@ -506,7 +819,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false)
 
   return runAIAction(async (client) => {
     const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-flash-lite-latest',
       contents: prompt,
       config: {
         temperature: 0.1,
@@ -521,7 +834,18 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false)
 
     const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleanedText);
-    return parsed.questions || [];
+    const questions = parsed.questions || [];
+    if (isBilingual) {
+      questions.forEach((q: any) => {
+        if (q.questionText) q.questionText = cleanBilingualDuplicates(q.questionText);
+        if (Array.isArray(q.options)) {
+          q.options.forEach((opt: any) => {
+            if (opt.text) opt.text = cleanBilingualDuplicates(opt.text);
+          });
+        }
+      });
+    }
+    return questions;
   });
 };
 

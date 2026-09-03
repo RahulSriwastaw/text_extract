@@ -2,7 +2,6 @@ import React from 'react';
 import { Clock, Trash2, FileText, ChevronRight, Download, Copy } from 'lucide-react';
 import { HistoryItem } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth } from '../services/firebase';
 
 interface HistorySidebarProps {
   history: HistoryItem[];
@@ -144,7 +143,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
 
             <div className="p-3 border-t border-[#252525] bg-[#111111]/50">
               <p className="text-[11px] text-[#555555] text-center">
-                {auth.currentUser ? "History is synced to your account." : "History is saved locally on your device."}
+                History is saved locally on your device.
               </p>
             </div>
           </motion.div>

@@ -251,12 +251,12 @@ const PdfConverter: React.FC = () => {
       setUploadProgress(prev => prev ? {
         ...prev,
         percentage: 100,
-        statusText: `Ready! Loaded ${newPages.length} pages.`
+        statusText: `Ready! Successfully loaded ${newPages.length} pages.`
       } : null);
 
       setTimeout(() => {
         setUploadProgress(null);
-      }, 1000);
+      }, 1800);
 
       setAppState(AppState.IDLE); // Ready to start AI
     } catch (err: any) {
@@ -642,7 +642,14 @@ const PdfConverter: React.FC = () => {
   const selectedPendingCount = pages.filter(p => p.isSelected && p.status !== 'done').length;
 
   return (
-    <div className="min-h-screen bg-[#0F0F0F] font-sans selection:bg-[#FF6B2B]/20 selection:text-[#FF6B2B]">
+    <div className="min-h-screen bg-[#0F0F0F] font-sans selection:bg-[#FF6B2B]/20 selection:text-[#FF6B2B] relative">
+      {/* Floating Top Upload Progress Bar */}
+      <AnimatePresence>
+        {uploadProgress && (
+          <UploadProgressBar progress={uploadProgress} />
+        )}
+      </AnimatePresence>
+
       <div className="max-w-7xl mx-auto px-3 py-3 md:px-3 md:py-12">
         
         <header className="mb-6 flex items-center justify-end">
@@ -723,11 +730,6 @@ const PdfConverter: React.FC = () => {
                     ))}
                 </div>
 
-                <AnimatePresence>
-                  {uploadProgress && (
-                    <UploadProgressBar progress={uploadProgress} />
-                  )}
-                </AnimatePresence>
              </div>
            ) : (
              <motion.div
@@ -735,11 +737,6 @@ const PdfConverter: React.FC = () => {
                animate={{ opacity: 1, y: 0 }}
                className="space-y-6"
              >
-                <AnimatePresence>
-                  {uploadProgress && (
-                    <UploadProgressBar progress={uploadProgress} />
-                  )}
-                </AnimatePresence>
 
                 {/* Error Modal */}
                 <AnimatePresence>

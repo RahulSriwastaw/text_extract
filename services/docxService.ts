@@ -1008,9 +1008,7 @@ export const generateDocx = async (
   };
 
   for (const element of elements) {
-    const isComplexTable = element.type === 'table' && element.content && isTableTooComplex(element.content.split('\n'));
-    
-    if ((element.type === 'image' || isComplexTable) && element.imageB64) {
+    if (element.type === 'image' && element.imageB64) {
       flushTable();
       
       // Convert base64 to Uint8Array for docx
@@ -1072,14 +1070,6 @@ export const generateDocx = async (
         alignment: AlignmentType.CENTER,
         spacing: { before: 240, after: 240 },
       }));
-      
-      if (isComplexTable) {
-          docChildren.push(new Paragraph({
-              children: [new TextRun({ text: "(Table rendered as image due to complexity)", size: 16, italics: true, color: "666666" })],
-              alignment: AlignmentType.CENTER,
-              spacing: { after: 120 }
-          }));
-      }
       continue;
     }
 
@@ -1158,10 +1148,6 @@ export const generateDocx = async (
       // 1. Table Handling
       const isTableRow = (line.startsWith('|') && line.endsWith('|')) || (line.startsWith('|') && line.split('|').length > 2);
       if (isTableRow || element.type === 'table') {
-          // If it's a table element that we already decided was too complex, we skip it here
-          // because it was already handled as an image at the top of the loop.
-          if (element.type === 'table' && isComplexTable) continue;
-
           flushOptions();
           tableBuffer.push(line);
           if (element.type === 'table' && i === lines.length - 1) flushTable();

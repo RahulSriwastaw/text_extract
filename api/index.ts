@@ -702,27 +702,34 @@ ${showAnswers ? '- **ANSWER FORMAT**: After options, add "Answer: [Label]" (e.g.
    - **STRICTLY IGNORE**: Do not extract any image elements.`;
 
   const mcqInstruction = mcqMode 
-    ? `**MCQ EXTRACTION MODE (STRICT LINE-BY-LINE FORMATTING REQUIRED)**:
-- This document is an MCQ paper.
-- Each MCQ must be cleanly formatted on separate lines:
+    ? `**MCQ / QUESTION-SET EXTRACTION MODE**:
+- This document contains Multiple Choice Questions (MCQs), practice questions, or test sets.
+- Format each MCQ clearly:
   Question: 1. [Question Text]
   (a) [Option A]
   (b) [Option B]
   (c) [Option C]
   (d) [Option D]
 ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
-- NEVER put all options on the same line. Always put each option on a new line.`
-    : `**GENERAL DOCUMENT MODE**:
-- Extract text as it appears. Maintain paragraphs and structure.`;
+- If a reading passage, comprehension text, poem, or table appears before questions, extract it completely in full markdown before the questions.`
+    : `**UNIVERSAL DOCUMENT / GENERAL TEXT EXTRACTION MODE**:
+- Extract ANY type of document content with 100% fidelity:
+  1. **Headings & Hierarchy**: Mark document headings with markdown (# Main Heading, ## Sub-Heading, ### Section).
+  2. **Paragraphs & Articles**: Maintain clean paragraphs with natural line flow. Preserve bold (**bold**) and italics (*italic*).
+  3. **Tables & Matrices**: Extract tabular data into Markdown tables (| Col 1 | Col 2 |) with standard separator rows (|---|---|).
+  4. **Lists & Bullet Points**: Preserve bullet points (•, -, *) and numbered lists (1., 2., a., b., i., ii.).
+  5. **Math & Science**: Enclose all mathematical expressions and formulas in LaTeX double dollar signs (\`$$\\frac{a}{b}$$\`, \`$$x^2 + y^2$$\`, \`$$\\sqrt{z}$$\`).
+  6. **Notes & Blockquotes**: Mark notes or callouts with \`> Note: ...\`.
+  7. **Handwritten / Scanned Notes**: Transcribe accurately in natural reading order.`;
 
   const refineInstruction = refineMode
     ? `**REFINE MODE ENABLED (STRICT CONTENT CLEANING & FILTERING)**:
-- YOUR GOAL: Extract ONLY the pure question text and pure options.
+- YOUR GOAL: Extract ONLY the pure primary content.
 - **STRICTLY EXCLUDE ALL EXAM METADATA & TAGS**:
   - Completely IGNORE and DO NOT extract any previous year exam details, source tags, or shift names (e.g., "(SSC CGL Tier-I (CBE) परीक्षा, 02.12.2022 Shift-II)", "(SSC CGL Tier-II (CBE) परीक्षा, 07.03.2023)", "[RRB NTPC 2021]", "(UPSC 2020)", "(CTET 2022)", shift timings, exam dates, or test series tags).
   - Do NOT attach exam tags to options or questions.
 - **REMOVE JUNK & BRANDING**: Exclude book chapter names, page headers/footers, page numbers, watermarks, Telegram/website links, publisher names, exam center codes, or decorative text.
-- **PRESERVE PURE CONTENT**: Extract the actual question and options cleanly and accurately.`
+- **PRESERVE PURE CONTENT**: Extract the actual question, options, paragraphs, and tables cleanly and accurately.`
     : `**FULLY EXTRACTION MODE (A TO Z)**:
 - Extract EVERY piece of text from the page, including headers, footers, page numbers, and small boilerplate text. Leave nothing out.`;
 

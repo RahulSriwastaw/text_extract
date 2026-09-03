@@ -1163,6 +1163,57 @@ export const generateDocx = async (
 
     // --- HEURISTICS FOR EXAM LAYOUT ---
 
+    // 1.5. Markdown Headings (#, ##, ###)
+    if (/^#\s+([^#].*)/.test(line)) {
+        flushOptions();
+        const headingText = line.replace(/^#\s+/, '').trim();
+        docChildren.push(new Paragraph({
+            children: parseLineToChildren(headingText, true),
+            heading: HeadingLevel.HEADING_1,
+            spacing: { before: 280, after: 140 },
+            alignment: AlignmentType.CENTER
+        }));
+        continue;
+    }
+    if (/^##\s+([^#].*)/.test(line)) {
+        flushOptions();
+        const headingText = line.replace(/^##\s+/, '').trim();
+        docChildren.push(new Paragraph({
+            children: parseLineToChildren(headingText, true),
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 240, after: 120 },
+            alignment: AlignmentType.LEFT
+        }));
+        continue;
+    }
+    if (/^###\s+(.*)/.test(line)) {
+        flushOptions();
+        const headingText = line.replace(/^###\s+/, '').trim();
+        docChildren.push(new Paragraph({
+            children: parseLineToChildren(headingText, true),
+            heading: HeadingLevel.HEADING_3,
+            spacing: { before: 200, after: 100 },
+            alignment: AlignmentType.LEFT
+        }));
+        continue;
+    }
+
+    // 1.6. Bulleted Lists (•, -, *)
+    if (/^[•\-\*]\s+(.*)/.test(line)) {
+        flushOptions();
+        const bulletText = line.replace(/^[•\-\*]\s+/, '').trim();
+        docChildren.push(new Paragraph({
+            children: [
+                new TextRun({ text: "•  ", bold: true, font: "Arial", size: 22 }),
+                ...parseLineToChildren(bulletText)
+            ],
+            indent: { left: 720, hanging: 360 },
+            spacing: { before: 40, after: 40, line: 276 },
+            alignment: AlignmentType.LEFT
+        }));
+        continue;
+    }
+
     // 2. Section Headers (e.g. "SECTION A", "PART I")
     // Force Center, Bold, Uppercase
     if (/^(Section|Part|Khand|Unit|Q\.\s*Paper|Paper|Code|Set)\s+[\w\d]+/i.test(line) && line.length < 50) {

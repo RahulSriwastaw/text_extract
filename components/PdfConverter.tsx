@@ -296,7 +296,7 @@ const PdfConverter: React.FC = () => {
             await new Promise(resolve => setTimeout(resolve, index * 600));
 
             try {
-                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
+                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers);
                 
                 // Calculate words and points
                 const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
@@ -376,7 +376,7 @@ const PdfConverter: React.FC = () => {
     setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined, errorMessage: undefined } : p));
 
     try {
-      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
+      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers);
       
       // Calculate words and points
       const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
@@ -442,6 +442,15 @@ const PdfConverter: React.FC = () => {
             .map(el => {
               if (el.type === 'text' || el.type === 'table') {
                 let content = el.content || '';
+                if (!showAnswers) {
+                  content = content
+                    .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+                    .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
+                    .replace(/([^\n])\s+Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+                    .trim();
+                } else {
+                  content = content.replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+                }
                 if (showMcqNumbers && content) {
                   content = content.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)?([\.\)\-:]?\s+)/gim, (_m, prefix, num) => {
                     if (/Question|Q|Prashn|प्रश्न|#/i.test(prefix) || num) {
@@ -460,7 +469,15 @@ const PdfConverter: React.FC = () => {
             })
             .join('\n\n');
         }
-        return p.extractedText || '';
+        let raw = p.extractedText || '';
+        if (!showAnswers) {
+          raw = raw
+            .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+            .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
+            .replace(/([^\n])\s+Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+            .trim();
+        }
+        return raw;
       })
       .join('\n\n---\n\n');
   };
@@ -478,7 +495,7 @@ const PdfConverter: React.FC = () => {
     }
 
     try {
-      const blob = await generateDocx(allElements, optionArrangement, showMcqNumbers, numberingStyle);
+      const blob = await generateDocx(allElements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -552,7 +569,7 @@ const PdfConverter: React.FC = () => {
           setErrorMsg("No content found in this history item.");
           return;
         }
-        const blob = await generateDocx(elements, optionArrangement, showMcqNumbers);
+        const blob = await generateDocx(elements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers);
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -1110,6 +1127,7 @@ const PdfConverter: React.FC = () => {
                     onRetry={retryPage} 
                     onToggleSelection={togglePageSelection}
                     includeImages={includeImages}
+                    showAnswers={showAnswers}
                 />
              </motion.div>
            )}

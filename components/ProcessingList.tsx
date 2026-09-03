@@ -14,12 +14,28 @@ interface ProcessingListProps {
   onRetry: (id: string) => void;
   onToggleSelection: (id: string) => void;
   includeImages: boolean;
+  showAnswers?: boolean;
 }
 
-const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, onRetry, onToggleSelection, includeImages }) => {
+const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, onRetry, onToggleSelection, includeImages, showAnswers = true }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const formatDisplayContent = (content: string) => {
+    if (!content) return content;
+    let res = content;
+    if (!showAnswers) {
+      res = res
+        .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+        .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
+        .replace(/([^\n])\s+Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+        .trim();
+    } else {
+      res = res.replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+    }
+    return res;
+  };
 
   if (pages.length === 0) return null;
 
@@ -214,7 +230,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, on
                                     <div key={el.id || `el-${index}`} className="relative group p-2 -mx-2 rounded-[8px] hover:bg-[#111111]/50 transition-colors">
                                         {el.content && (
                                             <button
-                                                onClick={() => handleCopy(el.id || `el-${index}`, el.content || '')}
+                                                onClick={() => handleCopy(el.id || `el-${index}`, formatDisplayContent(el.content || ''))}
                                                 className="absolute top-2 right-2 p-1.5 bg-[#1A1A1A] border border-[#252525] rounded-[6px] text-[#555555] opacity-0 group-hover:opacity-100 transition-opacity  hover:bg-[#111111] hover:text-[#EFEFEF] z-10"
                                                 title="Copy Content"
                                             >
@@ -228,7 +244,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, on
                                                         remarkPlugins={[remarkMath, remarkGfm]} 
                                                         rehypePlugins={[rehypeKatex]}
                                                     >
-                                                        {el.content || ''}
+                                                        {formatDisplayContent(el.content || '')}
                                                     </ReactMarkdown>
                                                 </div>
                                                 {el.type === 'table' && el.imageB64 && (
@@ -258,7 +274,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({ pages, onUpdateText, on
                                     remarkPlugins={[remarkMath, remarkGfm]} 
                                     rehypePlugins={[rehypeKatex]}
                                 >
-                                    {page.extractedText || ''}
+                                    {formatDisplayContent(page.extractedText || '')}
                                 </ReactMarkdown>
                             </div>
                         ) : (

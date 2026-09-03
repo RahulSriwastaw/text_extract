@@ -876,7 +876,8 @@ export const generateDocx = async (
     elements: ExtractedElement[],
     optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
     showSerialNumbers: boolean = true,
-    numberingStyle: NumberingStyle = NumberingStyle.QUESTION_DOT
+    numberingStyle: NumberingStyle = NumberingStyle.QUESTION_DOT,
+    showAnswers: boolean = true
 ): Promise<Blob> => {
   const docChildren: any[] = [];
   let tableBuffer: string[] = [];
@@ -1019,9 +1020,14 @@ export const generateDocx = async (
 
     if (!element.content) continue;
     
-    // Pre-process lines to merge those that don't start a new block
-    // Also protect multi-line math blocks
-    const content = cleanBilingualDuplicates(element.content || '');
+    let content = cleanBilingualDuplicates(element.content || '');
+    if (!showAnswers) {
+        content = content
+            .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+            .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
+            .replace(/([^\n])\s+Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+            .trim();
+    }
     
     // Protection for multi-line math: join sections between $$ and $$
     let blockMathRestored = content;

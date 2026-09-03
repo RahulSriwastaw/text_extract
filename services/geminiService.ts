@@ -8,6 +8,7 @@ export const extractLayoutFromImage = async (
   isBilingual: boolean = false,
   mcqMode: boolean = true,
   refineMode: boolean = false,
+  showAnswers: boolean = true,
   retryCount: number = 0
 ): Promise<ExtractedElement[]> => {
   // Skipping client-side OCR for speed when processing in parallel.
@@ -26,7 +27,8 @@ export const extractLayoutFromImage = async (
       includeImages,
       isBilingual,
       mcqMode,
-      refineMode
+      refineMode,
+      showAnswers
     }),
   });
 
@@ -48,7 +50,7 @@ export const extractLayoutFromImage = async (
 
         console.warn(`[Client] Quota hit. Waiting ${Math.round(waitTime/1000)}s before retry ${retryCount + 1}/5...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
-        return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, retryCount + 1);
+        return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, retryCount + 1);
     }
     
     // Friendly error message for quota

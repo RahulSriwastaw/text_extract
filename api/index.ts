@@ -561,7 +561,8 @@ const extractLayoutWithRetry = async (
   includeImages: boolean,
   isBilingual: boolean,
   mcqMode: boolean,
-  refineMode: boolean = false
+  refineMode: boolean = false,
+  showAnswers: boolean = true
 ): Promise<any> => {
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
@@ -769,6 +770,13 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         if (isBilingual) {
           contentStr = cleanBilingualDuplicates(contentStr);
         }
+        if (!showAnswers) {
+          contentStr = contentStr
+            .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+            .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
+            .replace(/([^\n])\s+Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+            .trim();
+        }
       }
 
       return {
@@ -851,8 +859,8 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false)
 
 app.post('/api/extract', async (req, res) => {
   try {
-    const { base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode } = req.body;
-    const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode);
+    const { base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers = true } = req.body;
+    const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers);
     res.json({ elements });
   } catch (error: any) {
     console.warn("Extraction failed:", error?.message || error);

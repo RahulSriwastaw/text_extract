@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type } from 'lucide-react';
+import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
@@ -627,27 +627,33 @@ const PdfConverter: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5 }}
-                  className="text-center mb-16 space-y-4"
+                  className="text-center mb-12 space-y-4"
                 >
-                    <h2 className="text-[32px] md:text-[48px] font-bold text-white tracking-tight leading-tight">
-                        Convert <span className="text-[#FF6B2B]">PDF to Text</span> <br className="hidden md:block" /> with Human-Like Accuracy
+                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-[#FF884D] text-xs uppercase tracking-wider font-bold mb-2 shadow-inner">
+                        <Sparkles className="w-3.5 h-3.5 text-[#FF6B2B]" />
+                        <span>AI-Powered Layout & Math OCR</span>
+                    </div>
+
+                    <h2 className="text-3xl sm:text-5xl md:text-6xl font-extrabold text-white tracking-tight leading-tight font-display">
+                        Convert <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#FF6B2B] via-[#FFA477] to-amber-300">PDF to Text</span> <br className="hidden md:block" /> with Human-Like Accuracy
                     </h2>
-                    <p className="text-[#888888] text-[16px] md:text-[18px] max-w-2xl mx-auto leading-relaxed">
-                        The ultimate AI-powered OCR tool designed for researchers, students, and professionals. 
-                        Preserve layouts, tables, and formatting perfectly.
+                    <p className="text-slate-400 text-sm sm:text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
+                        The ultimate AI OCR engine designed for exam papers, formulas, tables, and bilingual documents. 
+                        Preserves original hierarchy and exports directly to <strong className="text-white font-semibold">Microsoft Word (.docx)</strong>.
                     </p>
-                    <div className="flex flex-wrap justify-center gap-4 pt-4">
-                        <div className="flex items-center gap-2 bg-[#1A1A1A] px-4 py-2 rounded-full border border-[#252525]">
-                            <Check className="w-4 h-4 text-green-500" />
-                            <span className="text-[13px] font-medium text-[#EFEFEF]">99.9% Accuracy</span>
+
+                    <div className="flex flex-wrap justify-center gap-3 pt-2">
+                        <div className="flex items-center gap-2 bg-white/[0.03] px-3.5 py-1.5 rounded-full border border-white/[0.06] text-xs font-semibold text-slate-200">
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>99.9% Accuracy</span>
                         </div>
-                        <div className="flex items-center gap-2 bg-[#1A1A1A] px-4 py-2 rounded-full border border-[#252525]">
-                            <Check className="w-4 h-4 text-green-500" />
-                            <span className="text-[13px] font-medium text-[#EFEFEF]">Layout Aware</span>
+                        <div className="flex items-center gap-2 bg-white/[0.03] px-3.5 py-1.5 rounded-full border border-white/[0.06] text-xs font-semibold text-slate-200">
+                            <Check className="w-3.5 h-3.5 text-blue-400" />
+                            <span>Real Word Math (OMML)</span>
                         </div>
-                        <div className="flex items-center gap-2 bg-[#1A1A1A] px-4 py-2 rounded-full border border-[#252525]">
-                            <Check className="w-4 h-4 text-green-500" />
-                            <span className="text-[13px] font-medium text-[#EFEFEF]">Secure Cloud Sync</span>
+                        <div className="flex items-center gap-2 bg-white/[0.03] px-3.5 py-1.5 rounded-full border border-white/[0.06] text-xs font-semibold text-slate-200">
+                            <Check className="w-3.5 h-3.5 text-purple-400" />
+                            <span>Full Table Extraction</span>
                         </div>
                     </div>
                 </motion.div>
@@ -658,18 +664,19 @@ const PdfConverter: React.FC = () => {
                 />
 
                 {/* How it works section */}
-                <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-5">
                     {[
-                        { step: "01", title: "Upload PDF", desc: "Drag and drop your scanned PDFs or images into the secure converter." },
-                        { step: "02", title: "AI Analysis", desc: "Our Gemini-powered AI identifies text, tables, and layouts in real-time." },
-                        { step: "03", title: "Export Word", desc: "Download the refined, layout-preserved DOCX or TXT file instantly." }
+                        { step: "01", title: "Upload Paper or PDF", desc: "Drag & drop your scanned question papers, notes, or books into the secure converter." },
+                        { step: "02", title: "AI Vision Analysis", desc: "Gemini vision model identifies text, equations, tables, and Hindi/English bilingual pairs." },
+                        { step: "03", title: "Instant Word Export", desc: "Download refined, layout-preserved .docx documents with editable math and clean tables." }
                     ].map((item, i) => (
-                        <div key={i} className="bg-[#141414] p-8 rounded-[16px] border border-[#252525] relative overflow-hidden group">
-                            <div className="text-[48px] font-black text-white/5 absolute -right-2 -bottom-2 group-hover:text-[#FF6B2B]/10 transition-colors">
+                        <div key={i} className="glass-panel glass-panel-hover p-6 rounded-2xl relative overflow-hidden group">
+                            <div className="text-4xl font-black text-white/[0.04] absolute -right-2 -bottom-2 group-hover:text-[#FF6B2B]/15 transition-colors font-mono">
                                 {item.step}
                             </div>
-                            <h3 className="text-[18px] font-bold text-white mb-2 relative z-10">{item.title}</h3>
-                            <p className="text-[#888888] text-[14px] leading-relaxed relative z-10">{item.desc}</p>
+                            <div className="text-xs font-bold text-[#FF884D] font-mono mb-2 uppercase tracking-wider">Step {item.step}</div>
+                            <h3 className="text-base font-bold text-white mb-2 relative z-10 font-display">{item.title}</h3>
+                            <p className="text-slate-400 text-xs sm:text-sm leading-relaxed relative z-10">{item.desc}</p>
                         </div>
                     ))}
                 </div>
@@ -680,9 +687,9 @@ const PdfConverter: React.FC = () => {
                     animate={{ opacity: 1 }}
                     className="mt-8 flex flex-col items-center gap-3"
                   >
-                    <div className="w-8 h-8 border-2 border-[#252525] border-t-[#FF6B2B] rounded-[20px] animate-spin" />
-                    <p className="text-[#EFEFEF] font-semibold tracking-wider uppercase text-[10px]">
-                      Analyzing document...
+                    <div className="w-8 h-8 border-2 border-white/[0.1] border-t-[#FF6B2B] rounded-full animate-spin shadow-lg shadow-[#FF6B2B]/20" />
+                    <p className="text-slate-200 font-bold tracking-wider uppercase text-xs">
+                      Analyzing document structure...
                     </p>
                   </motion.div>
                 )}
@@ -1132,41 +1139,51 @@ const PdfConverter: React.FC = () => {
           showAnswers={showAnswers}
         />
 
-        {/* SEO Content Section */}
-        <div className="mt-32 border-t border-[#252525] pt-24 pb-20">
+        {/* SEO & Feature Deep Dive Section */}
+        <div className="mt-28 border-t border-white/[0.08] pt-20 pb-16">
             <div className="max-w-5xl mx-auto px-4 box-border">
                 
                 <motion.div 
-                    initial={{ opacity: 0 }}
-                    whileInView={{ opacity: 1 }}
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    className="text-center mb-20"
+                    className="text-center mb-16"
                 >
-                    <h2 className="text-[32px] md:text-[42px] font-bold text-white mb-6 tracking-tight">
-                        Why Choose Our <span className="text-[#FF6B2B]">AI PDF to Text</span> Converter?
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs font-bold text-[#FF884D] uppercase tracking-wider mb-4">
+                        <Layers className="w-3.5 h-3.5 text-[#FF6B2B]" />
+                        <span>Why Choose Our AI Digitizer?</span>
+                    </div>
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-white mb-4 tracking-tight font-display">
+                        Engineered specifically for <br className="hidden sm:block" />
+                        <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#FF6B2B] via-[#FFA477] to-amber-300">
+                            Exams, Formulas & Structured Books
+                        </span>
                     </h2>
-                    <p className="text-[#888888] text-[16px] max-w-3xl mx-auto leading-relaxed">
-                        We don't just extract text; we understand your documents. Our vision-language models 
-                        bridge the gap between flat images and structured, editable content.
+                    <p className="text-slate-400 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed">
+                        We don't just dump plain OCR text. Our vision model reads document hierarchy, cleans exam junk tags, extracts formulas into Word Math, and arranges bilingual lines automatically.
                     </p>
                 </motion.div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-32">
+                {/* 3 Pillars Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-24">
                     {[
                         { 
                             title: "Human-Quality OCR", 
-                            desc: "Handles pixelated scans, handwritten notes, and low-contrast documents that standard tools fail on.",
-                            icon: <Wand2 className="w-6 h-6 text-[#FF6B2B]" />
+                            desc: "Deciphers blurry scans, handwritten notes, shaded backgrounds, and low-contrast test prints without mangling words.",
+                            icon: <Wand2 className="w-6 h-6 text-[#FF6B2B]" />,
+                            color: "from-orange-500/20 to-transparent"
                         },
                         { 
-                            title: "Smart Layout Detection", 
-                            desc: "Automatically detects multi-column layouts, tables, and nested lists to maintain reading order.",
-                            icon: <Layout className="w-6 h-6 text-[#2196F3]" />
+                            title: "Real Word Math (OMML)", 
+                            desc: "Transforms continued fractions, roots, square powers, and algebraic symbols into native editable Microsoft Word math objects.",
+                            icon: <Layout className="w-6 h-6 text-blue-400" />,
+                            color: "from-blue-500/20 to-transparent"
                         },
                         { 
-                            title: "MCQ & Exam Optimized", 
-                            desc: "Tuned specifically for digitizing question papers with automated answer extraction and pattern recognition.",
-                            icon: <ListChecks className="w-6 h-6 text-[#4CAF50]" />
+                            title: "MCQ & Exam Refiner", 
+                            desc: "Filters out previous year exam tags, shift dates, and watermarks to output clean Questions, Options, and Answers.",
+                            icon: <ListChecks className="w-6 h-6 text-emerald-400" />,
+                            color: "from-emerald-500/20 to-transparent"
                         }
                     ].map((feature, i) => (
                         <motion.div 
@@ -1175,124 +1192,158 @@ const PdfConverter: React.FC = () => {
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
                             transition={{ delay: i * 0.1 }}
-                            className="bg-[#141414] p-8 rounded-[20px] border border-[#252525] hover:border-[#FF6B2B]/30 transition-all flex flex-col items-center text-center"
+                            className="glass-panel glass-panel-hover p-6 sm:p-7 rounded-2xl flex flex-col items-start text-left relative overflow-hidden group"
                         >
-                            <div className="w-12 h-12 bg-[#1A1A1A] rounded-[12px] flex items-center justify-center mb-6 border border-[#252525]">
+                            <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
                                 {feature.icon}
                             </div>
-                            <h3 className="text-[18px] font-bold text-white mb-3">{feature.title}</h3>
-                            <p className="text-[#888888] text-[14px] leading-relaxed">{feature.desc}</p>
+                            <h3 className="text-base sm:text-lg font-bold text-white mb-2 font-display">{feature.title}</h3>
+                            <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">{feature.desc}</p>
                         </motion.div>
                     ))}
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center mb-32">
+                {/* Interactive Preview Mockup Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-28">
                     <motion.div 
                         initial={{ opacity: 0, x: -20 }}
                         whileInView={{ opacity: 1, x: 0 }}
                         viewport={{ once: true }}
                     >
-                        <h2 className="text-[28px] font-bold text-white mb-6">Advanced <span className="text-[#FF6B2B]">PDF to Text</span> Processing</h2>
-                        <div className="space-y-6 text-[#888888] text-[15px] leading-relaxed">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-bold text-blue-400 mb-4">
+                            <span>Universal Vision Intelligence</span>
+                        </div>
+                        <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white mb-4 font-display">
+                            Intelligent <span className="text-[#FF6B2B]">Document Layout</span> Understanding
+                        </h2>
+                        <div className="space-y-4 text-slate-400 text-xs sm:text-sm leading-relaxed">
                             <p>
-                                When you convert a **pdf to text** with our tool, you're using the same technology that powers 
-                                some of the world's most advanced AI researchers. We utilize **Gemini 1.5 Pro** to analyze the visual 
-                                context of every page.
+                                Traditional OCR engines read text line-by-line without understanding structure, causing multi-column text to overlap and formulas to turn into broken characters.
                             </p>
                             <p>
-                                This means our **pdf to text converter** can distinguish between a footer and a main paragraph, 
-                                correctly identify headings even if they aren't marked in the file metadata, and 
-                                accurately recreate tables that would normally come out as a jumbled mess of text.
+                                TextExtract's vision pipeline understands document geometry: distinguishing headers, nested equations, question numbers, options <strong className="text-slate-200">(a)-(d)</strong>, and multi-row tables effortlessly.
                             </p>
-                            <div className="pt-4 flex gap-4">
-                                <div className="bg-[#1A1A1A] border border-[#252525] p-4 rounded-[12px] flex-1 text-center">
-                                    <div className="text-[20px] font-bold text-white">4x</div>
-                                    <div className="text-[11px] uppercase tracking-wider font-bold text-[#555555]">Better Results</div>
+                            <div className="pt-3 grid grid-cols-3 gap-3">
+                                <div className="glass-panel p-3.5 rounded-xl text-center">
+                                    <div className="text-xl font-extrabold text-white font-display">4x</div>
+                                    <div className="text-[10px] uppercase font-bold text-slate-500 mt-0.5">Faster Digitizing</div>
                                 </div>
-                                <div className="bg-[#1A1A1A] border border-[#252525] p-4 rounded-[12px] flex-1 text-center">
-                                    <div className="text-[20px] font-bold text-white">0s</div>
-                                    <div className="text-[11px] uppercase tracking-wider font-bold text-[#555555]">Setup Time</div>
+                                <div className="glass-panel p-3.5 rounded-xl text-center">
+                                    <div className="text-xl font-extrabold text-emerald-400 font-display">100%</div>
+                                    <div className="text-[10px] uppercase font-bold text-slate-500 mt-0.5">Math Accuracy</div>
                                 </div>
-                                <div className="bg-[#1A1A1A] border border-[#252525] p-4 rounded-[12px] flex-1 text-center">
-                                    <div className="text-[20px] font-bold text-white">Free</div>
-                                    <div className="text-[11px] uppercase tracking-wider font-bold text-[#555555]">AI Access</div>
+                                <div className="glass-panel p-3.5 rounded-xl text-center">
+                                    <div className="text-xl font-extrabold text-[#FF884D] font-display">DOCX</div>
+                                    <div className="text-[10px] uppercase font-bold text-slate-500 mt-0.5">Word Native</div>
                                 </div>
                             </div>
                         </div>
                     </motion.div>
+
+                    {/* Realistic Visual Mockup */}
                     <motion.div 
                         initial={{ opacity: 0, x: 20 }}
                         whileInView={{ opacity: 1, x: 0 }}
                         viewport={{ once: true }}
-                        className="bg-[#1A1A1A] p-4 rounded-[20px] border border-[#252525] shadow-2xl relative"
+                        className="glass-panel p-5 rounded-2xl relative shadow-2xl border-white/[0.1] bg-[#0E111A]"
                     >
-                        <div className="absolute inset-0 bg-[#FF6B2B]/5 rounded-[20px] blur-3xl -z-10" />
-                        <div className="aspect-video bg-[#141414] rounded-[12px] border border-[#252525] flex items-center justify-center overflow-hidden">
-                            <div className="p-8 w-full">
-                                <div className="h-2 w-1/2 bg-[#252525] rounded-full mb-4" />
-                                <div className="h-2 w-3/4 bg-[#FF6B2B]/30 rounded-full mb-4" />
-                                <div className="h-2 w-2/3 bg-[#252525] rounded-full mb-8" />
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="h-20 bg-[#1A1A1A] rounded-[8px] border border-[#252525] border-dashed" />
-                                    <div className="h-20 bg-[#1A1A1A] rounded-[8px] border border-[#252525] border-dashed" />
+                        <div className="flex items-center justify-between pb-3 border-b border-white/[0.06] mb-3">
+                            <div className="flex items-center gap-1.5">
+                                <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
+                                <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+                            </div>
+                            <span className="text-[10px] font-mono text-slate-500">Live Digitizer Preview</span>
+                        </div>
+
+                        <div className="space-y-3 font-mono text-xs">
+                            <div className="p-2.5 bg-white/[0.03] rounded-lg border border-white/[0.05]">
+                                <span className="text-[#FF884D] font-bold">Question 1.</span> <span className="text-slate-200">सबसे छोटी अभाज्य संख्या कौन-सी है?</span>
+                                <div className="text-slate-400 text-[11px] mt-0.5">Which is the smallest prime number?</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
+                                    <span className="text-amber-400 font-bold">(a)</span> 0
                                 </div>
+                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
+                                    <span className="text-amber-400 font-bold">(b)</span> 1
+                                </div>
+                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
+                                    <span className="text-amber-400 font-bold">(c)</span> 2
+                                </div>
+                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
+                                    <span className="text-amber-400 font-bold">(d)</span> 3
+                                </div>
+                            </div>
+                            <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-[11px] text-emerald-400 font-bold flex items-center justify-between">
+                                <span>Answer: C</span>
+                                <span className="text-[9px] bg-emerald-500/20 px-1.5 py-0.5 rounded text-emerald-300">Verified</span>
                             </div>
                         </div>
                     </motion.div>
                 </div>
 
-                <section className="mb-32">
-                    <h2 className="text-[28px] font-bold text-white mb-12 text-center">Frequently Asked Questions</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* FAQ Section */}
+                <section className="mb-24">
+                    <div className="text-center mb-12">
+                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-2 font-display">Frequently Asked Questions</h2>
+                        <p className="text-slate-400 text-xs sm:text-sm">Everything you need to know about the conversion engine.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                         {[
                             {
-                                q: "How accurate is the AI PDF to Text converter?",
-                                a: "Our tool achieves near-perfect accuracy even on messy documents. By leveraging Gemini's visual understanding, it resolves ambiguous characters using linguistic context, making it the most reliable pdf to text converter available."
+                                q: "How does the AI handle complex mathematical formulas?",
+                                a: "Formulas, fractions (\\frac{a}{b}), roots, and superscripts are transcribed into standard LaTeX and converted directly into native Microsoft Word Math (OMML) objects upon download."
                             },
                             {
-                                q: "Is it safe to upload sensitive documents?",
-                                a: "Security is our priority. Files are processed over encrypted channels (HTTPS) and are purged after analysis. We do not store your raw file content permanently, ensuring your data remains private."
+                                q: "Can I extract large tables with multiple rows?",
+                                a: "Yes! There are no row limits. Tables of any length (15, 50, 100+ rows) are recreated as 100% native, editable Word tables with custom borders and header shading."
                             },
                             {
-                                q: "Does it support languages other than English?",
-                                a: "Yes, our **pdf to text** engine is natively multilingual. It can process Hindi, Spanish, French, Chinese, and many other languages accurately, even within the same document."
+                                q: "What does the 'Refine' toggle do?",
+                                a: "When Refine is active, the AI automatically strips previous year exam tags (e.g. SSC CGL 2022 Shift-II), book headers, page numbers, and publisher branding to leave only pure questions and options."
                             },
                             {
-                                q: "Can I convert images (JPG/PNG) to text?",
-                                a: "Yes. The same powerful engine handles images exactly like PDFs. Simply drag your image into the converter to extract text instantly."
+                                q: "How does Bilingual translation work?",
+                                a: "In Bilingual mode, if a question is in Hindi, it automatically adds the English translation below it. Options are neatly formatted on a single line as '(a) Hindi / English'."
                             },
                             {
-                                q: "What makes this different from regular OCR?",
-                                a: "Traditional OCR 'guesses' letters. Our **AI PDF to Text** 'understands' the document. It knows when a list starts, when a table spans multiple lines, and how to ignore irrelevant watermarks."
+                                q: "Are my uploaded documents secure and private?",
+                                a: "Yes. Files are transmitted over encrypted HTTPS channels and processed transiently in memory without permanent cloud storage. Your data remains 100% private."
                             },
                             {
-                                q: "Can I export the results to Microsoft Word?",
-                                a: "Absolutely. Once extracted, you can download a professionally formatted DOCX file that maintains the structure and styling of your original document."
+                                q: "What file formats can I upload?",
+                                a: "You can upload PDF documents, scanned images (JPG, JPEG, PNG, WEBP), or paste screenshots directly using Ctrl+V."
                             }
                         ].map((faq, i) => (
                             <motion.div 
                                 key={i}
-                                initial={{ opacity: 0 }}
-                                whileInView={{ opacity: 1 }}
+                                initial={{ opacity: 0, y: 15 }}
+                                whileInView={{ opacity: 1, y: 0 }}
                                 viewport={{ once: true }}
                                 transition={{ delay: i * 0.05 }}
-                                className="bg-[#141414] border border-[#252525] p-6 rounded-[16px] hover:bg-[#1A1A1A] transition-colors"
+                                className="glass-panel p-5 sm:p-6 rounded-2xl hover:border-[#FF6B2B]/40 transition-all"
                             >
-                                <h4 className="text-[15px] font-bold text-[#FF6B2B] mb-3">{faq.q}</h4>
-                                <p className="text-[#888888] text-[13px] leading-relaxed">{faq.a}</p>
+                                <h4 className="text-sm sm:text-base font-bold text-white mb-2 font-display flex items-start gap-2">
+                                    <span className="text-[#FF6B2B]">•</span>
+                                    <span>{faq.q}</span>
+                                </h4>
+                                <p className="text-slate-400 text-xs sm:text-sm leading-relaxed pl-3.5">{faq.a}</p>
                             </motion.div>
                         ))}
                     </div>
                 </section>
 
-                <footer className="pt-20 border-t border-[#252525] text-center space-y-4">
-                    <div className="flex justify-center gap-6 text-[#555555] text-[13px] font-medium">
-                        <a href="#" className="hover:text-[#FF6B2B] transition-colors">Privacy Policy</a>
-                        <a href="#" className="hover:text-[#FF6B2B] transition-colors">Terms of Service</a>
-                        <a href="#" className="hover:text-[#FF6B2B] transition-colors">Contact Us</a>
+                {/* Footer */}
+                <footer className="pt-12 border-t border-white/[0.08] text-center space-y-4">
+                    <div className="flex flex-wrap justify-center gap-6 text-slate-400 text-xs font-semibold">
+                        <a href="#" className="hover:text-[#FF884D] transition-colors">Privacy Policy</a>
+                        <a href="#" className="hover:text-[#FF884D] transition-colors">Terms of Service</a>
+                        <a href="#" className="hover:text-[#FF884D] transition-colors">Contact Support</a>
                     </div>
-                    <p className="text-[#555555] text-[12px] pt-4">
-                        © 2026 AI PDF to Text Converter. Powered by Next-Gen Vision OCR. Accurate. Fast. Secure.
+                    <p className="text-slate-500 text-xs font-medium">
+                        © 2026 TextExtract AI Pro. Powered by Google Gemini Vision OCR & Word OMML Engine.
                     </p>
                 </footer>
             </div>

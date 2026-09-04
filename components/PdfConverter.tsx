@@ -9,7 +9,7 @@ import UploadProgressBar, { UploadProgressData } from './UploadProgressBar';
 import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem } from '../types';
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
-import { generateDocx } from '../services/docxService';
+import { generateDocx, formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 
 // Fallback UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -463,16 +463,6 @@ const PdfConverter: React.FC = () => {
     setPages(prev => prev.map(p => p.id === id ? { ...p, extractedText: newText } : p));
   };
 
-  const formatPrefix = (num: string | number, style: NumberingStyle) => {
-    switch (style) {
-      case NumberingStyle.Q_DOT: return `Q${num}. `;
-      case NumberingStyle.HASH: return `#${num}. `;
-      case NumberingStyle.NUMBER_DOT: return `${num}. `;
-      case NumberingStyle.QUESTION_DOT:
-      default: return `Question: ${num}. `;
-    }
-  };
-
   const getFullText = () => {
     let qCounter = 1;
     return pages
@@ -493,19 +483,30 @@ const PdfConverter: React.FC = () => {
                 } else {
                   content = content.replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
                 }
-                if (showMcqNumbers && content) {
-                  content = content.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)?([\.\)\-:]?\s+)/gim, (_m, prefix, num) => {
-                    if (/Question|Q|Prashn|प्रश्न|#/i.test(prefix) || num) {
-                      return formatPrefix(qCounter++, numberingStyle);
+
+                const lines = content.split('\n');
+                const processed = lines.map(line => {
+                  const cleanLineText = line.replace(/\*\*/g, '').trim();
+                  const isAnswerLine = /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText);
+                  const isOption = !isAnswerLine && /^(\([a-eA-E0-9]\)|[a-eA-E0-9][\.\)]|[A-E][\.\)])\s/.test(cleanLineText);
+                  const isSubQuestion = !isOption && /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
+                  const isMainQuestion = !isOption && !isAnswerLine && !isSubQuestion && (
+                    /^#\s/i.test(cleanLineText) ||
+                    /^(?:Q\.?\s*\d+|Prashn\s*[:\-]?\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*[:\-]?\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText)
+                  );
+
+                  if (isMainQuestion) {
+                    if (showMcqNumbers) {
+                      return renumberQuestionInLine(line, qCounter++, numberingStyle);
+                    } else {
+                      const numMatch = cleanLineText.match(/^(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*[:\-]?\s*|\bप्रश्न\s*[:\-]?\s*|#\s*)?(?:\((\d+)\)|\[(\d+)\]|(\d+))/i);
+                      const num = numMatch ? (numMatch[1] || numMatch[2] || numMatch[3]) : '';
+                      return num ? renumberQuestionInLine(line, num, numberingStyle) : line;
                     }
-                    return _m;
-                  });
-                } else if (!showMcqNumbers && content) {
-                  content = content.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)([\.\)\-:]?\s+)/gim, (_m, _prefix, num) => {
-                    return formatPrefix(num, numberingStyle);
-                  });
-                }
-                return content;
+                  }
+                  return line;
+                });
+                return processed.join('\n');
               }
               return `[Image: ${el.content}]`;
             })
@@ -948,7 +949,7 @@ const PdfConverter: React.FC = () => {
                         </div>
 
                         {/* Bottom Row: Tools & Settings Grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2 pt-2.5 border-t border-white/[0.06]">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-9 gap-2 pt-2.5 border-t border-white/[0.06]">
                             {/* MCQ Mode */}
                             <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-amber-500/30 transition-all">
                                 <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">MCQ Mode</span>
@@ -959,6 +960,20 @@ const PdfConverter: React.FC = () => {
                                         className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${mcqMode ? 'bg-amber-500' : 'bg-white/[0.1]'}`}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Numbers Toggle */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-[#FF6B2B]/30 transition-all">
+                                <span className="text-[10px] font-bold text-[#FF884D] uppercase tracking-wider">Numbers</span>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-400 font-medium">{showMcqNumbers ? 'On' : 'Off'}</span>
+                                    <button
+                                        onClick={() => setShowMcqNumbers(!showMcqNumbers)}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showMcqNumbers ? 'bg-[#FF6B2B]' : 'bg-white/[0.1]'}`}
+                                    >
+                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${showMcqNumbers ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
                                 </div>
                             </div>
@@ -1049,13 +1064,13 @@ const PdfConverter: React.FC = () => {
                             </div>
 
                             {/* Answers Toggle */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-[#FF6B2B]/30 transition-all">
-                                <span className="text-[10px] font-bold text-[#FF884D] uppercase tracking-wider">Answers</span>
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-violet-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider">Answers</span>
                                 <div className="flex items-center justify-between">
                                     <span className="text-[10px] text-slate-400 font-medium">{showAnswers ? 'On' : 'Off'}</span>
                                     <button
                                         onClick={() => setShowAnswers(!showAnswers)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showAnswers ? 'bg-[#FF6B2B]' : 'bg-white/[0.1]'}`}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showAnswers ? 'bg-violet-500' : 'bg-white/[0.1]'}`}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${showAnswers ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
@@ -1151,6 +1166,8 @@ const PdfConverter: React.FC = () => {
                     onToggleSelection={togglePageSelection}
                     includeImages={includeImages}
                     showAnswers={showAnswers}
+                    showMcqNumbers={showMcqNumbers}
+                    numberingStyle={numberingStyle}
                 />
              </motion.div>
            )}

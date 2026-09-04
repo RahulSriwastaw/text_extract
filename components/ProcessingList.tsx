@@ -3,8 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { ScannedPage } from '../types';
+import { ScannedPage, NumberingStyle } from '../types';
 import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon } from 'lucide-react';
+import { formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 
 interface ProcessingListProps {
   pages: ScannedPage[];
@@ -13,7 +14,65 @@ interface ProcessingListProps {
   onToggleSelection: (id: string) => void;
   includeImages: boolean;
   showAnswers?: boolean;
+  showMcqNumbers?: boolean;
+  numberingStyle?: NumberingStyle;
 }
+
+const processTextForDisplay = (
+  rawText: string,
+  startCounter: number,
+  showMcqNumbers: boolean,
+  numberingStyle: NumberingStyle,
+  showAnswers: boolean
+): { text: string; nextCounter: number } => {
+  if (!rawText) return { text: '', nextCounter: startCounter };
+  
+  let res = rawText;
+  if (!showAnswers) {
+    res = res
+      .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+      .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
+      .replace(/([^\n])\s+Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
+      .trim();
+  } else {
+    res = res.replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+  }
+
+  let currentCounter = startCounter;
+  const lines = res.split('\n');
+  const processedLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const cleanLineText = line.replace(/\*\*/g, '').trim();
+
+    const isAnswerLine = /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText);
+    const isOption = !isAnswerLine && /^(\([a-eA-E0-9]\)|[a-eA-E0-9][\.\)]|[A-E][\.\)])\s/.test(cleanLineText);
+    const isSubQuestion = !isOption && /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
+    const isMainQuestion = !isOption && !isAnswerLine && !isSubQuestion && (
+      /^#\s/i.test(cleanLineText) ||
+      /^(?:Q\.?\s*\d+|Prashn\s*[:\-]?\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*[:\-]?\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText)
+    );
+
+    if (isMainQuestion) {
+      if (showMcqNumbers) {
+        processedLines.push(renumberQuestionInLine(line, currentCounter++, numberingStyle));
+      } else {
+        const numMatch = cleanLineText.match(/^(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*[:\-]?\s*|\bप्रश्न\s*[:\-]?\s*|#\s*)?(?:\((\d+)\)|\[(\d+)\]|(\d+))/i);
+        const num = numMatch ? (numMatch[1] || numMatch[2] || numMatch[3]) : '';
+        if (num) {
+          processedLines.push(renumberQuestionInLine(line, num, numberingStyle));
+        } else {
+          processedLines.push(line);
+        }
+      }
+    } else {
+      processedLines.push(line);
+    }
+  }
+
+  return { text: processedLines.join('\n'), nextCounter: currentCounter };
+};
 
 const ProcessingList: React.FC<ProcessingListProps> = ({ 
   pages, 
@@ -21,26 +80,32 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
   onRetry, 
   onToggleSelection, 
   includeImages, 
-  showAnswers = true 
+  showAnswers = true,
+  showMcqNumbers = true,
+  numberingStyle = NumberingStyle.QUESTION_DOT
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const formatDisplayContent = (content: string) => {
-    if (!content) return content;
-    let res = content;
-    if (!showAnswers) {
-      res = res
-        .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
-        .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
-        .replace(/([^\n])\s+Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
-        .trim();
-    } else {
-      res = res.replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+  const processedPagesMap = React.useMemo(() => {
+    let currentCounter = 1;
+    const map = new Map<string, string>();
+    for (const page of pages) {
+      if (page.status === 'done' && page.extractedText) {
+        const { text, nextCounter } = processTextForDisplay(
+          page.extractedText,
+          currentCounter,
+          showMcqNumbers,
+          numberingStyle,
+          showAnswers
+        );
+        map.set(page.id, text);
+        currentCounter = nextCounter;
+      }
     }
-    return res;
-  };
+    return map;
+  }, [pages, showMcqNumbers, numberingStyle, showAnswers]);
 
   if (pages.length === 0) return null;
 
@@ -189,7 +254,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                     <Edit2 className="w-3.5 h-3.5 text-slate-400" /> Edit
                                 </button>
                                 <button 
-                                    onClick={() => handleCopy(page.id, formatDisplayContent(page.extractedText || ''))}
+                                    onClick={() => handleCopy(page.id, processedPagesMap.get(page.id) || page.extractedText || '')}
                                     className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
                                     title="Copy Text"
                                 >
@@ -197,7 +262,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                     {copiedId === page.id ? "Copied" : "Copy"}
                                 </button>
                                 <button 
-                                    onClick={() => handleCopy(page.id, `\`\`\`markdown\n${formatDisplayContent(page.extractedText || '')}\n\`\`\``)}
+                                    onClick={() => handleCopy(page.id, `\`\`\`markdown\n${processedPagesMap.get(page.id) || page.extractedText || ''}\n\`\`\``)}
                                     className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
                                     title="Copy Markdown Code"
                                 >
@@ -245,7 +310,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                 remarkPlugins={[remarkGfm, remarkMath]}
                                 rehypePlugins={[rehypeKatex]}
                               >
-                                {formatDisplayContent(page.extractedText)}
+                                {processedPagesMap.get(page.id) || page.extractedText}
                               </ReactMarkdown>
                           </div>
                       ) : page.status === 'processing' ? (

@@ -24,7 +24,7 @@ import {
 
 import { ExtractedElement, OptionArrangement, NumberingStyle } from "../types";
 
-const formatQuestionPrefix = (num: string | number, style: NumberingStyle = NumberingStyle.QUESTION_DOT): string => {
+export const formatQuestionPrefix = (num: string | number, style: NumberingStyle = NumberingStyle.QUESTION_DOT): string => {
   switch (style) {
     case NumberingStyle.Q_DOT:
       return `Q${num}. `;
@@ -36,6 +36,21 @@ const formatQuestionPrefix = (num: string | number, style: NumberingStyle = Numb
     default:
       return `Question: ${num}. `;
   }
+};
+
+export const renumberQuestionInLine = (
+  line: string, 
+  questionNum: number | string, 
+  style: NumberingStyle = NumberingStyle.QUESTION_DOT
+): string => {
+  if (!line) return line;
+  // Match any question start prefix (with optional **, Question, Q, Prashn, प्रश्न, #, numbers, parentheses, colons)
+  const qPrefixRegex = /^(\s*(?:\*\*)?(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*[:\-]?\s*|\bप्रश्न\s*[:\-]?\s*|#\s*)?(?:\((\d+)\)|\[(\d+)\]|(\d+))?(?:[\.\)\-:]?\s*(?:\*\*)?\s*|[\.\)\-:]\s*))/i;
+  
+  if (qPrefixRegex.test(line)) {
+    return line.replace(qPrefixRegex, () => formatQuestionPrefix(questionNum, style));
+  }
+  return `${formatQuestionPrefix(questionNum, style)}${line.trim()}`;
 };
 
 const cleanBilingualDuplicates = (text: string): string => {
@@ -1277,21 +1292,23 @@ export const generateDocx = async (
     }
 
     // 7. Questions & Options (Indentation Logic)
-    
     const cleanLineText = line.replace(/\*\*/g, '').trim();
 
-    // Main Question: "# What is...", "Q.1", "(1) ", "1) ", "1.", "प्रश्न 1", "Question: 1.", "Q1."
-    const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s*\d+|Prashn\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText);
-    
     // Answer line: "Answer: A"
     const isAnswerLine = /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText);
 
     // Option: "(a)", "a.", "a)", "(A)", "A.", "A)", "(E)", "E.", "E)", "(1)", "1.", "1)" if it looks like an option
     // We check for single letters or numbers followed by punctuation or inside parentheses
-    const isOption = !isAnswerLine && /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanLineText);
+    const isOption = !isAnswerLine && /^(\([a-eA-E0-9]\)|[a-eA-E0-9][\.\)]|[A-E][\.\)])\s/.test(cleanLineText);
     
     // Sub Question: "(i)", "i.", "(a)" if it looks like a list item (Roman numerals are prioritized)
-    const isSubQuestion = /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
+    const isSubQuestion = !isOption && /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
+
+    // Main Question: "# What is...", "Q.1", "(1) ", "1) ", "1.", "प्रश्न 1", "Question: 1.", "Q1."
+    const isMainQuestion = !isOption && !isAnswerLine && !isSubQuestion && (
+      /^#\s/i.test(cleanLineText) ||
+      /^(?:Q\.?\s*\d+|Prashn\s*[:\-]?\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*[:\-]?\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText)
+    );
 
     if (isOption) {
         optionBuffer.push(cleanBilingualDuplicates(line));
@@ -1326,16 +1343,13 @@ export const generateDocx = async (
     if (isMainQuestion) {
         let processedLine = cleanBilingualDuplicates(line);
         if (showSerialNumbers) {
-            processedLine = processedLine.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)?([\.\)\-:]?\s+)/i, (_m, prefix, num) => {
-                if (/Question|Q|Prashn|प्रश्न|#/i.test(prefix) || num) {
-                    return formatQuestionPrefix(qSerialCounter++, numberingStyle);
-                }
-                return _m;
-            });
+            processedLine = renumberQuestionInLine(processedLine, qSerialCounter++, numberingStyle);
         } else {
-            processedLine = processedLine.replace(/^(\s*(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*|\bप्रश्न\s*)?)(\d+)([\.\)\-:]?\s+)/i, (_m, _prefix, num) => {
-                return formatQuestionPrefix(num, numberingStyle);
-            });
+            const numMatch = cleanLineText.match(/^(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*[:\-]?\s*|\bप्रश्न\s*[:\-]?\s*|#\s*)?(?:\((\d+)\)|\[(\d+)\]|(\d+))/i);
+            const num = numMatch ? (numMatch[1] || numMatch[2] || numMatch[3]) : '';
+            if (num) {
+                processedLine = renumberQuestionInLine(processedLine, num, numberingStyle);
+            }
         }
         const subLines = processedLine.split('\n');
         if (subLines.length > 1) {

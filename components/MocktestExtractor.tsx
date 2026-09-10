@@ -2,8 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, Loader2, Sparkles, Download, Copy, Check, Plus, 
-  BookOpen, CheckSquare, Square, Zap, Settings, Shield, Globe, Cpu, RefreshCw, Key
+  BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
+  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import remarkGfm from 'remark-gfm';
+import rehypeKatex from 'rehype-katex';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import { 
   MockTestMcqItem, 
@@ -42,7 +47,31 @@ interface PageQueueItem {
   errorMessage?: string;
   mcqCount: number;
   isSelected: boolean;
+  items?: MockTestMcqItem[];
 }
+
+/**
+ * LaTeX and Math-safe content renderer using KaTeX
+ */
+const LatexRenderer: React.FC<{ content: string; className?: string }> = ({ content, className }) => {
+  if (!content) return null;
+  // Clean outer paragraph tags for markdown while preserving newlines
+  const clean = content
+    .replace(/^<p>/i, '')
+    .replace(/<\/p>$/i, '')
+    .replace(/<br\s*\/?>/gi, '\n');
+
+  return (
+    <div className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath, remarkGfm]}
+        rehypePlugins={[rehypeKatex]}
+      >
+        {clean}
+      </ReactMarkdown>
+    </div>
+  );
+};
 
 export const MocktestExtractor: React.FC = () => {
   // Page queue state
@@ -56,21 +85,25 @@ export const MocktestExtractor: React.FC = () => {
 
   // Engine Mode & Concurrency Batch Size
   const [aiEngine, setAiEngine] = useState<'bridge' | 'api'>('bridge');
-  const [batchSize, setBatchSize] = useState<number>(3); // Multi-page parallel batch size (e.g. 3 pages at once)
+  const [batchSize, setBatchSize] = useState<number>(3); // Multi-page parallel batch size
   const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
 
   // Configuration state
   const [setName, setSetName] = useState<string>('RRB NTPC 2024 CBT-1');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('medium');
   const [answerFormat, setAnswerFormat] = useState<'letters' | 'numbers'>('letters');
-  const [autoDeepSolveAll, setAutoDeepSolveAll] = useState<boolean>(true); // One-shot all fields & deep solutions auto-fill
+  const [autoDeepSolveAll, setAutoDeepSolveAll] = useState<boolean>(true);
 
   // Extracted MCQs state
   const [extractedMcqs, setExtractedMcqs] = useState<MockTestMcqItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'cards' | 'grid' | 'csv'>('cards');
+  const [activeTab, setActiveTab] = useState<'split' | 'grid' | 'csv'>('split');
   const [solvingId, setSolvingId] = useState<string | null>(null);
   const [isSolvingAll, setIsSolvingAll] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Inline editing & Image Zoom modal
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
 
   // Modals & Bridge status
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
@@ -88,9 +121,6 @@ export const MocktestExtractor: React.FC = () => {
   useEffect(() => {
     const unsub = subscribeToExtensionStatus(st => {
       setBridgeStatus(st);
-      if (!st.connected && aiEngine === 'bridge') {
-        // keep bridge mode ready or allow fallback
-      }
     });
     pingStudyAiExtension().catch(() => {});
     return () => unsub();
@@ -135,7 +165,8 @@ export const MocktestExtractor: React.FC = () => {
               imageUrl: img,
               status: 'pending',
               mcqCount: 0,
-              isSelected: true
+              isSelected: true,
+              items: []
             });
           });
         } else if (file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(file.name)) {
@@ -151,7 +182,8 @@ export const MocktestExtractor: React.FC = () => {
             imageUrl: base64,
             status: 'pending',
             mcqCount: 0,
-            isSelected: true
+            isSelected: true,
+            items: []
           });
         }
       }
@@ -199,7 +231,7 @@ export const MocktestExtractor: React.FC = () => {
           }
         });
 
-        // 1. FIRST: Parse AI rawText as JSON (which contains the full 18-column fields!)
+        // 1. FIRST: Parse AI rawText as JSON
         const startIndex = extractedMcqs.length + 1;
         formattedItems = parseAiOutputToMockTestItems(rawText, setName, startIndex);
 
@@ -208,20 +240,22 @@ export const MocktestExtractor: React.FC = () => {
           formattedItems = convertElementsToMockTestItems(elements, setName);
         }
       } else {
-        // Direct API mode (Zero dependence on extension!)
+        // Direct API mode
         setLiveStatusText(`Page ${page.pageNumber}: Calling Gemini API...`);
         const startIndex = extractedMcqs.length + 1;
         formattedItems = await extractMockTestWithDirectApi(page.imageUrl, setName, startIndex);
       }
 
-      // Apply current difficulty and set name
+      // Link page metadata to each MCQ
       formattedItems = formattedItems.map(item => ({
         ...item,
+        pageNumber: page.pageNumber,
+        pageId: page.id,
         set_name: setName,
         difficulty_level: difficulty
       }));
 
-      // If One-Shot Auto-Fill All Fields is enabled, perform deep research & solution pass immediately
+      // If One-Shot Auto-Fill All Fields is enabled, perform deep research pass
       if (autoDeepSolveAll && formattedItems.length > 0) {
         setLiveStatusText(`Page ${page.pageNumber}: Deep-researching solutions for ${formattedItems.length} question(s)...`);
         setPages(prev => prev.map(p => p.id === page.id ? {
@@ -231,7 +265,6 @@ export const MocktestExtractor: React.FC = () => {
 
         const solvedItems = await Promise.all(
           formattedItems.map(async (item) => {
-            // If solution is already rich and detailed (>35 chars), keep it
             if (item.solution_hi && item.solution_hi.length > 35 && item.solution_en && item.solution_en.length > 35) {
               return item;
             }
@@ -252,18 +285,20 @@ export const MocktestExtractor: React.FC = () => {
         formattedItems = solvedItems;
       }
 
-      // Update page state
+      // Update page state with its own extracted items
       setPages(prev => prev.map(p => p.id === page.id ? {
         ...p,
         status: 'ready',
         mcqCount: formattedItems.length,
-        errorMessage: undefined
+        errorMessage: undefined,
+        items: formattedItems
       } : p));
 
-      // Append to global extracted MCQs list
+      // Append/Update in global extracted MCQs list
       if (formattedItems.length > 0) {
         setExtractedMcqs(prev => {
-          const nextList = [...prev, ...formattedItems];
+          const withoutThisPage = prev.filter(it => it.pageId !== page.id);
+          const nextList = [...withoutThisPage, ...formattedItems];
           return nextList.map((it, idx) => ({ ...it, question_r: idx + 1 }));
         });
       }
@@ -280,7 +315,7 @@ export const MocktestExtractor: React.FC = () => {
     }
   };
 
-  // Multi-Page Batch & Concurrency Loop ("ek saath multiple pages send karna")
+  // Multi-Page Batch & Concurrency Loop
   const handleStartExtraction = async () => {
     const selectedPages = pages.filter(p => p.isSelected && p.status !== 'ready');
     if (selectedPages.length === 0) {
@@ -288,7 +323,6 @@ export const MocktestExtractor: React.FC = () => {
       return;
     }
 
-    // Auto-check bridge connection if bridge engine is selected
     if (aiEngine === 'bridge' && !bridgeStatus.connected) {
       const ping = await pingStudyAiExtension(600);
       if (!ping.connected) {
@@ -311,7 +345,6 @@ export const MocktestExtractor: React.FC = () => {
     try {
       const effectiveBatchSize = Math.max(1, batchSize);
 
-      // Process in chunks of batchSize
       for (let i = 0; i < selectedPages.length; i += effectiveBatchSize) {
         if (pauseRef.current) {
           setLiveStatusText('Processing paused by user.');
@@ -326,10 +359,8 @@ export const MocktestExtractor: React.FC = () => {
           `Batch ${batchNum}/${totalBatches}: Processing ${currentBatch.length} page(s) simultaneously (P.${currentBatch.map(p => p.pageNumber).join(', ')})...`
         );
 
-        // Execute batch in parallel!
         await Promise.allSettled(
           currentBatch.map(async (page, indexInBatch) => {
-            // Stagger parallel requests by 200ms for network stability
             if (indexInBatch > 0) {
               await new Promise(r => setTimeout(r, indexInBatch * 200));
             }
@@ -337,7 +368,6 @@ export const MocktestExtractor: React.FC = () => {
           })
         );
 
-        // Pause briefly between batches
         await new Promise(res => setTimeout(res, 500));
       }
 
@@ -353,13 +383,27 @@ export const MocktestExtractor: React.FC = () => {
 
   // Single page retry
   const handleRetryPage = async (page: PageQueueItem, idx: number) => {
+    if (isProcessingAll) return;
+    setIsProcessingAll(true);
     try {
       await processPageItem(page, idx, pages.length);
     } catch (err: any) {
       alert(`Page ${page.pageNumber} extraction failed: ${err.message}`);
     } finally {
+      setIsProcessingAll(false);
       setActivePageIndex(null);
     }
+  };
+
+  // Delete a single page
+  const handleDeletePage = (pageId: string) => {
+    setPages(prev => prev.filter(p => p.id !== pageId).map((p, idx) => ({ ...p, pageNumber: idx + 1 })));
+    setExtractedMcqs(prev => prev.filter(it => it.pageId !== pageId).map((it, idx) => ({ ...it, question_r: idx + 1 })));
+  };
+
+  // Toggle selection for a page
+  const togglePageSelection = (pageId: string) => {
+    setPages(prev => prev.map(p => p.id === pageId ? { ...p, isSelected: !p.isSelected } : p));
   };
 
   // Auto-Solve Deep Solutions for all items lacking solutions
@@ -379,12 +423,11 @@ export const MocktestExtractor: React.FC = () => {
         setSolvingId(item.id);
         try {
           const res = await generateDeepSolutionForItem(item);
-          setExtractedMcqs(prev => prev.map(q => q.id === item.id ? {
-            ...q,
-            solution_hi: res.solution_hi || q.solution_hi,
-            solution_en: res.solution_en || q.solution_en,
-            difficulty_level: res.difficulty_level || q.difficulty_level
-          } : q));
+          updateItem(item.id, {
+            solution_hi: res.solution_hi || item.solution_hi,
+            solution_en: res.solution_en || item.solution_en,
+            difficulty_level: res.difficulty_level || item.difficulty_level
+          });
         } catch (e) {
           console.warn(`Could not solve Q#${item.question_r}:`, e);
         }
@@ -401,12 +444,11 @@ export const MocktestExtractor: React.FC = () => {
     setSolvingId(item.id);
     try {
       const res = await generateDeepSolutionForItem(item);
-      setExtractedMcqs(prev => prev.map(q => q.id === item.id ? {
-        ...q,
-        solution_hi: res.solution_hi || q.solution_hi,
-        solution_en: res.solution_en || q.solution_en,
-        difficulty_level: res.difficulty_level || q.difficulty_level
-      } : q));
+      updateItem(item.id, {
+        solution_hi: res.solution_hi || item.solution_hi,
+        solution_en: res.solution_en || item.solution_en,
+        difficulty_level: res.difficulty_level || item.difficulty_level
+      });
     } catch (err: any) {
       alert(`Auto-solve failed: ${err.message}`);
     } finally {
@@ -453,7 +495,7 @@ export const MocktestExtractor: React.FC = () => {
     reader.readAsText(file, 'utf-8');
   };
 
-  // Deep AI Proofreading: cleans OCR errors, aligns translations, strips all exam tags
+  // Deep AI Proofreading
   const handleProofreadAll = async () => {
     if (extractedMcqs.length === 0) {
       alert('No questions loaded to proofread.');
@@ -466,13 +508,17 @@ export const MocktestExtractor: React.FC = () => {
         setLiveStatusText(msg);
       });
       setExtractedMcqs(cleaned);
+      // Sync back to pages
+      setPages(prev => prev.map(p => ({
+        ...p,
+        items: cleaned.filter(it => it.pageId === p.id || it.pageNumber === p.pageNumber)
+      })));
       setLiveStatusText(`✓ All ${cleaned.length} questions proofread and cleaned error-free!`);
       alert(`✨ AI Proofreading Complete!\n\nSuccessfully proofread ${cleaned.length} questions. All previous-year exam tags, shifts, dates, and OCR errors have been cleanly eliminated.`);
     } catch (err: any) {
       console.error('Proofreading error:', err);
-      // Fallback: apply local offline sanitizer
       setExtractedMcqs(prev => prev.map(cleanMockTestItem));
-      alert(`AI proofreading encountered an issue (${err.message || err}), but all exam tags and math delimiters were successfully cleaned using the offline sanitization engine!`);
+      alert(`AI proofreading finished with offline sanitizer!`);
     } finally {
       setIsProofreading(false);
     }
@@ -484,13 +530,57 @@ export const MocktestExtractor: React.FC = () => {
       alert('No questions loaded to clean.');
       return;
     }
-    setExtractedMcqs(prev => prev.map(cleanMockTestItem));
+    const cleaned = extractedMcqs.map(cleanMockTestItem);
+    setExtractedMcqs(cleaned);
+    setPages(prev => prev.map(p => ({
+      ...p,
+      items: cleaned.filter(it => it.pageId === p.id || it.pageNumber === p.pageNumber)
+    })));
     setLiveStatusText('🧹 Cleaned all exam tags, shift references, and math delimiters!');
     alert('Exam citations, shifts, LaTeX delimiters ($$), percentages, and rupee signs cleaned successfully!');
   };
 
-  // Add question manually
+  // Add question to a specific page
+  const handleAddQuestionToPage = (page: PageQueueItem) => {
+    const nextNum = extractedMcqs.length + 1;
+    const newItem: MockTestMcqItem = {
+      id: `mt_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      pageNumber: page.pageNumber,
+      pageId: page.id,
+      question_r: nextNum,
+      question_type: 'MCQ',
+      question_hi: '<p>प्रश्न यहाँ लिखें...</p>',
+      option1_hi: 'विकल्प A',
+      option2_hi: 'विकल्प B',
+      option3_hi: 'विकल्प C',
+      option4_hi: 'विकल्प D',
+      solution_hi: '<p><b>हल:</b> विस्तृत विवरण...</p>',
+      question_en: '<p>Enter question text here...</p>',
+      option1_en: 'Option A',
+      option2_en: 'Option B',
+      option3_en: 'Option C',
+      option4_en: 'Option D',
+      solution_en: '<p><b>Solution:</b> Detailed step-by-step proof...</p>',
+      answer: answerFormat === 'letters' ? 'A' : '1',
+      set_name: setName,
+      difficulty_level: difficulty
+    };
+    setExtractedMcqs(prev => [...prev, newItem]);
+    setPages(prev => prev.map(p => p.id === page.id ? {
+      ...p,
+      items: [...(p.items || []), newItem],
+      mcqCount: (p.items || []).length + 1
+    } : p));
+    setEditingItemId(newItem.id);
+  };
+
+  // Add global question
   const handleAddQuestion = () => {
+    const firstPage = pages[0];
+    if (firstPage) {
+      handleAddQuestionToPage(firstPage);
+      return;
+    }
     const nextNum = extractedMcqs.length + 1;
     const newItem: MockTestMcqItem = {
       id: `mt_manual_${Date.now()}`,
@@ -513,10 +603,15 @@ export const MocktestExtractor: React.FC = () => {
       difficulty_level: difficulty
     };
     setExtractedMcqs(prev => [...prev, newItem]);
+    setEditingItemId(newItem.id);
   };
 
   const updateItem = (id: string, updates: Partial<MockTestMcqItem>) => {
     setExtractedMcqs(prev => prev.map(it => it.id === id ? { ...it, ...updates } : it));
+    setPages(prev => prev.map(p => ({
+      ...p,
+      items: (p.items || []).map(it => it.id === id ? { ...it, ...updates } : it)
+    })));
   };
 
   const deleteItem = (id: string) => {
@@ -524,6 +619,22 @@ export const MocktestExtractor: React.FC = () => {
       ...it,
       question_r: idx + 1
     })));
+    setPages(prev => prev.map(p => {
+      const nextItems = (p.items || []).filter(it => it.id !== id);
+      return {
+        ...p,
+        items: nextItems,
+        mcqCount: nextItems.length
+      };
+    }));
+  };
+
+  // Jump to specific page card
+  const scrollToPageCard = (pageNumber: number) => {
+    const el = document.getElementById(`page-card-${pageNumber}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   const solvedCount = extractedMcqs.filter(i => (i.solution_hi && i.solution_hi.length > 10) || (i.solution_en && i.solution_en.length > 10)).length;
@@ -531,7 +642,7 @@ export const MocktestExtractor: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Header Banner */}
-      <div className="relative rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-600/10 border border-amber-500/20 p-6 backdrop-blur-xl">
+      <div className="relative rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-600/10 border border-amber-500/20 p-5 backdrop-blur-xl">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="space-y-1">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold tracking-wide uppercase">
@@ -542,33 +653,31 @@ export const MocktestExtractor: React.FC = () => {
               Bilingual MockTest MCQ Extractor
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
-              Extract bilingual MCQs page-by-page from PDFs & scanned papers with LaTeX math, 
-              deep step-by-step explanations, and export ready-to-upload 18-column CSV files.
+              Extract bilingual MCQs page-by-page from PDFs & scanned papers. Left side shows pages, Right side displays all extracted questions with LaTeX math and deep step-by-step solutions.
             </p>
           </div>
 
-          {/* Quick Stats & Engine Selector */}
+          {/* Quick Stats */}
           <div className="flex flex-wrap items-center gap-2.5">
-            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2.5">
+            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2">
               <span className="text-xs text-slate-400">Total MCQs:</span>
               <span className="text-base font-extrabold text-amber-400">{extractedMcqs.length}</span>
             </div>
 
-            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2.5">
+            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2">
               <span className="text-xs text-slate-400">Pages:</span>
               <span className="text-base font-extrabold text-blue-400">{pages.length}</span>
             </div>
 
-            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2.5">
+            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2">
               <span className="text-xs text-slate-400">Solved:</span>
               <span className="text-base font-extrabold text-emerald-400">{solvedCount}/{extractedMcqs.length}</span>
             </div>
           </div>
         </div>
 
-        {/* AI Engine Switcher & Bridge Connect/Disconnect Bar */}
-        <div className="mt-5 p-3 rounded-xl bg-black/50 border border-white/[0.08] flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Mode Switcher */}
+        {/* AI Engine Switcher & Bridge Bar */}
+        <div className="mt-4 p-3 rounded-xl bg-black/50 border border-white/[0.08] flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
               AI Engine:
@@ -602,11 +711,9 @@ export const MocktestExtractor: React.FC = () => {
             </div>
           </div>
 
-          {/* Dynamic Settings based on Engine */}
           <div className="flex flex-wrap items-center gap-2.5">
             {aiEngine === 'bridge' ? (
               <>
-                {/* Provider Selector for Bridge */}
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-slate-400">Provider:</span>
                   <select
@@ -621,7 +728,6 @@ export const MocktestExtractor: React.FC = () => {
                   </select>
                 </div>
 
-                {/* Bridge Connection Status & Connect/Disconnect Button */}
                 {bridgeStatus.connected ? (
                   <div className="flex items-center gap-2">
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-xs font-bold">
@@ -674,7 +780,7 @@ export const MocktestExtractor: React.FC = () => {
               </>
             )}
 
-            {/* Multi-Page Parallel Batch Control ("ek saath multiple pages send karna") */}
+            {/* Parallel Batch Selector */}
             <div className="flex items-center gap-1.5 pl-2 border-l border-white/[0.1]">
               <span className="text-xs font-bold text-slate-300" title="How many pages to send simultaneously">
                 Parallel Batch:
@@ -690,7 +796,6 @@ export const MocktestExtractor: React.FC = () => {
                         ? 'bg-amber-500 border-amber-400 text-black shadow'
                         : 'bg-black/60 border-white/[0.1] text-slate-400 hover:text-white'
                     }`}
-                    title={`Send ${count} page(s) at once`}
                   >
                     {count} {count === 1 ? 'Page' : 'Pages'}
                   </button>
@@ -700,9 +805,8 @@ export const MocktestExtractor: React.FC = () => {
           </div>
         </div>
 
-        {/* Global Settings Toolbar */}
-        <div className="mt-4 pt-4 border-t border-white/[0.08] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Paper Set Name */}
+        {/* Global Configuration Fields */}
+        <div className="mt-3 pt-3 border-t border-white/[0.08] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Set / Paper Name (set_name)
@@ -719,7 +823,6 @@ export const MocktestExtractor: React.FC = () => {
             />
           </div>
 
-          {/* Answer Format */}
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Answer Format
@@ -750,7 +853,6 @@ export const MocktestExtractor: React.FC = () => {
             </div>
           </div>
 
-          {/* Default Difficulty */}
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Default Difficulty
@@ -770,7 +872,7 @@ export const MocktestExtractor: React.FC = () => {
             </select>
           </div>
 
-          {/* Quick Actions */}
+          {/* Export & Import Actions */}
           <div className="flex flex-col gap-1 justify-end">
             <div className="flex items-center gap-2">
               <button
@@ -811,7 +913,7 @@ export const MocktestExtractor: React.FC = () => {
         </div>
 
         {/* One-Shot All Fields & Deep Solutions Checkbox Option */}
-        <div className="mt-4 pt-3.5 border-t border-white/[0.08] flex items-center justify-between flex-wrap gap-3 bg-amber-500/[0.03] p-3 rounded-xl border border-amber-500/20">
+        <div className="mt-3.5 pt-3 border-t border-white/[0.08] flex items-center justify-between flex-wrap gap-3 bg-amber-500/[0.03] p-3 rounded-xl border border-amber-500/20">
           <label className="flex items-center gap-3 cursor-pointer select-none group flex-1">
             <input
               type="checkbox"
@@ -840,7 +942,7 @@ export const MocktestExtractor: React.FC = () => {
         </div>
       </div>
 
-      {/* File Upload Dropzone */}
+      {/* File Upload Dropzone (Compact if pages exist) */}
       <div 
         onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
         onDrop={(e) => {
@@ -849,10 +951,10 @@ export const MocktestExtractor: React.FC = () => {
           if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
         }}
         onClick={() => fileInputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
+        className={`relative border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all ${
           pages.length === 0 
             ? 'border-amber-500/40 bg-amber-500/[0.03] hover:bg-amber-500/[0.06] py-12' 
-            : 'border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.04]'
+            : 'border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.04] py-4'
         }`}
       >
         <input
@@ -864,566 +966,775 @@ export const MocktestExtractor: React.FC = () => {
           className="hidden"
         />
 
-        <div className="flex flex-col items-center justify-center gap-2">
-          <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-            <Upload className="w-6 h-6" />
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+          <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+            <Upload className="w-5 h-5" />
           </div>
-          <h3 className="text-sm font-bold text-white">
-            {pages.length === 0 ? 'Upload PDF or Question Paper Images' : 'Add More Pages (PDF / Images)'}
-          </h3>
-          <p className="text-xs text-slate-400 max-w-md">
-            Drag & drop exam PDF files or photos. Each page is converted to 2.5x high-res images and processed in parallel batches of {batchSize} page(s).
-          </p>
+          <div className="text-left">
+            <h3 className="text-sm font-bold text-white">
+              {pages.length === 0 ? 'Upload PDF or Question Paper Images' : 'Add More Pages (PDF / Images)'}
+            </h3>
+            <p className="text-xs text-slate-400">
+              Drag & drop exam PDF files or photos. Each page will render with its high-res image on the left and extracted questions on the right.
+            </p>
+          </div>
         </div>
 
         {uploadProgress && (
-          <div className="mt-4 max-w-md mx-auto p-3 bg-black/60 rounded-xl border border-amber-500/30 flex items-center gap-3">
+          <div className="mt-3 max-w-md mx-auto p-2.5 bg-black/60 rounded-xl border border-amber-500/30 flex items-center gap-3">
             <Loader2 className="w-4 h-4 text-amber-400 animate-spin flex-shrink-0" />
             <span className="text-xs text-amber-300 font-medium">{uploadProgress.text}</span>
           </div>
         )}
       </div>
 
-      {/* Page Queue Section */}
+      {/* Main Workspace: TextExtract Style UI (Left: Pages | Right: Questions) */}
       {pages.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-white/[0.03] border border-white/[0.08] rounded-xl">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-white uppercase tracking-wider">
-                Page Queue ({pages.length} Pages • Batch: {batchSize} parallel)
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  const allSelected = pages.every(p => p.isSelected);
-                  setPages(prev => prev.map(p => ({ ...p, isSelected: !allSelected })));
-                }}
-                className="text-xs text-amber-400 hover:text-amber-300 underline font-medium"
-              >
-                {pages.every(p => p.isSelected) ? 'Deselect All' : 'Select All'}
-              </button>
-              {liveStatusText && (
-                <span className="text-xs text-slate-300 font-medium animate-pulse flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-                  {liveStatusText}
+        <div className="space-y-4">
+          {/* Workspace Controls & Quick Jump Strip */}
+          <div className="p-4 bg-white/[0.03] border border-white/[0.08] rounded-2xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-xs font-extrabold text-white uppercase tracking-wider">
+                  Page Queue ({pages.length} Pages • Batch: {batchSize} Parallel)
                 </span>
-              )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allSelected = pages.every(p => p.isSelected);
+                    setPages(prev => prev.map(p => ({ ...p, isSelected: !allSelected })));
+                  }}
+                  className="text-xs text-amber-400 hover:text-amber-300 underline font-medium"
+                >
+                  {pages.every(p => p.isSelected) ? 'Deselect All' : 'Select All'}
+                </button>
+                {liveStatusText && (
+                  <span className="text-xs text-amber-300 font-medium flex items-center gap-1.5 animate-pulse">
+                    <span className="h-2 w-2 rounded-full bg-amber-400" />
+                    {liveStatusText}
+                  </span>
+                )}
+              </div>
+
+              {/* View Switcher & Processing Buttons */}
+              <div className="flex items-center flex-wrap gap-2">
+                {/* View Tabs */}
+                <div className="flex items-center p-0.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('split')}
+                    className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 ${
+                      activeTab === 'split' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>Split View (Left: Page | Right: MCQs)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('grid')}
+                    className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 ${
+                      activeTab === 'grid' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>18-Col Grid</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('csv')}
+                    className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 ${
+                      activeTab === 'csv' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Raw CSV</span>
+                  </button>
+                </div>
+
+                {!isProcessingAll ? (
+                  <button
+                    type="button"
+                    onClick={handleStartExtraction}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-black" />
+                    <span>Start MCQ Extraction ({batchSize} Pages Parallel)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsPaused(!isPaused)}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all"
+                  >
+                    {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                    <span>{isPaused ? 'Resume' : 'Pause'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm('Clear all pages and questions?')) {
+                      setPages([]);
+                      setExtractedMcqs([]);
+                    }
+                  }}
+                  disabled={isProcessingAll}
+                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all disabled:opacity-40"
+                  title="Clear all pages"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            {/* Queue Controls */}
-            <div className="flex items-center gap-2">
-              {!isProcessingAll ? (
-                <button
-                  type="button"
-                  onClick={handleStartExtraction}
-                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
-                >
-                  <Play className="w-3.5 h-3.5 fill-black" />
-                  <span>Start MCQ Extraction ({batchSize} Pages Parallel)</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsPaused(!isPaused)}
-                  className="flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all"
-                >
-                  {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-                  <span>{isPaused ? 'Resume' : 'Pause'}</span>
-                </button>
-              )}
+            {/* Quick Jump Filmstrip Bar for Fast Navigation */}
+            <div className="pt-2 border-t border-white/[0.04] flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+              <span className="text-[11px] font-bold text-slate-400 shrink-0 uppercase tracking-wider">
+                Quick Jump:
+              </span>
+              {pages.map((p) => {
+                const count = (p.items?.length) || extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id).length;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => scrollToPageCard(p.pageNumber)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 ${
+                      p.status === 'processing'
+                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse'
+                        : p.status === 'ready'
+                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
+                        : p.status === 'error'
+                        ? 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
+                        : 'bg-black/40 border-white/[0.08] text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>P.{p.pageNumber}</span>
+                    {count > 0 && (
+                      <span className="px-1 py-0.2 rounded-full text-[9px] bg-black/60 font-extrabold text-amber-300">
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
 
+            {/* Bulk Action Buttons Row */}
+            <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                {/* Auto-Solve All */}
+                <button
+                  type="button"
+                  onClick={handleAutoSolveAll}
+                  disabled={isSolvingAll || extractedMcqs.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-500/20 to-indigo-500/20 hover:from-purple-500/30 hover:to-indigo-500/30 border border-purple-500/30 text-purple-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
+                >
+                  {isSolvingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-purple-400" />}
+                  <span>Auto-Solve All (AI)</span>
+                </button>
+
+                {/* AI Proofread */}
+                <button
+                  type="button"
+                  onClick={handleProofreadAll}
+                  disabled={isProofreading || extractedMcqs.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
+                >
+                  {isProofreading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-cyan-300" />}
+                  <span>✨ AI Proofread (Clean Tags)</span>
+                </button>
+
+                {/* Clean Tags & Math */}
+                <button
+                  type="button"
+                  onClick={handleCleanAllMath}
+                  disabled={extractedMcqs.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                  <span>🧹 Clean Tags & Math</span>
+                </button>
+
+                {/* Add MCQ */}
+                <button
+                  type="button"
+                  onClick={handleAddQuestion}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-xl text-xs font-semibold transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>+ Add MCQ</span>
+                </button>
+              </div>
+
+              {/* Download CSV */}
               <button
                 type="button"
-                onClick={() => {
-                  if (confirm('Clear all pages from the queue?')) {
-                    setPages([]);
-                  }
-                }}
-                disabled={isProcessingAll}
-                className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all disabled:opacity-40"
-                title="Clear all pages"
+                onClick={handleDownloadCsv}
+                disabled={extractedMcqs.length === 0}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold shadow-md transition-all disabled:opacity-40"
               >
-                <Trash2 className="w-4 h-4" />
+                <Download className="w-3.5 h-3.5" />
+                <span>Download 18-Col CSV</span>
               </button>
             </div>
           </div>
 
-          {/* Visual Page Cards Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {pages.map((page, idx) => {
-              return (
-                <div
-                  key={page.id}
-                  className={`group relative rounded-xl overflow-hidden border transition-all ${
-                    page.status === 'processing'
-                      ? 'border-amber-500 ring-2 ring-amber-500/30 bg-amber-500/5'
-                      : page.status === 'ready'
-                      ? 'border-emerald-500/40 bg-emerald-500/5'
-                      : page.status === 'error'
-                      ? 'border-rose-500/40 bg-rose-500/5'
-                      : 'border-white/[0.08] bg-black/40 hover:border-white/[0.2]'
-                  }`}
-                >
-                  {/* Select Checkbox & Page Badge */}
-                  <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={() => setPages(prev => prev.map(p => p.id === page.id ? { ...p, isSelected: !p.isSelected } : p))}
-                      className="p-1 rounded bg-black/60 text-white hover:text-amber-400 backdrop-blur-md"
-                    >
-                      {page.isSelected ? (
-                        <CheckSquare className="w-3.5 h-3.5 text-amber-400" />
-                      ) : (
-                        <Square className="w-3.5 h-3.5 text-slate-400" />
-                      )}
-                    </button>
+          {/* TAB 1: SPLIT VIEW (TextExtract Style: Left Page Thumbnail | Right Questions) */}
+          {activeTab === 'split' && (
+            <div className="space-y-6">
+              {pages.map((page, idx) => {
+                // Find all MCQs belonging to this page
+                const pageQuestions = (page.items && page.items.length > 0)
+                  ? page.items
+                  : extractedMcqs.filter(m => m.pageId === page.id || m.pageNumber === page.pageNumber);
 
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-black/70 text-white backdrop-blur-md border border-white/[0.1]">
-                      P.{page.pageNumber}
-                    </span>
-                  </div>
+                return (
+                  <div
+                    key={page.id}
+                    id={`page-card-${page.pageNumber}`}
+                    className={`rounded-2xl overflow-hidden shadow-xl flex flex-col lg:flex-row h-auto min-h-[380px] transition-all duration-300 border ${
+                      page.isSelected
+                        ? 'border-amber-500/40 ring-1 ring-amber-500/30 bg-[#10131E]'
+                        : 'border-white/[0.06] bg-[#0A0C13] opacity-90 hover:opacity-100'
+                    }`}
+                  >
+                    {/* LEFT SIDE: Page Image & Page Controls (like ProcessingList.tsx) */}
+                    <div className="w-full lg:w-[320px] xl:w-[360px] bg-[#08090E] border-b lg:border-b-0 lg:border-r border-white/[0.08] p-4 flex flex-col justify-between shrink-0">
+                      <div>
+                        {/* Page Card Header */}
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => togglePageSelection(page.id)}
+                              className="p-1.5 rounded-lg bg-black/60 border border-white/[0.1] text-white hover:text-amber-400 backdrop-blur-md"
+                              title="Toggle batch selection"
+                            >
+                              {page.isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-amber-400" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-400" />
+                              )}
+                            </button>
+                            <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-slate-900 border border-white/[0.1] text-white shadow">
+                              Page {page.pageNumber}
+                            </span>
+                          </div>
 
-                  {/* Thumbnail */}
-                  <div className="relative aspect-[3/4] bg-neutral-900 overflow-hidden flex items-center justify-center">
-                    <img
-                      src={page.imageUrl}
-                      alt={`Page ${page.pageNumber}`}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                    />
+                          {/* Status Badge */}
+                          <div>
+                            {page.status === 'processing' && (
+                              <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 animate-pulse">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Digitizing...
+                              </span>
+                            )}
+                            {page.status === 'ready' && (
+                              <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                                <CheckCircle2 className="w-3 h-3" /> {pageQuestions.length} MCQs
+                              </span>
+                            )}
+                            {page.status === 'error' && (
+                              <span className="bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                                <AlertCircle className="w-3 h-3" /> Error
+                              </span>
+                            )}
+                            {page.status === 'pending' && (
+                              <span className="bg-white/[0.04] border border-white/[0.08] text-slate-400 text-xs font-bold px-2.5 py-1 rounded-full">
+                                Pending
+                              </span>
+                            )}
+                          </div>
+                        </div>
 
-                    {/* Status Overlay */}
-                    {page.status === 'processing' && (
-                      <div className="absolute inset-0 bg-black/70 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center">
-                        <Loader2 className="w-6 h-6 text-amber-400 animate-spin mb-1" />
-                        <span className="text-[10px] text-amber-300 font-bold uppercase tracking-wider">
-                          Extracting...
-                        </span>
-                        {page.errorMessage && (
-                          <span className="text-[9px] text-slate-300 line-clamp-2 mt-1">
-                            {page.errorMessage}
+                        {/* Page Image Preview with Zoom on Click */}
+                        <div
+                          className="relative group rounded-xl overflow-hidden border border-white/[0.08] bg-black cursor-pointer aspect-[3/4] max-h-[380px] flex items-center justify-center shadow-inner"
+                          onClick={() => setZoomImageUrl(page.imageUrl)}
+                          title="Click to view full image in lightbox"
+                        >
+                          <img
+                            src={page.imageUrl}
+                            alt={`Page ${page.pageNumber}`}
+                            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                          />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white gap-2 font-bold text-xs backdrop-blur-xs">
+                            <ZoomIn className="w-5 h-5 text-amber-400" />
+                            <span>Click to Zoom Image</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Controls for Page */}
+                      <div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs">
+                        <button
+                          type="button"
+                          onClick={() => handleRetryPage(page, idx)}
+                          disabled={isProcessingAll}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] hover:bg-amber-500/20 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 rounded-lg font-bold transition-all disabled:opacity-40"
+                          title="Re-extract this page"
+                        >
+                          <RotateCw className="w-3.5 h-3.5" />
+                          <span>Re-Extract Page</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePage(page.id)}
+                          disabled={isProcessingAll}
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
+                          title="Delete this page"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* RIGHT SIDE: Extracted Questions for THIS Page */}
+                    <div className="flex-1 min-w-0 bg-[#0C0F17] flex flex-col p-4 space-y-3">
+                      {/* Right Panel Header */}
+                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
+                            Page {page.pageNumber} MCQs
                           </span>
-                        )}
-                      </div>
-                    )}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/[0.06] text-slate-300">
+                            {pageQuestions.length} Questions
+                          </span>
+                        </div>
 
-                    {page.status === 'ready' && (
-                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-600 text-white shadow-md flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        <span>{page.mcqCount} MCQs</span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleAddQuestionToPage(page)}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-semibold transition-all"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Add Question</span>
+                          </button>
+                        </div>
                       </div>
-                    )}
 
-                    {page.status === 'error' && (
-                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-600 text-white shadow-md flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        <span>Error</span>
-                      </div>
-                    )}
+                      {/* Content Area according to Status */}
+                      {page.status === 'processing' && (
+                        <div className="py-16 flex flex-col items-center justify-center text-center space-y-3">
+                          <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
+                          <p className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                            Extracting Bilingual MCQs with LaTeX...
+                          </p>
+                          <p className="text-[11px] text-slate-400 max-w-sm">
+                            {page.errorMessage || 'AI model is reading questions, options, and deep step-by-step solutions.'}
+                          </p>
+                        </div>
+                      )}
+
+                      {page.status === 'pending' && (
+                        <div className="py-16 text-center space-y-2 text-slate-500">
+                          <BookOpen className="w-8 h-8 mx-auto text-slate-600" />
+                          <p className="text-xs font-semibold text-slate-400">Page is ready in queue</p>
+                          <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                            Click "Start MCQ Extraction" at the top or click "Re-Extract Page" on the left to digitize this page.
+                          </p>
+                        </div>
+                      )}
+
+                      {page.status === 'error' && (
+                        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 space-y-2">
+                          <div className="flex items-center gap-2 font-bold text-xs">
+                            <AlertCircle className="w-4 h-4 text-rose-400" />
+                            <span>Page Extraction Error</span>
+                          </div>
+                          <p className="text-xs text-rose-200/90">{page.errorMessage || 'Failed to extract this page.'}</p>
+                          <button
+                            type="button"
+                            onClick={() => handleRetryPage(page, idx)}
+                            className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs"
+                          >
+                            Retry Extraction
+                          </button>
+                        </div>
+                      )}
+
+                      {page.status === 'ready' && pageQuestions.length === 0 && (
+                        <div className="py-12 text-center text-slate-500 space-y-2">
+                          <AlertCircle className="w-7 h-7 mx-auto text-slate-600" />
+                          <p className="text-xs font-semibold">No questions found on Page {page.pageNumber}</p>
+                          <button
+                            type="button"
+                            onClick={() => handleAddQuestionToPage(page)}
+                            className="px-3 py-1 text-xs text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10"
+                          >
+                            + Add Question Manually
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Questions List for this Page */}
+                      {pageQuestions.length > 0 && (
+                        <div className="space-y-4">
+                          {pageQuestions.map((item) => {
+                            const isEditing = editingItemId === item.id;
+                            const isSolving = solvingId === item.id;
+
+                            return (
+                              <div
+                                key={item.id}
+                                className="rounded-xl border border-white/[0.08] bg-black/40 p-4 space-y-3 hover:border-white/[0.15] transition-all"
+                              >
+                                {/* MCQ Header Bar */}
+                                <div className="flex items-center justify-between gap-3 pb-2 border-b border-white/[0.06]">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-xs border border-amber-500/30">
+                                      Q#{item.question_r}
+                                    </span>
+                                    <span className="text-[11px] font-semibold text-slate-400">
+                                      Type: <strong className="text-white">{item.question_type}</strong>
+                                    </span>
+                                    <span className="text-[11px] text-slate-400">
+                                      Difficulty: <strong className="text-white capitalize">{item.difficulty_level}</strong>
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    {/* Correct Answer Badge */}
+                                    <div className="flex items-center gap-1 text-xs">
+                                      <span className="text-slate-400 font-bold">Ans:</span>
+                                      <input
+                                        type="text"
+                                        value={item.answer}
+                                        onChange={(e) => updateItem(item.id, { answer: e.target.value })}
+                                        className="w-12 px-1.5 py-0.5 bg-black/80 border border-emerald-500/40 rounded text-center text-xs font-extrabold text-emerald-400 focus:outline-none"
+                                      />
+                                    </div>
+
+                                    {/* Auto-Solve Single Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSolveSingle(item)}
+                                      disabled={isSolving}
+                                      className="flex items-center gap-1 px-2.5 py-1 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded text-xs font-semibold transition-all disabled:opacity-50"
+                                      title="Generate deep research step-by-step solutions"
+                                    >
+                                      {isSolving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3 text-purple-400" />}
+                                      <span className="hidden sm:inline">
+                                        {item.solution_hi || item.solution_en ? 'Re-Solve' : 'Auto-Solve'}
+                                      </span>
+                                    </button>
+
+                                    {/* Edit Toggle Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingItemId(isEditing ? null : item.id)}
+                                      className={`p-1 rounded transition-all ${
+                                        isEditing 
+                                          ? 'bg-amber-500 text-black' 
+                                          : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                                      }`}
+                                      title="Edit fields"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                    </button>
+
+                                    {/* Delete Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteItem(item.id)}
+                                      className="p-1 text-slate-500 hover:text-rose-400 rounded transition-all"
+                                      title="Delete question"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Interactive Bilingual Content View */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                  {/* HINDI SIDE */}
+                                  <div className="space-y-2 p-3 bg-black/40 rounded-xl border border-white/[0.06]">
+                                    <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
+                                      Hindi Question & Options
+                                    </span>
+
+                                    {isEditing ? (
+                                      <textarea
+                                        rows={2}
+                                        value={item.question_hi}
+                                        onChange={(e) => updateItem(item.id, { question_hi: e.target.value })}
+                                        className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none"
+                                      />
+                                    ) : (
+                                      <LatexRenderer content={item.question_hi} className="text-slate-200 font-medium" />
+                                    )}
+
+                                    {/* Options List */}
+                                    <div className="space-y-1.5 pt-1">
+                                      {(['option1_hi', 'option2_hi', 'option3_hi', 'option4_hi'] as const).map((key, optIdx) => {
+                                        const optLetter = String.fromCharCode(65 + optIdx);
+                                        const optNum = String(optIdx + 1);
+                                        const isCorrect = item.answer === optLetter || item.answer === optNum || item.answer?.includes(optLetter) || item.answer?.includes(optNum);
+
+                                        return (
+                                          <div
+                                            key={key}
+                                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+                                              isCorrect
+                                                ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                                                : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
+                                            }`}
+                                          >
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
+                                              isCorrect ? 'bg-emerald-500 text-black' : 'bg-white/[0.08] text-slate-400'
+                                            }`}>
+                                              {optLetter}
+                                            </span>
+                                            {isEditing ? (
+                                              <input
+                                                type="text"
+                                                value={item[key] || ''}
+                                                onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                className="w-full bg-transparent text-xs text-white focus:outline-none"
+                                              />
+                                            ) : (
+                                              <span className="flex-1 truncate" title={item[key]}>
+                                                {item[key] || <em className="text-slate-600">Blank</em>}
+                                              </span>
+                                            )}
+                                            {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+
+                                    {/* Hindi Solution */}
+                                    <div className="pt-2 border-t border-white/[0.06] space-y-1">
+                                      <span className="text-[10px] font-bold text-amber-400/80 uppercase">
+                                        Solution (Hindi)
+                                      </span>
+                                      {isEditing ? (
+                                        <textarea
+                                          rows={3}
+                                          value={item.solution_hi}
+                                          onChange={(e) => updateItem(item.id, { solution_hi: e.target.value })}
+                                          className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-200 focus:outline-none"
+                                        />
+                                      ) : (
+                                        <div className="p-2.5 rounded-lg bg-amber-500/[0.03] border border-amber-500/20">
+                                          <LatexRenderer content={item.solution_hi || '<p>हल उपलब्ध नहीं है</p>'} className="text-amber-200/90 text-xs" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* ENGLISH SIDE */}
+                                  <div className="space-y-2 p-3 bg-black/40 rounded-xl border border-white/[0.06]">
+                                    <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider block">
+                                      English Question & Options
+                                    </span>
+
+                                    {isEditing ? (
+                                      <textarea
+                                        rows={2}
+                                        value={item.question_en}
+                                        onChange={(e) => updateItem(item.id, { question_en: e.target.value })}
+                                        className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none"
+                                      />
+                                    ) : (
+                                      <LatexRenderer content={item.question_en} className="text-slate-200 font-medium" />
+                                    )}
+
+                                    {/* Options List */}
+                                    <div className="space-y-1.5 pt-1">
+                                      {(['option1_en', 'option2_en', 'option3_en', 'option4_en'] as const).map((key, optIdx) => {
+                                        const optLetter = String.fromCharCode(65 + optIdx);
+                                        const optNum = String(optIdx + 1);
+                                        const isCorrect = item.answer === optLetter || item.answer === optNum || item.answer?.includes(optLetter) || item.answer?.includes(optNum);
+
+                                        return (
+                                          <div
+                                            key={key}
+                                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+                                              isCorrect
+                                                ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                                                : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
+                                            }`}
+                                          >
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
+                                              isCorrect ? 'bg-emerald-500 text-black' : 'bg-white/[0.08] text-slate-400'
+                                            }`}>
+                                              {optLetter}
+                                            </span>
+                                            {isEditing ? (
+                                              <input
+                                                type="text"
+                                                value={item[key] || ''}
+                                                onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                className="w-full bg-transparent text-xs text-white focus:outline-none"
+                                              />
+                                            ) : (
+                                              <span className="flex-1 truncate" title={item[key]}>
+                                                {item[key] || <em className="text-slate-600">Blank</em>}
+                                              </span>
+                                            )}
+                                            {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+
+                                    {/* English Solution */}
+                                    <div className="pt-2 border-t border-white/[0.06] space-y-1">
+                                      <span className="text-[10px] font-bold text-blue-400/80 uppercase">
+                                        Solution (English)
+                                      </span>
+                                      {isEditing ? (
+                                        <textarea
+                                          rows={3}
+                                          value={item.solution_en}
+                                          onChange={(e) => updateItem(item.id, { solution_en: e.target.value })}
+                                          className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-teal-200 focus:outline-none"
+                                        />
+                                      ) : (
+                                        <div className="p-2.5 rounded-lg bg-teal-500/[0.03] border border-teal-500/20">
+                                          <LatexRenderer content={item.solution_en || '<p>Solution not available</p>'} className="text-teal-200/90 text-xs" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+          )}
 
-                  {/* Card Bottom Bar */}
-                  <div className="p-2 flex items-center justify-between bg-black/60 border-t border-white/[0.06] text-xs">
-                    <span className="text-[10px] text-slate-400 truncate">
-                      {page.status === 'ready' ? `${page.mcqCount} extracted` : page.status}
-                    </span>
+          {/* TAB 2: LIVE 18-COLUMN CSV GRID VIEW */}
+          {activeTab === 'grid' && (
+            <div className="rounded-2xl border border-white/[0.08] bg-black/40 backdrop-blur-xl overflow-hidden shadow-2xl p-4">
+              <div className="max-h-[700px] overflow-auto custom-scrollbar">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/[0.1] bg-white/[0.04] text-[11px] font-bold text-amber-400 whitespace-nowrap">
+                      <th className="p-2">#</th>
+                      <th className="p-2 min-w-[200px]">question_hi</th>
+                      <th className="p-2 min-w-[100px]">opt1_hi</th>
+                      <th className="p-2 min-w-[100px]">opt2_hi</th>
+                      <th className="p-2 min-w-[100px]">opt3_hi</th>
+                      <th className="p-2 min-w-[100px]">opt4_hi</th>
+                      <th className="p-2 min-w-[200px]">solution_hi</th>
+                      <th className="p-2 min-w-[200px]">question_en</th>
+                      <th className="p-2 min-w-[100px]">opt1_en</th>
+                      <th className="p-2 min-w-[100px]">opt2_en</th>
+                      <th className="p-2 min-w-[100px]">opt3_en</th>
+                      <th className="p-2 min-w-[100px]">opt4_en</th>
+                      <th className="p-2 min-w-[200px]">solution_en</th>
+                      <th className="p-2 min-w-[70px]">answer</th>
+                      <th className="p-2 min-w-[120px]">set_name</th>
+                      <th className="p-2 min-w-[80px]">difficulty</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.05] text-slate-300">
+                    {extractedMcqs.map((row) => (
+                      <tr key={row.id} className="hover:bg-white/[0.02]">
+                        <td className="p-2 font-bold text-amber-400">{row.question_r}</td>
+                        <td className="p-2 truncate max-w-[220px]" title={row.question_hi}>{row.question_hi}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option1_hi}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option2_hi}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option3_hi}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option4_hi}</td>
+                        <td className="p-2 truncate max-w-[220px]" title={row.solution_hi}>{row.solution_hi}</td>
+                        <td className="p-2 truncate max-w-[220px]" title={row.question_en}>{row.question_en}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option1_en}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option2_en}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option3_en}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option4_en}</td>
+                        <td className="p-2 truncate max-w-[220px]" title={row.solution_en}>{row.solution_en}</td>
+                        <td className="p-2 font-bold text-emerald-400">{row.answer}</td>
+                        <td className="p-2 truncate max-w-[120px]">{row.set_name}</td>
+                        <td className="p-2 capitalize">{row.difficulty_level}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
-                    <button
-                      type="button"
-                      onClick={() => handleRetryPage(page, idx)}
-                      disabled={isProcessingAll}
-                      title="Re-extract this page"
-                      className="p-1 text-slate-400 hover:text-amber-400 rounded transition-all"
-                    >
-                      <RotateCw className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          {/* TAB 3: RAW CSV VIEW */}
+          {activeTab === 'csv' && (
+            <div className="rounded-2xl border border-white/[0.08] bg-black/40 backdrop-blur-xl overflow-hidden p-5 space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>RFC 4180 CSV with UTF-8 BOM (\uFEFF) • Ready for direct MockTest Portal Upload</span>
+                <button
+                  type="button"
+                  onClick={handleCopyCsv}
+                  className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-bold"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? 'Copied!' : 'Copy to Clipboard'}</span>
+                </button>
+              </div>
+              <pre className="p-4 bg-black/80 rounded-xl border border-white/[0.08] text-xs text-slate-300 font-mono overflow-x-auto max-h-[500px] custom-scrollbar whitespace-pre-wrap">
+                {serializeMockTestToCsv(extractedMcqs, answerFormat)}
+              </pre>
+            </div>
+          )}
+
+          {/* Bottom Summary Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 rounded-2xl border border-white/[0.08] bg-black/50 backdrop-blur-xl text-xs text-slate-400">
+            <div className="flex items-center gap-4">
+              <span>Total Questions: <strong className="text-white">{extractedMcqs.length}</strong></span>
+              <span>Fully Solved: <strong className="text-emerald-400">{solvedCount}</strong></span>
+              <span>Pages Digitized: <strong className="text-blue-400">{pages.filter(p => p.status === 'ready').length} of {pages.length}</strong></span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleDownloadCsv}
+                disabled={extractedMcqs.length === 0}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Download 18-Column CSV</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Extracted MCQs Live Studio Section */}
-      <div className="rounded-2xl border border-white/[0.08] bg-black/40 backdrop-blur-xl overflow-hidden shadow-2xl">
-        {/* Studio Tabs & Action Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 border-b border-white/[0.08] bg-white/[0.02]">
-          {/* Tabs */}
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('cards')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'cards'
-                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+      {/* Lightbox / Zoom Modal for Original Page Image */}
+      {zoomImageUrl && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setZoomImageUrl(null)}
+        >
+          <div 
+            className="relative max-w-5xl max-h-[92vh] bg-black rounded-2xl overflow-hidden border border-white/[0.15] shadow-2xl p-2 flex flex-col items-center"
+            onClick={e => e.stopPropagation()}
+          >
+            <button 
+              type="button" 
+              onClick={() => setZoomImageUrl(null)} 
+              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/80 text-white hover:text-amber-400 border border-white/[0.2] transition-colors"
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Interactive Cards ({extractedMcqs.length})</span>
+              <X className="w-5 h-5" />
             </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('grid')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'grid'
-                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Live 18-Column CSV Grid</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('csv')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                activeTab === 'csv'
-                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Raw CSV</span>
-            </button>
-          </div>
-
-          {/* Right Toolbar Actions */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Auto Solve All */}
-            <button
-              type="button"
-              onClick={handleAutoSolveAll}
-              disabled={isSolvingAll || extractedMcqs.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg text-xs font-bold shadow transition-all disabled:opacity-40"
-              title="Automatically generate deep step-by-step Hindi & English solutions with LaTeX & HTML"
-            >
-              {isSolvingAll ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              )}
-              <span>{isSolvingAll ? 'Generating Solutions...' : '⚡ Auto-Solve All (AI)'}</span>
-            </button>
-
-            {/* AI Proofread & Clean Tags */}
-            <button
-              type="button"
-              onClick={handleProofreadAll}
-              disabled={isProofreading || extractedMcqs.length === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-lg text-xs font-bold shadow transition-all disabled:opacity-40"
-              title="AI Proofread: Deeply analyzes questions, fixes OCR typos, and strips all exam shift citations and junk text"
-            >
-              {isProofreading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
-              )}
-              <span>{isProofreading ? 'Proofreading...' : '✨ AI Proofread (Clean Tags)'}</span>
-            </button>
-
-            {/* Clean Tags & Math Delimiters */}
-            <button
-              type="button"
-              onClick={handleCleanAllMath}
-              disabled={extractedMcqs.length === 0}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-lg text-xs font-bold transition-all disabled:opacity-40"
-              title="Clean exam shift tags, junk text, raw $$ formatting, percentages, and rupee signs for mocktest portals"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>🧹 Clean Tags & Math</span>
-            </button>
-
-            {/* Add Custom Question */}
-            <button
-              type="button"
-              onClick={handleAddQuestion}
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-semibold transition-all"
-            >
-              <Plus className="w-3.5 h-3.5 text-amber-400" />
-              <span>Add MCQ</span>
-            </button>
-
-            {/* Download CSV */}
-            <button
-              type="button"
-              onClick={handleDownloadCsv}
-              disabled={extractedMcqs.length === 0}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-extrabold shadow-md transition-all disabled:opacity-40"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download 18-Col CSV</span>
-            </button>
+            <img 
+              src={zoomImageUrl} 
+              alt="Page High-Res Zoom" 
+              className="max-w-full max-h-[86vh] object-contain rounded-lg mx-auto" 
+            />
           </div>
         </div>
-
-        {/* Tab 1: Interactive Bilingual Cards */}
-        {activeTab === 'cards' && (
-          <div className="p-5 space-y-4 max-h-[700px] overflow-y-auto custom-scrollbar">
-            {extractedMcqs.length === 0 ? (
-              <div className="py-16 text-center text-slate-500 space-y-2">
-                <FileSpreadsheet className="w-12 h-12 mx-auto text-slate-600" />
-                <p className="text-sm font-semibold">No questions extracted yet.</p>
-                <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Upload PDF pages or images above and click "Start MCQ Extraction" to extract questions into this studio.
-                </p>
-              </div>
-            ) : (
-              extractedMcqs.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 space-y-3 hover:border-white/[0.15] transition-all"
-                >
-                  {/* Card Header */}
-                  <div className="flex items-center justify-between gap-3 pb-2 border-b border-white/[0.06]">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-xs border border-amber-500/30">
-                        #{item.question_r}
-                      </span>
-                      <span className="text-xs font-semibold text-slate-400">
-                        Type: <strong className="text-white">{item.question_type}</strong>
-                      </span>
-                      <span className="text-xs text-slate-400">
-                        Difficulty: <strong className="text-white capitalize">{item.difficulty_level}</strong>
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {/* Solve Single Button */}
-                      <button
-                        type="button"
-                        onClick={() => handleSolveSingle(item)}
-                        disabled={solvingId === item.id}
-                        className="flex items-center gap-1 px-2.5 py-1 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded text-xs font-semibold transition-all disabled:opacity-50"
-                      >
-                        {solvingId === item.id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-3 h-3" />
-                        )}
-                        <span>{item.solution_hi || item.solution_en ? 'Regenerate Solution' : 'Auto-Solve'}</span>
-                      </button>
-
-                      {/* Correct Answer Selector */}
-                      <div className="flex items-center gap-1 text-xs">
-                        <span className="text-slate-400 font-bold">Ans:</span>
-                        <input
-                          type="text"
-                          value={item.answer}
-                          onChange={(e) => updateItem(item.id, { answer: e.target.value })}
-                          className="w-12 px-1.5 py-0.5 bg-black/60 border border-emerald-500/40 rounded text-center text-xs font-extrabold text-emerald-400 focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Delete */}
-                      <button
-                        type="button"
-                        onClick={() => deleteItem(item.id)}
-                        className="p-1 text-slate-500 hover:text-rose-400 rounded transition-all"
-                        title="Delete question"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Bilingual Columns */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {/* Hindi Column */}
-                    <div className="space-y-2 p-3 bg-black/30 rounded-xl border border-white/[0.05]">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider">
-                          Hindi (question_hi & options)
-                        </span>
-                      </div>
-
-                      {/* Hindi Question Text */}
-                      <textarea
-                        rows={2}
-                        value={item.question_hi}
-                        onChange={(e) => updateItem(item.id, { question_hi: e.target.value })}
-                        placeholder="<p>प्रश्न हिंदी में यहाँ लिखें...</p>"
-                        className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-lg text-xs text-slate-200 focus:outline-none focus:border-amber-500/50 custom-scrollbar"
-                      />
-
-                      {/* Hindi Options 1-4 */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {(['option1_hi', 'option2_hi', 'option3_hi', 'option4_hi'] as const).map((key, optIdx) => (
-                          <div key={key} className="flex items-center gap-1.5 px-2 py-1 bg-black/40 border border-white/[0.06] rounded-lg">
-                            <span className="text-[10px] font-bold text-amber-400">{String.fromCharCode(65 + optIdx)}</span>
-                            <input
-                              type="text"
-                              value={item[key] || ''}
-                              onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
-                              placeholder={`विकल्प ${String.fromCharCode(65 + optIdx)}`}
-                              className="w-full bg-transparent text-xs text-slate-300 focus:outline-none"
-                            />
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Hindi Solution */}
-                      <div className="space-y-1 mt-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">
-                          Detailed Hindi Solution (solution_hi)
-                        </span>
-                        <textarea
-                          rows={3}
-                          value={item.solution_hi}
-                          onChange={(e) => updateItem(item.id, { solution_hi: e.target.value })}
-                          placeholder="<p><b>हल:</b> विस्तृत विवरण, सूत्र एवं गणना...</p>"
-                          className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-lg text-xs text-amber-200/90 focus:outline-none focus:border-amber-500/50 custom-scrollbar"
-                        />
-                      </div>
-                    </div>
-
-                    {/* English Column */}
-                    <div className="space-y-2 p-3 bg-black/30 rounded-xl border border-white/[0.05]">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider">
-                          English (question_en & options)
-                        </span>
-                      </div>
-
-                      {/* English Question Text */}
-                      <textarea
-                        rows={2}
-                        value={item.question_en}
-                        onChange={(e) => updateItem(item.id, { question_en: e.target.value })}
-                        placeholder="<p>Enter English question here...</p>"
-                        className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-lg text-xs text-slate-200 focus:outline-none focus:border-blue-500/50 custom-scrollbar"
-                      />
-
-                      {/* English Options 1-4 */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {(['option1_en', 'option2_en', 'option3_en', 'option4_en'] as const).map((key, optIdx) => (
-                          <div key={key} className="flex items-center gap-1.5 px-2 py-1 bg-black/40 border border-white/[0.06] rounded-lg">
-                            <span className="text-[10px] font-bold text-blue-400">{String.fromCharCode(65 + optIdx)}</span>
-                            <input
-                              type="text"
-                              value={item[key] || ''}
-                              onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
-                              placeholder={`Option ${String.fromCharCode(65 + optIdx)}`}
-                              className="w-full bg-transparent text-xs text-slate-300 focus:outline-none"
-                            />
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* English Solution */}
-                      <div className="space-y-1 mt-2">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">
-                          Detailed English Solution (solution_en)
-                        </span>
-                        <textarea
-                          rows={3}
-                          value={item.solution_en}
-                          onChange={(e) => updateItem(item.id, { solution_en: e.target.value })}
-                          placeholder="<p><b>Solution:</b> Step-by-step derivation, formula & proofs...</p>"
-                          className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-lg text-xs text-teal-200/90 focus:outline-none focus:border-blue-500/50 custom-scrollbar"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* Tab 2: Live 18-Column CSV Grid */}
-        {activeTab === 'grid' && (
-          <div className="p-4 max-h-[700px] overflow-auto custom-scrollbar">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-white/[0.1] bg-white/[0.04] text-[11px] font-bold text-amber-400 whitespace-nowrap">
-                  <th className="p-2">#</th>
-                  <th className="p-2 min-w-[200px]">question_hi</th>
-                  <th className="p-2 min-w-[100px]">opt1_hi</th>
-                  <th className="p-2 min-w-[100px]">opt2_hi</th>
-                  <th className="p-2 min-w-[100px]">opt3_hi</th>
-                  <th className="p-2 min-w-[100px]">opt4_hi</th>
-                  <th className="p-2 min-w-[200px]">solution_hi</th>
-                  <th className="p-2 min-w-[200px]">question_en</th>
-                  <th className="p-2 min-w-[100px]">opt1_en</th>
-                  <th className="p-2 min-w-[100px]">opt2_en</th>
-                  <th className="p-2 min-w-[100px]">opt3_en</th>
-                  <th className="p-2 min-w-[100px]">opt4_en</th>
-                  <th className="p-2 min-w-[200px]">solution_en</th>
-                  <th className="p-2 min-w-[70px]">answer</th>
-                  <th className="p-2 min-w-[120px]">set_name</th>
-                  <th className="p-2 min-w-[80px]">difficulty</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/[0.05] text-slate-300">
-                {extractedMcqs.map((row) => (
-                  <tr key={row.id} className="hover:bg-white/[0.02]">
-                    <td className="p-2 font-bold text-amber-400">{row.question_r}</td>
-                    <td className="p-2 truncate max-w-[220px]" title={row.question_hi}>{row.question_hi}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option1_hi}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option2_hi}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option3_hi}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option4_hi}</td>
-                    <td className="p-2 truncate max-w-[220px]" title={row.solution_hi}>{row.solution_hi}</td>
-                    <td className="p-2 truncate max-w-[220px]" title={row.question_en}>{row.question_en}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option1_en}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option2_en}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option3_en}</td>
-                    <td className="p-2 truncate max-w-[100px]">{row.option4_en}</td>
-                    <td className="p-2 truncate max-w-[220px]" title={row.solution_en}>{row.solution_en}</td>
-                    <td className="p-2 font-bold text-emerald-400">{row.answer}</td>
-                    <td className="p-2 truncate max-w-[120px]">{row.set_name}</td>
-                    <td className="p-2 capitalize">{row.difficulty_level}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Tab 3: Raw CSV Preview */}
-        {activeTab === 'csv' && (
-          <div className="p-4 space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>RFC 4180 CSV with UTF-8 BOM (\uFEFF) • Ready for direct MockTest Portal Upload</span>
-              <button
-                type="button"
-                onClick={handleCopyCsv}
-                className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-bold"
-              >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? 'Copied!' : 'Copy to Clipboard'}</span>
-              </button>
-            </div>
-            <pre className="p-4 bg-black/80 rounded-xl border border-white/[0.08] text-xs text-slate-300 font-mono overflow-x-auto max-h-[500px] custom-scrollbar whitespace-pre-wrap">
-              {serializeMockTestToCsv(extractedMcqs, answerFormat)}
-            </pre>
-          </div>
-        )}
-
-        {/* Footer Status Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 border-t border-white/[0.08] bg-white/[0.02] text-xs text-slate-400">
-          <div className="flex items-center gap-4">
-            <span>Total: <strong className="text-white">{extractedMcqs.length}</strong></span>
-            <span>Solved: <strong className="text-emerald-400">{solvedCount}</strong></span>
-            <span>Unsolved: <strong className="text-amber-400">{extractedMcqs.length - solvedCount}</strong></span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleDownloadCsv}
-              disabled={extractedMcqs.length === 0}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download 18-Column CSV</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Modals for Settings and Connect */}
       <GeminiSettingsModal

@@ -83,5 +83,7 @@ export interface MockTestMcqItem {
   answer: string; // "D", "[\"3\",\"4\"]", or "{\"start\":\"86\",\"end\":\"86\"}"
   set_name: string;
   difficulty_level: DifficultyLevel;
+  pageNumber?: number;
+  pageId?: string;
 }
 

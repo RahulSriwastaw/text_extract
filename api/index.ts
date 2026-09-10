@@ -349,10 +349,22 @@ const cleanBilingualDuplicates = (text: string): string => {
   });
 
   // 2. Format single line bilingual questions into two lines WITHOUT slash (ONLY FOR QUESTIONS)
-  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n/]+?)\s*\/+\s*([A-Za-z\$\\\(\[\{\d][^\n]+)$/gm, (match, hindiPart, engPart) => {
-    const cleanHindi = hindiPart.replace(/\s*\/+$/, '').trim();
+  // A bilingual question separator '/' must separate a Hindi question from an English question!
+  // It MUST NOT match inside units like 'm/s', 'km/h', or formulas like '1/2', 'a/b'!
+  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n]+?)\s+(?:\/|\|)\s+([A-Za-z][^\n]+)$/gm, (match, hindiPart, engPart) => {
+    // If the slash is inside $...$ or $$...$$, DO NOT split!
+    const dollarsBefore = (hindiPart.match(/\$/g) || []).length;
+    if (dollarsBefore % 2 !== 0) return match;
+
+    const cleanHindi = hindiPart.trim();
     const cleanEng = engPart.trim();
-    if (/[\u0900-\u097F]/.test(cleanHindi) || /[a-zA-Z]/.test(cleanEng)) {
+    
+    const hasHindi = /[\u0900-\u097F]/.test(cleanHindi);
+    const engHindiCharCount = (cleanEng.match(/[\u0900-\u097F]/g) || []).length;
+    const engLatinCharCount = (cleanEng.match(/[a-zA-Z]/g) || []).length;
+
+    // cleanEng must be an actual English question (more Latin letters than Devanagari letters)
+    if (hasHindi && engLatinCharCount > 5 && engLatinCharCount > engHindiCharCount) {
       return cleanHindi + '\n' + cleanEng;
     }
     return match;
@@ -367,16 +379,14 @@ const cleanBilingualDuplicates = (text: string): string => {
   cleaned = cleaned.replace(/^(\s*(?:\([a-zA-Z0-9]+\)|[a-zA-Z0-9]+[\.\)])\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
     const lNorm = left.trim();
     const rNorm = right.trim();
-    if (lNorm.toLowerCase() === rNorm.toLowerCase()) {
-      return prefix + lNorm;
-    }
-    if (lNorm.replace(/\s+/g, '').toLowerCase() === rNorm.replace(/\s+/g, '').toLowerCase()) {
+    if (lNorm.toLowerCase() === rNorm.toLowerCase() || lNorm.replace(/\s+/g, '').toLowerCase() === rNorm.replace(/\s+/g, '').toLowerCase()) {
       return prefix + lNorm;
     }
     return match;
   });
 
   // 5. Clean standalone numbers/formulas/symbols/units duplicated with / e.g. '123 / 123', '$$x=2$$ / $$x=2$$'
+  // (Only replace if left and right are identical, never touching m/s or km/h)
   cleaned = cleaned.replace(/([^\n/]+?)\s*\/\s*([^\n/]+)/g, (match, left, right) => {
     const lTrim = left.trim();
     const rTrim = right.trim();
@@ -388,6 +398,164 @@ const cleanBilingualDuplicates = (text: string): string => {
 
   return cleaned;
 };
+
+const MATH_WORDS = new Set([
+  'sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'cosec',
+  'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
+  'log', 'ln', 'lg', 'lim', 'det', 'exp', 'max', 'min',
+  'pi', 'theta', 'alpha', 'beta', 'gamma', 'delta', 'lambda', 'sigma', 'omega', 'phi',
+  'frac', 'sqrt', 'times', 'div', 'pm', 'cdot', 'text', 'mathrm', 'overline', 'underline',
+  'cm', 'm', 'mm', 'km', 'kg', 'g', 'deg'
+]);
+
+function findMathStartIndex(str: string): number {
+  const prefixMatch = str.match(/^(\s*(?:\*\*)?(?:Question|Q\.?|Prashn|प्रश्न)?\s*[:\-]?\s*#?\s*\(?\d+\)?[\.\)\-:]\s*(?:\*\*)?\s*)/i);
+  const minPrefixIdx = (prefixMatch && prefixMatch[0].length > 0) ? prefixMatch[0].length : 0;
+
+  let idx = str.length;
+
+  while (idx > minPrefixIdx && /\s/.test(str[idx - 1])) {
+    idx--;
+  }
+
+  while (idx > minPrefixIdx) {
+    const prevChar = str[idx - 1];
+
+    if (/[\d\s\+\-\*\/\=\(\)\[\]\{\}\\\^\_\.\,\u00D7\u00F7\u03C0\u03B8\u00B0]/.test(prevChar)) {
+      if (prevChar === '.' && idx - 1 <= minPrefixIdx) {
+        break;
+      }
+      idx--;
+      continue;
+    }
+
+    if (/[a-zA-Z]/.test(prevChar)) {
+      let wordStart = idx - 1;
+      while (wordStart > minPrefixIdx && /[a-zA-Z]/.test(str[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = str.substring(wordStart, idx).toLowerCase();
+
+      const isSingleLetterVar = word.length === 1;
+      const isMathWord = MATH_WORDS.has(word);
+      const isTrigCombo = /^(sin|cos|tan|sec|csc|cot|cosec)[a-z]$/i.test(word);
+
+      if (isSingleLetterVar || isMathWord || isTrigCombo) {
+        idx = wordStart;
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    break;
+  }
+
+  if (idx < minPrefixIdx) {
+    idx = minPrefixIdx;
+  }
+
+  while (idx < str.length && /\s/.test(str[idx])) {
+    idx++;
+  }
+
+  return idx;
+}
+
+export function fixDanglingMathOnLine(line: string): string {
+  if (!line) return line;
+
+  let s = line;
+
+  // Separate Hindi/Devanagari characters glued to $ or $$
+  s = s.replace(/([\u0900-\u097F])(\$+)/g, '$1 $2');
+  s = s.replace(/(\$+)([\u0900-\u097F])/g, '$1 $2');
+
+  // Fix broken units across spaces e.g. "m s$" -> "m/s$", "m / s$" -> "m/s$"
+  s = s.replace(/\bm\s*\/?\s*s(\$+)/g, 'm/s$1');
+  s = s.replace(/\bm\s*\/?\s*s\b/g, 'm/s');
+
+  // 1. Fix squashed math + units + $$:
+  // e.g. "$$\frac{16\pi}{3}$$ cm^2$$" -> "$$\frac{16\pi}{3}\text{ cm}^2$$"
+  s = s.replace(/\$\$([^\$]+)\$\$\s*(?:\\text\{)?\s*(cm|m|mm|km|km\/h|kg|g)\b(\^[0-9]+)?\}?\s*\$\$/g, (_m, math, unit, exp) => {
+    const expStr = exp ? exp : '';
+    return `$$${math.trim()}\\text{ ${unit}}${expStr}$$`;
+  });
+
+  // Also fix: "$$\frac{16\pi}{3}$$ cm^2" (without trailing $$) when cm^2 was left outside math
+  s = s.replace(/\$\$([^\$]+)\$\$\s*(cm\^2|m\^2|cm\^3|m\^3)\b/g, (_m, math, unit) => {
+    return `$$${math.trim()}\\text{ ${unit}}$$`;
+  });
+
+  // 2. Normalize single-dollar $...$ to $$...$$
+  s = s.replace(/(?<!\$)\$(?!\$)([^\$\n]+?)(?<!\$)\$(?!\$)/g, (_m, p1) => `$$${p1}$$`);
+
+  // 3. Normalize multiple consecutive dollars
+  s = s.replace(/\${3,}/g, '$$');
+
+  // 4. Check for dangling closing $$ without opening $$
+  let result = '';
+  let inMath = false;
+  let i = 0;
+
+  while (i < s.length) {
+    if (s.startsWith('$$', i)) {
+      if (inMath) {
+        inMath = false;
+        result += '$$';
+        i += 2;
+      } else {
+        const remaining = s.substring(i + 2);
+        const hasClosingLater = remaining.includes('$$');
+
+        if (hasClosingLater) {
+          inMath = true;
+          result += '$$';
+          i += 2;
+        } else {
+          // Unmatched dangling closing $$! Scan backwards to find where the math started
+          const startIdx = findMathStartIndex(result);
+          if (startIdx < result.length) {
+            const beforeMath = result.substring(0, startIdx);
+            const mathPart = result.substring(startIdx);
+            result = beforeMath + '$$' + mathPart + '$$';
+          } else {
+            result += '$$';
+          }
+          i += 2;
+        }
+      }
+    } else {
+      result += s[i];
+      i++;
+    }
+  }
+
+  if (inMath) {
+    result += '$$';
+  }
+
+  // 5. Clean & format all $$...$$ expressions
+  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_m, mathBody) => {
+    let mb = mathBody;
+
+    // Convert Unicode math operators
+    mb = mb.replace(/×/g, ' \\times ')
+           .replace(/÷/g, ' \\div ')
+           .replace(/°/g, '^\\circ ')
+           .replace(/·/g, ' \\cdot ');
+
+    // Normalize bare trig & math function names without backslash
+    mb = mb.replace(/(?<!\\)\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\s*([a-zA-Z0-9\(\[\{])/g, '\\$1 $2');
+    mb = mb.replace(/(?<!\\)\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\b(?![a-zA-Z])/g, '\\$1');
+    mb = mb.replace(/(?<![a-zA-Z\\])(sin|cos|tan|sec|csc|cot|cosec)([A-Z])/g, '\\$1 $2');
+
+    mb = mb.replace(/\s+/g, ' ').trim();
+    return `$$${mb}$$`;
+  });
+
+  return result;
+}
 
 const cleanMixedMathText = (text: string): string => {
   if (!text) return text;
@@ -406,8 +574,18 @@ const cleanMixedMathText = (text: string): string => {
     return `${hindi.trim()}\n${eng.trim()}: $$${math.trim()}$$`;
   });
 
-  // 3. Fix standalone \text{...} in normal sentences
-  cleaned = cleaned.replace(/\\text\{([^\}]+)\}/g, '$1');
+  // 3. Fix standalone \text{...} only if it contains full non-math sentences (Devanagari or long phrases)
+  cleaned = cleaned.replace(/\\text\{([^\}]+)\}/g, (match, inner) => {
+    // Keep measurement units like \text{ cm}, \text{m}, etc.
+    if (/^\s*(cm|m|mm|km|kg|g|s|h|sec|min|km\/h|degree|deg)\b/i.test(inner)) {
+      return match;
+    }
+    // Remove if it's Hindi or long natural language
+    if (/[\u0900-\u097F]/.test(inner) || inner.length > 20) {
+      return inner;
+    }
+    return match;
+  });
 
   return cleaned;
 };
@@ -420,7 +598,7 @@ const wrapLatexExpressions = (text: string): string => {
 
   // 1. Repair double backslashes, control characters & keywords
   s = s
-    .replace(/\\\\+(frac|sqrt|times|beta|rho|neq|alpha|theta|overline|underline|pm|div|cdot|left|right|sum|int|pi|infty|circ|deg|text|mathbf|mathrm|ge|le|approx|quad|to|sim|partial|Delta|lambda|mu|sigma|omega|phi|sin|cos|tan|log|ln|lim|binom)/g, '\\$1')
+    .replace(/\\\\+(frac|sqrt|times|beta|rho|neq|alpha|theta|overline|underline|pm|div|cdot|left|right|sum|int|pi|infty|circ|deg|text|mathbf|mathrm|ge|le|approx|quad|to|sim|partial|Delta|lambda|mu|sigma|omega|phi|sin|cos|tan|sec|csc|cot|log|ln|lim|binom)/g, '\\$1')
     .replace(/[\x0c\f]rac/g, '\\frac')
     .replace(/[\x08\b]eta/g, '\\beta')
     .replace(/(^|[^\\a-zA-Z])rac\{/g, '$1\\frac{')
@@ -430,7 +608,15 @@ const wrapLatexExpressions = (text: string): string => {
     .replace(/(^|[^\\a-zA-Z])frac(\d{2})(\d{2})/g, '$1\\frac{$2}{$3}')
     .replace(/(^|[^\\a-zA-Z])frac(\d)(\d{2})/g, '$1\\frac{$2}{$3}')
     .replace(/(^|[^\\a-zA-Z])frac(\d)(\d)(?!\d)/g, '$1\\frac{$2}{$3}')
-    .replace(/\${3,}/g, '$$');
+    .replace(/\${3,}/g, '$$')
+    .replace(/([\u0900-\u097F])(\$+)(?!\$)/g, '$1 $2')
+    .replace(/(\$+)([\u0900-\u097F])/g, '$1 $2')
+    .replace(/\bm\s*\n\s*\/?\s*s(\$+)/g, 'm/s$1')
+    .replace(/\bm\s*\n\s*\/?\s*s\b/g, 'm/s');
+
+  // Fix dangling dollars & normalize on every line
+  const fixedLines = s.split('\n').map(fixDanglingMathOnLine);
+  s = fixedLines.join('\n');
 
   const lines = s.split('\n');
   const resultLines = lines.map(line => {
@@ -453,7 +639,7 @@ const wrapLatexExpressions = (text: string): string => {
       let result = '';
       
       while (segment.length > 0) {
-        const match = segment.match(/\\(frac|binom|sqrt|overline|underline|times|div|pm|cdot|alpha|beta|theta|sum|int|pi|sin|cos|tan)/);
+        const match = segment.match(/\\(frac|binom|sqrt|overline|underline|times|div|pm|cdot|alpha|beta|theta|sum|int|pi|sin|cos|tan|sec|csc|cot|cosec|arcsin|arccos|arctan|sinh|cosh|tanh|log|ln|lim|circ|deg|degree|infty|neq|le|ge|approx)/);
         if (!match || match.index === undefined) {
           result += segment;
           break;
@@ -505,6 +691,13 @@ const wrapLatexExpressions = (text: string): string => {
           }
         }
 
+        // Capture any trailing units or exponents (e.g. \text{ cm}^2, cm^2, ^2)
+        const trailingSegment = segment.substring(endIdx);
+        const unitMatch = trailingSegment.match(/^\s*(?:\\text\{\s*(?:cm|m|mm|km|kg|g)\b\}|\b(?:cm|m|mm|km|kg|g)\b)?(?:\^[0-9]+)?/);
+        if (unitMatch && unitMatch[0].trim().length > 0) {
+          endIdx += unitMatch[0].length;
+        }
+
         const beforeMath = segment.substring(0, startIdx);
         const mathExpr = segment.substring(startIdx, endIdx).trim();
         result += beforeMath + `$$${mathExpr}$$`;
@@ -522,9 +715,55 @@ const wrapLatexExpressions = (text: string): string => {
 
 const formatMcqText = (text: string): string => {
   if (!text) return text;
+  text = formatChemicalReactions(text);
   
-  // 1. First repair and wrap any un-delimited LaTeX formulas
-  let res = wrapLatexExpressions(text);
+  // 0. Pre-process: Join multi-line math formulas spanning across newlines:
+  let preProcessed = text
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_m, body) => '$$' + body.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim() + '$$')
+    .replace(/(?<!\$)\$([^\$\n]*?)\n\s*([^\$\n]*?)\$(?!\$)/g, (_m, p1, p2) => '$' + (p1 + ' ' + p2).replace(/\s+/g, ' ').trim() + '$');
+  
+  // Fix broken units across lines e.g. "m\ns$" -> "m/s$"
+  preProcessed = preProcessed.replace(/\bm\s*\n\s*\/?\s*s(\$+)/g, 'm/s$1');
+  preProcessed = preProcessed.replace(/\bm\s*\n\s*\/?\s*s\b/g, 'm/s');
+  preProcessed = preProcessed.replace(/(\b[0-9a-zA-Z\^\_]+)\s*\n\s*\/?\s*(s|sec|hr|h|min|m|cm|mm|kg|g)\b(\$+)/g, '$1 $2$3');
+
+  // Join wrapped question lines of the same language
+  const rawLines = preProcessed.split('\n');
+  const mergedLines: string[] = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i].trim();
+    if (!line) {
+      mergedLines.push('');
+      continue;
+    }
+    if (mergedLines.length === 0) {
+      mergedLines.push(line);
+      continue;
+    }
+    const prevLine = mergedLines[mergedLines.length - 1].trim();
+    const isPrevQuestion = /^#\s/i.test(prevLine) || /^(?:(?:Question|Q\.?|Prashn|प्रश्न)?\s*[:\-]?\s*#?\s*\(?\d+\)?[\.\)\-:]\s*)/i.test(prevLine);
+    const isCurrOption = /^(\([a-eA-E0-9]\)|[a-eA-E0-9][\.\)]|[A-E][\.\)])\s/.test(line);
+    const isCurrAnswer = /^(?:Answer|Ans)\s*[:\-]/i.test(line);
+    const isCurrNewQuestion = /^#\s/i.test(line) || /^(?:(?:Question|Q\.?|Prashn|प्रश्न)\s*[:\-]?\s*#?\s*\(?\d+\)?[\.\)\-:]\s*)/i.test(line);
+    const isCurrHeader = /^(Section|Part|Khand|Unit|Paper|Note|Instruction)\b/i.test(line);
+
+    if (isPrevQuestion && !isCurrOption && !isCurrAnswer && !isCurrNewQuestion && !isCurrHeader) {
+      const prevHasHindi = /[\u0900-\u097F]/.test(prevLine);
+      const currHasHindi = /[\u0900-\u097F]/.test(line);
+      const currIsEnglishOnly = !currHasHindi && /[a-zA-Z]{3,}/.test(line);
+
+      if (prevHasHindi && currIsEnglishOnly && !prevLine.includes('\n')) {
+        mergedLines.push(line);
+      } else {
+        mergedLines[mergedLines.length - 1] = prevLine + ' ' + line;
+      }
+    } else {
+      mergedLines.push(line);
+    }
+  }
+
+  let res = mergedLines.map(fixDanglingMathOnLine).join('\n');
+  res = wrapLatexExpressions(res);
 
   // 2. Separate squashed Answer from options e.g. '(D) $$\frac{31}{40}$$ / Answer: D' -> '(d) $$\frac{31}{40}$$\nAnswer: D'
   res = res.replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
@@ -541,30 +780,47 @@ const formatMcqText = (text: string): string => {
     return `${qPrefix}\n$$${cleanMath}$$`;
   });
 
-  // 5. Ensure any dangling single $$ on a line gets balanced
-  const lines = res.split('\n');
-  const fixedLines: string[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    const dollarCount = (line.match(/\$\$/g) || []).length;
-    if (dollarCount % 2 !== 0) {
-      if (i + 1 < lines.length && (lines[i + 1].match(/\$\$/g) || []).length === 0 && /[+\-*\/=^_\\{}]/.test(lines[i + 1])) {
-        const cleanL1 = line.replace(/\$\$/, '').trim();
-        const nextMath = lines[i + 1].trim();
-        fixedLines.push(cleanL1 ? `${cleanL1}\n$$${nextMath}$$` : `$$${nextMath}$$`);
-        i++;
-        continue;
-      } else {
-        line = line + '$$';
-      }
-    }
-    fixedLines.push(line);
-  }
+  // 5. Run fixDanglingMathOnLine on final lines
+  res = res.split('\n').map(fixDanglingMathOnLine).join('\n');
 
-  return fixedLines.join('\n');
+  return res;
 };
 
+const SUB_MAP: Record<string, string> = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+  '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉'
+};
+
+export function formatChemicalReactions(text: string): string {
+  if (!text) return text;
+  let res = text;
+  
+  // 1. Format \xrightarrow[below]{above} or \xrightarrow{above}
+  res = res.replace(/\\?xrightarrow\s*(?:\[([^\]]*)\])?\s*\{([^\}]*)\}/gi, (_m, below, above) => {
+    const cleanAbove = (above || '').replace(/\\text\{([^\}]+)\}/g, '$1').replace(/[\{\}]/g, '').trim();
+    const cleanBelow = (below || '').replace(/\\text\{([^\}]+)\}/g, '$1').replace(/[\{\}]/g, '').trim();
+    const label = cleanBelow ? `${cleanAbove} / ${cleanBelow}` : cleanAbove;
+    return label ? ` ⎯⎯(${label})⎯→ ` : ` → `;
+  });
+
+  // 2. Heal malformed xrightarrow without braces e.g. "xrightarrowताप", "xrightarrowHeat", "xrightarrowसूर्य का प्रकाश"
+  res = res.replace(/\\?xrightarrow\s*([a-zA-Z\u0900-\u097F\s]+?)(?=\s+[A-Z0-9\+\-]|s*$)/g, (_m, label) => {
+    const cleanLabel = label.trim();
+    return cleanLabel ? ` ⎯⎯(${cleanLabel})⎯→ ` : ` → `;
+  });
+
+  // 3. For chemical equations with subscripts like CaCO_3(s), FeSO_4(aq), convert to Unicode subscripts
+  res = res.replace(/([A-Za-z\)])(_[0-9]+|_\{[0-9]+\})/g, (_m, elem, sub) => {
+    const digits = sub.replace(/[_{}]/g, '');
+    const unicodeSub = digits.split('').map(d => SUB_MAP[d] || d).join('');
+    return elem + unicodeSub;
+  });
+
+  return res;
+}
+
 const cleanRefinedText = (text: string): string => {
+  text = formatChemicalReactions(text);
   if (!text) return text;
   
   let res = text;
@@ -640,7 +896,8 @@ const extractLayoutWithRetry = async (
   isBilingual: boolean,
   mcqMode: boolean,
   refineMode: boolean = false,
-  showAnswers: boolean = true
+  showAnswers: boolean = true,
+  userKey?: string
 ): Promise<any> => {
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
@@ -743,7 +1000,7 @@ ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
     : `**FULLY EXTRACTION MODE (A TO Z)**:
 - Extract EVERY piece of text from the page, including headers, footers, page numbers, and small boilerplate text. Leave nothing out.`;
 
-  return runAIAction(async (client) => {
+  const executeCall = async (client: any) => {
     const response = await client.models.generateContent({
       model: 'gemini-flash-lite-latest',
       contents: [
@@ -777,8 +1034,10 @@ Use this as a reference to improve your accuracy, especially for math formulas a
    - ${numberingInstruction}
    - For multiple-choice options, ensure each option (a), (b), (c), (d) is on a separate line.
    - Preserve mathematical formulas and scientific notations accurately.
-   - **STRICT MATH RULE**: You MUST enclose ALL mathematical formulas, variables, and expressions in double dollar signs like \`$$\` ... \`$$\` (e.g., \`$$x^2 + y^2 = r^2$$\`), even for simple inline variables like \`$$x$$\`.
-   - Use standard LaTeX format for all math.
+   - **STRICT MATH RULE**: You MUST enclose ALL mathematical formulas, variables, equations, and expressions in double dollar signs like \`$$\` ... \`$$\` (e.g., \`$$x^2 + y^2 = r^2$$\`, \`$$(\sec A + \tan A) \times (1 - \sin A) \times \sec A$$\`).
+   - **NO DANGLING DOLLARS**: NEVER output a closing \`$$\` without a matching opening \`$$\`! Never output broken math like \`(sec A + tan A)... \\sec A$$\` or \`\\frac{16\\pi}{3} cm^2$$\`. Every math expression MUST start with \`$$\` and end with \`$$\`.
+   - For trigonometric expressions, ALWAYS use standard LaTeX: \`\\sin A\`, \`\\cos A\`, \`\\tan A\`, \`\\sec A\`, \`\\csc A\`, \`\\cot A\` inside \`$$\`...\`$$\`.
+   - For formulas with units of measurement (area, volume, etc.), wrap them properly: e.g. \`$$\\frac{16\\pi}{3}\\text{ cm}^2$$\`.
    - PAY VERY CLOSE ATTENTION to recurring decimals or numbers with a line/bar over them (e.g., $0.04\\overline{3}$ or $0.\\overline{43}$). You MUST extract the bar correctly using LaTeX \\overline{}! This is a very common requirement.
    - For fractions, always use \`\\frac{num}{den}\`. For square roots, use \`\\sqrt{...}\`.
    - Ensure complex equations are balanced and valid LaTeX.
@@ -900,10 +1159,17 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         content: contentStr
       };
     });
-  });
+  };
+
+  if (userKey && userKey.trim().length > 10) {
+    const userClient = new GoogleGenAI({ apiKey: userKey.trim() });
+    return executeCall(userClient);
+  }
+
+  return runAIAction(executeCall);
 };
 
-const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false): Promise<any> => {
+const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false, userKey?: string): Promise<any> => {
   const bilingualAddon = isBilingual 
     ? `
     IMPORTANT: This document is BILINGUAL (Hindi and English).
@@ -927,19 +1193,24 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false)
     3. Clean up any OCR errors, typos, or stray characters.
     4. Ensure the question is complete and logical.
     5. Remove any junk text that is not part of the question or options (e.g., page numbers, headers, footers).
+    6. LaTeX & Units Rule:
+       - Keep all math, formulas, and units in proper LaTeX (e.g. "$3 \\times 10^8\\text{ m/s}$", "$\\frac{a}{b}$", "$\\sin\\theta$").
+       - ALWAYS ensure opening and closing math delimiters ($ or $) are properly paired. NEVER leave unclosed or dangling delimiters.
+       - Measurement units like m/s, km/h, cm^2 must NEVER be split across lines or separated from their numbers.
+   - **CHEMICAL EQUATIONS**: For reaction conditions over arrows, use standard LaTeX \\xrightarrow{\\text{condition}} or ⎯⎯(condition)⎯→ (e.g. \\xrightarrow{\\text{Heat}}, \\xrightarrow{\\text{ताप}}). NEVER drop the backslash or concatenate into "xrightarrowHeat". Subscripts in chemical formulas must use standard LaTeX (e.g. CaCO_3, CuSO_4, H_2O).
+       - Keep complete sentences intact; do NOT insert arbitrary newlines inside a question.
+    
+    Return a JSON object with a single key "questions" which is an array of objects.
+    Each object must have:
+    - "questionText": string
+    - "options": array of objects, each with "label" (e.g. "A", "B") and "text" (string)
+    - "answer": string (optional, if detected)
     
     RAW TEXT:
     "${rawText}"
-    
-    Return the result as a JSON object with a 'questions' array. Each item should have:
-    - questionText: string
-    - options: array of {label: string, text: string}
-    - answer: string (the label of the correct option if found, e.g., "A")
-    
-    If no MCQs are found, return {"questions": []}.
   `;
 
-  return runAIAction(async (client) => {
+  const executeProofread = async (client: any) => {
     const response = await client.models.generateContent({
       model: 'gemini-flash-lite-latest',
       contents: prompt,
@@ -954,7 +1225,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false)
       throw new Error("Empty response from Gemini API");
     }
 
-    const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    const cleanedText = responseText.replace(/^\`\`\`json\n?/, '').replace(/\n?\`\`\`$/, '').trim();
     const parsed = JSON.parse(cleanedText);
     const questions = parsed.questions || [];
     if (isBilingual) {
@@ -968,13 +1239,21 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false)
       });
     }
     return questions;
-  });
+  };
+
+  if (userKey && userKey.trim().length > 10) {
+    const userClient = new GoogleGenAI({ apiKey: userKey.trim() });
+    return executeProofread(userClient);
+  }
+
+  return runAIAction(executeProofread);
 };
 
 app.post('/api/extract', async (req, res) => {
   try {
     const { base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers = true } = req.body;
-    const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers);
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, userKey);
     res.json({ elements });
   } catch (error: any) {
     console.warn("Extraction failed:", error?.message || error);
@@ -991,7 +1270,8 @@ app.post('/api/extract', async (req, res) => {
 app.post('/api/proofread', async (req, res) => {
   try {
     const { rawText, isBilingual } = req.body;
-    const questions = await proofreadWithRetry(rawText, isBilingual);
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const questions = await proofreadWithRetry(rawText, isBilingual, userKey);
     res.json({ questions });
   } catch (error: any) {
     console.warn("Proofread failed:", error?.message || error);
@@ -1005,4 +1285,283 @@ app.post('/api/proofread', async (req, res) => {
   }
 });
 
+app.post('/api/mocktest-solve', async (req, res) => {
+  try {
+    const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option1_en, option2_en, option3_en, option4_en, answer, question_type } = req.body;
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    const qPrompt = `You are an elite Indian exam educator, subject matter expert, and competitive exam test-series architect (SSC CGL, Railway RRB, Banking IBPS/SBI, UPSC, GATE, State PSC).
+Conduct a DEEP PEDAGOGICAL RESEARCH and provide a RIGOROUS, STEP-BY-STEP SOLUTION for the question below.
+
+Question Context:
+Correct Answer: ${answer || 'Deduce correct answer'}
+Question Type: ${question_type || 'MCQ'}
+
+HINDI:
+Question: ${question_hi || ''}
+(A) ${option1_hi || ''}
+(B) ${option2_hi || ''}
+(C) ${option3_hi || ''}
+(D) ${option4_hi || ''}
+
+ENGLISH:
+Question: ${question_en || ''}
+(A) ${option1_en || ''}
+(B) ${option2_en || ''}
+(C) ${option3_en || ''}
+(D) ${option4_en || ''}
+
+DEEP RESEARCH & SOLUTION REQUIREMENTS:
+1. 'solution_hi': Detailed, pedagogical explanation in Hindi wrapped in semantic HTML (<p><b>हल:</b>...</p>).
+   - Must include:
+     a) दिया गया डेटा (Given Data) & मुख्य अवधारणा (Core Concept/Theorem).
+     b) आवश्यक सूत्र (Formula in LaTeX $...$ or $$...$$).
+     c) चरण-दर-चरण विस्तृत गणना (Step-by-step calculation).
+     d) निष्कर्ष एवं सही विकल्प (Final answer conclusion stating why Option ${answer} is correct).
+2. 'solution_en': Detailed, rigorous solution in English wrapped in semantic HTML (<p><b>Solution:</b>...</p>).
+   - Must include:
+     a) Key concept & underlying principle.
+     b) Standard formula / theorem in LaTeX $...$.
+     c) Intermediate algebraic/numerical steps with proofs.
+     d) Final deduction matching option ${answer}.
+3. LaTeX Math: Every variable, fraction, power, square root, equation MUST use LaTeX: e.g. $x$, $\\frac{a}{b}$, $x^2 + y^2 = 25$, $\\sqrt{z}$, $\\times$.
+4. Determine 'difficulty_level': 'easy' | 'medium' | 'hard'.
+5. Output ONLY valid JSON:
+{
+  "solution_hi": "<p><b>हल:</b>...</p>",
+  "solution_en": "<p><b>Solution:</b>...</p>",
+  "difficulty_level": "medium"
+}`;
+
+    const executeSolve = async (client: any) => {
+      let modelToUse = 'gemini-2.5-flash';
+      try {
+        const response = await client.models.generateContent({
+          model: modelToUse,
+          contents: [{ text: qPrompt }],
+          config: {
+            temperature: 0.15,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      } catch (err: any) {
+        // Fallback to flash-lite if 2.5 is unavailable
+        const response = await client.models.generateContent({
+          model: 'gemini-flash-lite-latest',
+          contents: [{ text: qPrompt }],
+          config: {
+            temperature: 0.2,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      }
+    };
+
+    let rawJson = '';
+    if (userKey) {
+      const userClient = new GoogleGenAI({ apiKey: userKey });
+      rawJson = await executeSolve(userClient);
+    } else {
+      rawJson = await runAIAction(executeSolve);
+    }
+
+    const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned);
+    res.json({
+      solution_hi: parsed.solution_hi || '',
+      solution_en: parsed.solution_en || '',
+      difficulty_level: parsed.difficulty_level || 'medium'
+    });
+  } catch (error: any) {
+    console.warn("MockTest solve failed:", error?.message || error);
+    res.status(500).json({ error: error.message || "Failed to generate solution" });
+  }
+});
+
+app.post('/api/mocktest-extract', async (req, res) => {
+  try {
+    const { base64Image, setName = 'Exam Paper' } = req.body;
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    let cleanBase64 = base64Image || '';
+    if (cleanBase64.includes(';base64,')) {
+      cleanBase64 = cleanBase64.split(';base64,')[1];
+    }
+
+    const promptText = `You are a professional Exam Paper Digitizer and MockTest Content Architect.
+Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.
+
+Extract into a strict JSON array of objects with these exact 18 fields:
+1. question_r: Sequence number (1, 2, 3...)
+2. question_hi: Question in Hindi wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
+3. option1_hi: Option 1 (A) in Hindi
+4. option2_hi: Option 2 (B) in Hindi
+5. option3_hi: Option 3 (C) in Hindi
+6. option4_hi: Option 4 (D) in Hindi
+7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
+8. solution_hi: Detailed step-by-step solution in Hindi wrapped in HTML (<p><b>हल:</b>...</p>) with formulas.
+9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
+10. option1_en: Option 1 (A) in English
+11. option2_en: Option 2 (B) in English
+12. option3_en: Option 3 (C) in English
+13. option4_en: Option 4 (D) in English
+14. option5_en: Option 5 (E) in English (empty string if 4 options)
+15. solution_en: Detailed step-by-step solution in English wrapped in HTML (<p><b>Solution:</b>...</p>) with formulas.
+16. answer: Correct answer: Single choice "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
+17. set_name: "${setName}"
+18. difficulty_level: "easy", "medium", or "hard"
+
+RULES:
+- STRICT NEGATIVE RULE: DO NOT include previous-year exam shift citations, tags, dates, or publisher labels in question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED). The question text must be purely the question statement itself!
+- If question is in one language only, translate and generate counterpart fields so BOTH Hindi and English are populated.
+- Enclose actual algebraic/calculus formulas in LaTeX ($...$). NEVER enclose plain numbers, percentages (40%), or rupee amounts (₹4,800) in dollar signs.
+- Solutions MUST be thorough, complete, and pedagogical.
+- Respond ONLY with the JSON array.`;
+
+    const executeExtract = async (client: any) => {
+      const response = await client.models.generateContent({
+        model: 'gemini-flash-lite-latest',
+        contents: [
+          {
+            inlineData: {
+              mimeType: 'image/png',
+              data: cleanBase64
+            }
+          },
+          { text: promptText }
+        ],
+        config: {
+          temperature: 0.1,
+          responseMimeType: "application/json"
+        }
+      });
+      let responseText = response?.text;
+      if (!responseText && response?.candidates?.[0]?.content?.parts) {
+        responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+      }
+      return responseText;
+    };
+
+    let rawJson = '';
+    if (userKey) {
+      const userClient = new GoogleGenAI({ apiKey: userKey });
+      rawJson = await executeExtract(userClient);
+    } else {
+      rawJson = await runAIAction(executeExtract);
+    }
+
+    const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned);
+    res.json({ items: Array.isArray(parsed) ? parsed : [] });
+  } catch (error: any) {
+    console.warn("MockTest extract failed:", error?.message || error);
+    res.status(500).json({ error: error.message || "Extraction failed" });
+  }
+});
+
+app.post('/api/mocktest-proofread', async (req, res) => {
+  try {
+    const { items } = req.body;
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.json({ items: [] });
+    }
+
+    const proofreadPrompt = `You are a Senior Exam Editor and Pedagogical Proofreader for Indian competitive exam portals (SSC, Railway RRB, Banking, UPSC).
+Rigorously PROOFREAD, CLEAN, and STANDARDIZE the following MockTest MCQ questions.
+
+STRICT EDITORIAL GUIDELINES:
+1. STRIP ALL EXAM CITATIONS & JUNK:
+   - Completely REMOVE any previous-year exam tags, shift dates, shift names, paper codes, or book citations from question texts and options!
+   - Specific examples that MUST BE STRIPPED:
+     * "RRB Tech. - (III) 23/12/2024 (Afternoon)"
+     * "NTPC CBT - I (GL) 17/06/2025 (Afternoon)"
+     * "[SSC CGL 14/07/2023 (Shift-1)]"
+     * "(RRB Group D 17-08-2022 Shift 2)"
+     * "(Morning)", "(Evening)", "(Shift II)", "(प्रथम पाली)", "(दोपहर)"
+     * "Youth Competition Times", "Pinnacle Publication", "Platform Education", etc.
+   - The question text must be STRICTLY the problem statement itself, ending with appropriate question mark (?) or period (.).
+
+2. OCR & GRAMMAR ERROR FIXING:
+   - Correct scan OCR errors (e.g., 'rn' confused with 'm', broken Hindi matras/halants, misspelled math terms).
+   - Ensure clean, natural Devanagari Hindi (question_hi) and English (question_en).
+   - If Hindi or English counterpart is missing or malformed, provide an accurate translation so both languages are fully populated.
+
+3. PRESERVE NUMBERS & ANSWERS:
+   - DO NOT alter mathematical numerical values, variables, or the correct answer.
+   - Use LaTeX ($...$) for algebraic/fractional equations.
+   - Plain numbers, percentages (40%), and currency (₹4,800) MUST NOT be enclosed in dollar signs.
+
+4. SEMANTIC HTML:
+   - Ensure question_hi and question_en are wrapped in <p>...</p>.
+   - Ensure solutions (if present) are structured with <p><b>हल:</b>...</p> and <p><b>Solution:</b>...</p>.
+
+INPUT ITEMS TO PROOFREAD:
+${JSON.stringify(items, null, 2)}
+
+OUTPUT:
+Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`\` block, preserving all schema fields.`;
+
+    const executeProofread = async (client: any) => {
+      let modelToUse = 'gemini-2.5-flash';
+      try {
+        const response = await client.models.generateContent({
+          model: modelToUse,
+          contents: [{ text: proofreadPrompt }],
+          config: {
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      } catch (err: any) {
+        const response = await client.models.generateContent({
+          model: 'gemini-flash-lite-latest',
+          contents: [{ text: proofreadPrompt }],
+          config: {
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      }
+    };
+
+    let rawJson = '';
+    if (userKey) {
+      const userClient = new GoogleGenAI({ apiKey: userKey });
+      rawJson = await executeProofread(userClient);
+    } else {
+      rawJson = await runAIAction(executeProofread);
+    }
+
+    const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned);
+    res.json({ items: Array.isArray(parsed) ? parsed : items });
+  } catch (error: any) {
+    console.warn("MockTest proofread failed:", error?.message || error);
+    res.status(500).json({ error: error.message || "Proofread failed" });
+  }
+});
+
 export default app;
+

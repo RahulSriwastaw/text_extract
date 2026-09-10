@@ -1,5 +1,7 @@
 import { NumberingStyle, ExtractedElement } from "../types";
 import { performOCR } from './ocrService';
+import { getAiSettings } from './aiDbService';
+import { extractLayoutWithUserGemini } from './userGeminiService';
 
 export const extractLayoutFromImage = async (
   base64Image: string, 
@@ -12,14 +14,21 @@ export const extractLayoutFromImage = async (
   retryCount: number = 0
 ): Promise<ExtractedElement[]> => {
   // Skipping client-side OCR for speed when processing in parallel.
-  // Gemini 2.5 Flash is highly capable of reading text directly from the image.
   const ocrText = '';
+
+  // Get user-connected Gemini credentials from local IndexedDB
+  const settings = await getAiSettings();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (settings.apiKey) {
+    headers['x-user-gemini-key'] = settings.apiKey.trim();
+  }
 
   const response = await fetch('/api/extract', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       base64Image,
       ocrText,
@@ -74,11 +83,18 @@ export const extractTextFromImage = async (base64Image: string, numberingStyle: 
 };
 
 export const proofreadMcqs = async (rawText: string, isBilingual: boolean = false, retryCount: number = 0): Promise<any[]> => {
+  const settings = await getAiSettings();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (settings.apiKey) {
+    headers['x-user-gemini-key'] = settings.apiKey.trim();
+  }
+
   const response = await fetch('/api/proofread', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({ rawText, isBilingual }),
   });
 

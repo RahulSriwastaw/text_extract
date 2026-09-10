@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import PdfConverter from './components/PdfConverter';
+import MocktestExtractor from './components/MocktestExtractor';
 import ErrorBoundary from './components/ErrorBoundary';
 import LandingPage from './components/LandingPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
 import { motion, AnimatePresence } from 'motion/react';
 
+export type ActiveTool = 'landing' | 'text-converter' | 'mcq-extractor';
+
 function App() {
-  const [showConverter, setShowConverter] = useState(false);
+  const [activeTool, setActiveTool] = useState<ActiveTool>('landing');
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
@@ -31,18 +34,26 @@ function App() {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-[#0F0F0F]">
-        <Navbar />
+        <Navbar 
+          activeTool={activeTool}
+          onSelectTool={(tool) => setActiveTool(tool)}
+        />
         <AnimatePresence mode="wait">
-          {!showConverter ? (
+          {activeTool === 'landing' && (
             <motion.div
               key="landing"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              <LandingPage onStart={() => setShowConverter(true)} />
+              <LandingPage 
+                onStartTextConverter={() => setActiveTool('text-converter')}
+                onStartMcqExtractor={() => setActiveTool('mcq-extractor')}
+              />
             </motion.div>
-          ) : (
+          )}
+
+          {activeTool === 'text-converter' && (
             <motion.div
               key="converter"
               initial={{ opacity: 0, y: 20 }}
@@ -53,6 +64,18 @@ function App() {
               <PdfConverter />
             </motion.div>
           )}
+
+          {activeTool === 'mcq-extractor' && (
+            <motion.div
+              key="mcq-extractor"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="pt-16"
+            >
+              <MocktestExtractor />
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
     </ErrorBoundary>
@@ -60,3 +83,4 @@ function App() {
 }
 
 export default App;
+

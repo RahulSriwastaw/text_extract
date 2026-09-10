@@ -1,15 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers } from 'lucide-react';
+import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers, Bot, FileSpreadsheet } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
 import HistorySidebar from './HistorySidebar';
 import McqSidebar from './McqSidebar';
+import MocktestStudioModal from './MocktestStudioModal';
 import UploadProgressBar, { UploadProgressData } from './UploadProgressBar';
-import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem } from '../types';
+import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem, MockTestMcqItem } from '../types';
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
 import { generateDocx, formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
+import { convertElementsToMockTestItems } from '../services/mocktestService';
+import GeminiConnectModal from './GeminiConnectModal';
+import GeminiSettingsModal from './GeminiSettingsModal';
+import { checkUserGeminiAuth } from '../services/userGeminiService';
+import { saveExtractedDocument } from '../services/aiDbService';
+import { 
+  extractWithStudyAiBridge, 
+  buildBridgePrompt, 
+  pingStudyAiExtension, 
+  subscribeToExtensionStatus, 
+  BridgeStatus, 
+  getStoredAiProvider,
+  setStoredAiProvider,
+  AiProvider
+} from '../services/studyAiBridgeService';
 
 // Fallback UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -23,6 +39,9 @@ const PdfConverter: React.FC = () => {
   const [rangeInput, setRangeInput] = useState<string>("");
   const [autoDownload, setAutoDownload] = useState<boolean>(true);
   const [numberingStyle, setNumberingStyle] = useState<NumberingStyle>(NumberingStyle.HASH);
+  const [userGeminiAuth, setUserGeminiAuth] = useState<{ isAuthenticated: boolean; authType: string }>({ isAuthenticated: false, authType: 'none' });
+  const [showGeminiConnect, setShowGeminiConnect] = useState(false);
+  const [showGeminiSettings, setShowGeminiSettings] = useState(false);
   const [isBilingual, setIsBilingual] = useState(false);
   const [includeImages, setIncludeImages] = useState<boolean>(false);
   const [optionArrangement, setOptionArrangement] = useState<OptionArrangement>(OptionArrangement.VERTICAL);
@@ -40,19 +59,53 @@ const PdfConverter: React.FC = () => {
   const [totalKeys, setTotalKeys] = useState(1);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressData | null>(null);
 
+  // Study AI Chrome Extension Bridge state
+  const [aiEngine, setAiEngine] = useState<'extension' | 'api'>('extension');
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
+  const [bridgeProgressMsg, setBridgeProgressMsg] = useState<string | null>(null);
+  const isUsingBridge = aiEngine === 'extension' && bridgeStatus.connected;
+  const [showMocktestStudio, setShowMocktestStudio] = useState(false);
+  const [mocktestItems, setMocktestItems] = useState<MockTestMcqItem[]>([]);
+
+  const handleOpenMocktestStudio = () => {
+    const completedElements = pages
+      .filter(p => p.status === 'done' && p.elements)
+      .flatMap(p => p.elements || []);
+
+    if (completedElements.length > 0) {
+      const converted = convertElementsToMockTestItems(completedElements, fileName || 'Mock Test 01');
+      setMocktestItems(converted);
+    }
+    setShowMocktestStudio(true);
+  };
+
   // Helper to count words
   const countWords = (text: string) => {
     return text.trim().split(/\s+/).filter(Boolean).length;
   };
 
   useEffect(() => {
+    checkAuth();
+    const unsub = subscribeToExtensionStatus((status) => {
+      setBridgeStatus(status);
+      if (status.connected) {
+        setAiEngine('extension');
+      }
+    });
+    pingStudyAiExtension().catch(() => {});
     fetch('/api/config')
       .then(r => r.json())
       .then(data => {
         if (data.totalKeys) setTotalKeys(data.totalKeys);
       })
       .catch(err => console.error("Config fetch failed:", err));
+    return () => unsub();
   }, []);
+
+  const checkAuth = async () => {
+    const auth = await checkUserGeminiAuth();
+    setUserGeminiAuth({ isAuthenticated: auth.isAuthenticated, authType: auth.authType });
+  };
 
   // Load history on mount
   useEffect(() => {
@@ -67,7 +120,7 @@ const PdfConverter: React.FC = () => {
     try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
   }, [history]);
 
-  // Auto-save to history effect
+  // Auto-save to history effect & local IndexedDB
   useEffect(() => {
     if (appState === AppState.COMPLETED) {
       const completedElements = pages
@@ -82,7 +135,19 @@ const PdfConverter: React.FC = () => {
           elements: completedElements
         };
 
-        setHistory(prev => [{ ...newItem, id: generateId() } as HistoryItem, ...prev].slice(0, 20));
+        const docId = generateId();
+        setHistory(prev => [{ ...newItem, id: docId } as HistoryItem, ...prev].slice(0, 20));
+
+        // Save to browser IndexedDB (100% local device storage)
+        const fullText = completedElements.map(e => e.type === 'text' ? (e.content || '') : '').join('\n\n');
+        saveExtractedDocument({
+          id: docId,
+          fileName,
+          pageCount: pages.length,
+          extractedText: fullText,
+          elements: completedElements,
+          timestamp: Date.now()
+        }).catch(err => console.error("Failed to save to local IndexedDB:", err));
       }
 
       if (autoDownload) {
@@ -309,12 +374,10 @@ const PdfConverter: React.FC = () => {
   const startExtraction = async () => {
     setAppState(AppState.ANALYZING);
     setErrorMsg(null);
+    setBridgeProgressMsg(null);
     
-    // Process pages in parallel batches
-    // We can confidently process up to 10 pages in parallel if multiple keys are available
-    // Even with 1 key, Gemini 1.5 Flash supports concurrent requests well (up to 15 RPM).
-    const BATCH_SIZE = Math.min(10, pages.filter(p => p.isSelected).length);
-    let criticalErrorOccurred = false;
+    // Check if using Study AI Bridge extension (Zero Token Mode)
+    const useBridge = aiEngine === 'extension' && bridgeStatus.connected;
 
     // 1. Visually mark ALL selected pages as 'processing' immediately.
     setPages(prev => prev.map(p => 
@@ -325,6 +388,114 @@ const PdfConverter: React.FC = () => {
     
     // Identify pages to process
     const pagesToProcess = pages.filter(p => p.isSelected && p.status !== 'done');
+    let criticalErrorOccurred = false;
+
+    if (useBridge) {
+      // Process sequentially through the browser AI chat tab
+      const extractedPageTexts: { [pageId: string]: string } = {};
+
+      for (let i = 0; i < pagesToProcess.length; i++) {
+        if (criticalErrorOccurred) break;
+        const page = pagesToProcess[i];
+
+        // Explicitly update current page to processing status
+        setPages(prev => prev.map(p => p.id === page.id ? {
+          ...p,
+          status: 'processing',
+          extractedText: undefined,
+          elements: undefined,
+          errorMessage: `Processing page ${page.pageNumber} (${i + 1}/${pagesToProcess.length})...`
+        } : p));
+
+        // Get trailing chunk from previous page to handle questions split across page boundaries
+        let prevTailChunk = '';
+        if (i > 0) {
+          const prevPage = pagesToProcess[i - 1];
+          const prevText = extractedPageTexts[prevPage.id] || prevPage.extractedText || '';
+          if (prevText) {
+            const lines = prevText.trim().split('\n').filter(Boolean);
+            prevTailChunk = lines.slice(-5).join('\n');
+          }
+        }
+
+        try {
+          const prompt = buildBridgePrompt(
+            numberingStyle, 
+            isBilingual, 
+            mcqMode, 
+            refineMode, 
+            showAnswers,
+            prevTailChunk || undefined
+          );
+          const { rawText, elements } = await extractWithStudyAiBridge({
+            base64Image: page.imageUrl,
+            fileName: `${fileName}_page_${page.pageNumber}.png`,
+            mimeType: 'image/png',
+            prompt,
+            provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
+            continueChat: i > 0,
+            onProgress: (step, detail) => {
+              const msg = detail || `${step.toUpperCase()}...`;
+              setBridgeProgressMsg(`Page ${i + 1}/${pagesToProcess.length}: ${msg}`);
+              setPages(prev => prev.map(p => p.id === page.id ? {
+                ...p,
+                errorMessage: msg
+              } : p));
+            }
+          });
+
+          // Calculate words and points
+          const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
+          extractedPageTexts[page.id] = pageText;
+          const pageWords = countWords(pageText);
+          setWordsConsumed(prev => prev + pageWords);
+          setPointsConsumed(prev => prev + 1);
+
+          // If the first element completed a split question from the previous page, update previous page
+          const firstElem = elements[0];
+          if (firstElem && (firstElem as any).continues_previous && i > 0) {
+            const prevPage = pagesToProcess[i - 1];
+            setPages(prev => prev.map(p => {
+              if (p.id === prevPage.id && p.elements && p.elements.length > 0) {
+                // If previous page had the partial question cut off, remove the trailing fragment
+                const trimmed = p.elements.slice(0, -1);
+                return {
+                  ...p,
+                  elements: trimmed,
+                  extractedText: trimmed.map(e => e.type === 'text' ? (e.content || '') : `[Image: ${e.content || ''}]`).join('\n\n')
+                };
+              }
+              return p;
+            }));
+          }
+
+          // Mark success
+          setPages(prev => prev.map(p => p.id === page.id ? { 
+            ...p, 
+            status: 'done', 
+            elements,
+            errorMessage: undefined,
+            extractedText: elements.map(e => e.type === 'text' ? (e.content || '') : `[Image: ${e.content || ''}]`).join('\n\n')
+          } : p));
+
+          // Pause briefly between pages so browser tab and AI session settle
+          if (i < pagesToProcess.length - 1) {
+            await new Promise(r => setTimeout(r, 1200));
+          }
+        } catch (e: any) {
+          console.error(`Error processing page ${page.pageNumber} via TextExtract Bridge:`, e);
+          const errorStr = e?.message || String(e);
+          setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: errorStr } : p));
+        }
+      }
+
+      setBridgeProgressMsg(null);
+      setAppState(AppState.COMPLETED);
+      return;
+    }
+
+    // Direct Gemini API mode
+    const BATCH_SIZE = Math.min(10, pagesToProcess.length);
 
     for (let i = 0; i < pagesToProcess.length; i += BATCH_SIZE) {
         if (criticalErrorOccurred) break;
@@ -416,6 +587,57 @@ const PdfConverter: React.FC = () => {
 
     // Update to processing
     setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined, errorMessage: undefined } : p));
+
+    // If using Study AI Bridge
+    if (aiEngine === 'extension' && bridgeStatus.connected) {
+      try {
+        const pageIdx = pages.findIndex(p => p.id === id);
+        let prevTailChunk = '';
+        if (pageIdx > 0) {
+          const prevP = pages[pageIdx - 1];
+          if (prevP && prevP.extractedText) {
+            const lines = prevP.extractedText.trim().split('\n').filter(Boolean);
+            prevTailChunk = lines.slice(-5).join('\n');
+          }
+        }
+        const prompt = buildBridgePrompt(
+          numberingStyle, 
+          isBilingual, 
+          mcqMode, 
+          refineMode, 
+          showAnswers,
+          prevTailChunk || undefined
+        );
+        const { rawText, elements } = await extractWithStudyAiBridge({
+          base64Image: page.imageUrl,
+          fileName: `${fileName}_page_${page.pageNumber}.png`,
+          mimeType: 'image/png',
+          prompt,
+          provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
+          continueChat: true,
+          onProgress: (_step, detail) => {
+            setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: detail || undefined } : p));
+          }
+        });
+
+        const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
+        const pageWords = countWords(pageText);
+        setWordsConsumed(prev => prev + pageWords);
+        setPointsConsumed(prev => prev + 1);
+
+        setPages(prev => prev.map(p => p.id === id ? { 
+          ...p, 
+          status: 'done', 
+          elements,
+          errorMessage: undefined,
+          extractedText: elements.map(e => e.type === 'text' ? (e.content || '') : `[Image: ${e.content || ''}]`).join('\n\n')
+        } : p));
+        return;
+      } catch (e: any) {
+        setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: e?.message || String(e) } : p));
+        return;
+      }
+    }
 
     try {
       const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers);
@@ -653,7 +875,38 @@ const PdfConverter: React.FC = () => {
 
       <div className="max-w-7xl mx-auto px-3 py-3 md:px-3 md:py-12">
         
-        <header className="mb-6 flex items-center justify-end">
+        <header className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {aiEngine === 'extension' && bridgeStatus.connected ? (
+              <button 
+                onClick={() => setShowGeminiConnect(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-bold bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 rounded-[6px] hover:bg-emerald-500/20 transition-colors"
+                title={`TextExtract Pro Bridge is active with ${(bridgeStatus.provider || getStoredAiProvider()).toUpperCase()}`}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{(bridgeStatus.provider || getStoredAiProvider()).toUpperCase()} Active</span>
+              </button>
+            ) : userGeminiAuth.isAuthenticated ? (
+              <button 
+                onClick={() => setShowGeminiSettings(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-[6px] hover:bg-emerald-500/20 transition-colors"
+                title="Direct Gemini API is active"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Gemini API Active</span>
+              </button>
+            ) : (
+              <button 
+                onClick={() => setShowGeminiConnect(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[#FF6B2B]/15 hover:bg-[#FF6B2B]/25 border border-[#FF6B2B]/30 text-[#FF884D] rounded-[6px] transition-colors shadow-sm"
+                title="Connect AI Bridge or Gemini account"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Connect AI Engine (Free)</span>
+              </button>
+            )}
+          </div>
+
           <div className="flex items-center gap-2">
             {pages.length > 0 && (
               <button 
@@ -677,7 +930,7 @@ const PdfConverter: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5 }}
-                  className="text-center mb-12 space-y-4"
+                  className="text-center mb-8 space-y-4"
                 >
                     <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-[#FF884D] text-xs uppercase tracking-wider font-bold mb-2 shadow-inner">
                         <Sparkles className="w-3.5 h-3.5 text-[#FF6B2B]" />
@@ -707,6 +960,54 @@ const PdfConverter: React.FC = () => {
                         </div>
                     </div>
                 </motion.div>
+
+                {/* User-Owned Gemini Engine Callout Banner */}
+                <div className="mb-8 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.08] backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] flex items-center justify-center text-white shrink-0 shadow-lg shadow-[#FF6B2B]/20">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-white">
+                          {userGeminiAuth.isAuthenticated ? 'Your Personal Gemini Engine is Active' : 'Use Your Own Gemini for Unlimited Text Extraction'}
+                        </h4>
+                        {userGeminiAuth.isAuthenticated && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                            Connected ✓
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        {userGeminiAuth.isAuthenticated 
+                          ? 'Extracting text using your personal Google/Gemini quota. 100% saved locally on this device.'
+                          : 'Zero server limits, maximum speed, and your extracted documents stay 100% private in local browser storage.'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                    {userGeminiAuth.isAuthenticated ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowGeminiSettings(true)}
+                        className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-bold text-slate-200 transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Settings className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Gemini Settings</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowGeminiConnect(true)}
+                        className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] hover:shadow-lg hover:shadow-[#FF6B2B]/25 text-xs font-bold text-white transition-all flex items-center justify-center gap-2"
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Connect Your Gemini (Free)</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
 
                 <FileUploader 
                   onFilesSelected={handleFilesSelected} 
@@ -800,18 +1101,27 @@ const PdfConverter: React.FC = () => {
                                         <RefreshCw className="w-4 h-4 text-[#FF6B2B] animate-spin flex-shrink-0" />
                                         <div className="flex flex-col min-w-0">
                                             <span className="text-xs font-bold text-white truncate">Processing: {fileName}</span>
-                                            <div className="flex items-center gap-2">
+                                            {bridgeProgressMsg && (
+                                              <span className="text-[10px] text-[#FF884D] font-medium truncate">
+                                                {bridgeProgressMsg}
+                                              </span>
+                                            )}
+                                            <div className="flex items-center gap-2 mt-0.5">
                                                 <span className="text-[10px] text-[#FF884D] font-bold tabular-nums">
                                                     {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
                                                 </span>
                                                 <span className="text-[10px] text-slate-400 font-medium">
                                                     {pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages
                                                 </span>
-                                                {totalKeys > 1 && (
+                                                {isUsingBridge ? (
+                                                  <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black rounded uppercase tracking-wider border border-blue-500/20">
+                                                    Free Bridge
+                                                  </span>
+                                                ) : totalKeys > 1 ? (
                                                   <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded uppercase tracking-wider border border-emerald-500/20">
                                                     Turbo: {totalKeys} Keys
                                                   </span>
-                                                )}
+                                                ) : null}
                                                 {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
                                                     <div className="flex items-center gap-2">
                                                         <button 
@@ -898,7 +1208,69 @@ const PdfConverter: React.FC = () => {
                                 )}
 
                                 {appState !== AppState.ANALYZING ? (
-                                    <div className="flex gap-2 flex-1 sm:flex-none">
+                                    <div className="flex flex-wrap items-center gap-2 flex-1 sm:flex-none">
+                                        {/* AI Engine Switcher */}
+                                        <div className="flex items-center gap-1 p-1 bg-white/[0.03] border border-white/[0.08] rounded-xl">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setAiEngine('extension');
+                                                    if (!bridgeStatus.connected) {
+                                                        setShowGeminiConnect(true);
+                                                    }
+                                                }}
+                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                                    aiEngine === 'extension'
+                                                        ? bridgeStatus.connected
+                                                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow'
+                                                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                                        : 'text-slate-400 hover:text-white'
+                                                }`}
+                                                title={bridgeStatus.connected ? "Zero Token Extension Mode Active" : "Extension not detected - click to connect"}
+                                            >
+                                                <Bot className="w-3.5 h-3.5" />
+                                                <span className="hidden sm:inline">Free Bridge</span>
+                                                <span className={`text-[9px] px-1 py-0.2 rounded font-bold ${bridgeStatus.connected ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                                                    {bridgeStatus.connected ? '0 Tokens' : 'Connect'}
+                                                </span>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAiEngine('api')}
+                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                                    aiEngine === 'api'
+                                                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white shadow'
+                                                        : 'text-slate-400 hover:text-white'
+                                                }`}
+                                                title="Direct Gemini API (Uses API Keys)"
+                                            >
+                                                <Zap className="w-3.5 h-3.5" />
+                                                <span className="hidden sm:inline">API Mode</span>
+                                            </button>
+                                        </div>
+
+                                        {/* AI Model Selector for Free Bridge */}
+                                        {aiEngine === 'extension' && (
+                                            <div className="flex items-center gap-1.5 px-2 py-1 bg-white/[0.03] border border-white/[0.08] rounded-xl">
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase hidden md:inline">Model:</span>
+                                                <select
+                                                    value={getStoredAiProvider()}
+                                                    onChange={(e) => {
+                                                        const newModel = e.target.value as AiProvider;
+                                                        setStoredAiProvider(newModel);
+                                                        setBridgeStatus(prev => ({ ...prev, provider: newModel }));
+                                                    }}
+                                                    className="bg-[#0B0D13] border border-emerald-500/30 text-emerald-300 text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-400 cursor-pointer"
+                                                    title="Select AI Model (Gemini, DeepSeek, ChatGPT, Claude)"
+                                                >
+                                                    <option value="gemini" className="bg-[#121524] text-white">⚡ Gemini Web</option>
+                                                    <option value="deepseek" className="bg-[#121524] text-white">🧠 DeepSeek Web</option>
+                                                    <option value="chatgpt" className="bg-[#121524] text-white">💬 ChatGPT Web</option>
+                                                    <option value="claude" className="bg-[#121524] text-white">🎭 Claude Web</option>
+                                                </select>
+                                            </div>
+                                        )}
+
                                         <label className="px-3.5 py-2 text-slate-200 bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all">
                                             <Plus className="w-4 h-4 text-[#FF6B2B]" />
                                             ADD
@@ -1093,6 +1465,14 @@ const PdfConverter: React.FC = () => {
                             >
                                 <ListChecks className="w-3.5 h-3.5 text-[#FF6B2B]" />
                                 <span>MCQ Bank</span>
+                            </button>
+                            <button
+                                onClick={handleOpenMocktestStudio}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 hover:text-white rounded-lg text-xs font-bold border border-emerald-500/30 transition-all shadow-sm"
+                                title="Open in 18-Field MockTest CSV Studio"
+                            >
+                                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>MockTest Studio (CSV)</span>
                             </button>
                         </div>
                    </div>
@@ -1403,6 +1783,33 @@ const PdfConverter: React.FC = () => {
             </div>
         </div>
       </div>
+
+      <GeminiConnectModal
+        isOpen={showGeminiConnect}
+        onClose={() => {
+          setShowGeminiConnect(false);
+          checkAuth();
+        }}
+        onConnected={() => {
+          setShowGeminiConnect(false);
+          checkAuth();
+        }}
+      />
+
+      <GeminiSettingsModal
+        isOpen={showGeminiSettings}
+        onClose={() => {
+          setShowGeminiSettings(false);
+          checkAuth();
+        }}
+      />
+
+      <MocktestStudioModal
+        isOpen={showMocktestStudio}
+        onClose={() => setShowMocktestStudio(false)}
+        initialItems={mocktestItems}
+        defaultSetName={fileName || 'Exam Mock Test 01'}
+      />
     </div>
   );
 };

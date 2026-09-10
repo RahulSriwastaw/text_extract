@@ -14,10 +14,14 @@ import {
 } from 'lucide-react';
 
 interface LandingPageProps {
-  onStart: () => void;
+  onStartTextConverter: () => void;
+  onStartMcqExtractor: () => void;
 }
 
-const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ 
+  onStartTextConverter, 
+  onStartMcqExtractor 
+}) => {
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
@@ -115,22 +119,68 @@ const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
             Extract multiple-choice questions, complex math equations, full tables, and bilingual exam papers into perfectly formatted <strong className="text-white">.docx</strong> files in seconds.
           </motion.p>
 
-          {/* Call to Action Button */}
+          {/* Two Dedicated Tool Launchers */}
           <motion.div 
             variants={itemVariants}
-            className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto mb-16"
           >
+            {/* Tool 1: Document to Word */}
             <button
-              onClick={onStart}
-              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white font-bold text-base shadow-xl shadow-[#FF6B2B]/25 hover:shadow-[#FF6B2B]/40 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3 group"
+              type="button"
+              onClick={onStartTextConverter}
+              className="p-5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.1] hover:border-[#FF6B2B]/50 transition-all text-left group flex flex-col justify-between shadow-xl relative overflow-hidden"
             >
-              <span>Launch Converter</span>
-              <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              <div className="space-y-2 mb-4">
+                <div className="flex items-center justify-between">
+                  <div className="p-2.5 rounded-xl bg-[#FF6B2B]/15 text-[#FF884D] border border-[#FF6B2B]/25">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-slate-300">
+                    DOCX / Word
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white group-hover:text-[#FFA477] transition-colors">
+                  Document / Text Extractor
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Extract PDFs, books & papers into clean editable Word (.docx) documents with full tables & native math.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs font-bold text-[#FF884D] group-hover:translate-x-1 transition-transform">
+                <span>Launch Document Tool</span>
+                <ArrowRight className="w-4 h-4" />
+              </div>
             </button>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Supports PDF, JPG, PNG & Scanned Papers</span>
-            </div>
+
+            {/* Tool 2: Dedicated MockTest MCQ Extractor */}
+            <button
+              type="button"
+              onClick={onStartMcqExtractor}
+              className="p-5 rounded-2xl bg-gradient-to-br from-amber-500/[0.08] to-orange-500/[0.04] hover:from-amber-500/[0.15] hover:to-orange-500/[0.08] border border-amber-500/30 hover:border-amber-400 transition-all text-left group flex flex-col justify-between shadow-xl relative overflow-hidden"
+            >
+              <div className="space-y-2 mb-4">
+                <div className="flex items-center justify-between">
+                  <div className="p-2.5 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    18-Col CSV
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white group-hover:text-amber-300 transition-colors">
+                  MockTest MCQ Extractor
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Extract bilingual MCQs page-by-page with LaTeX math, deep step-by-step AI solutions & 18-col CSV export.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs font-extrabold text-amber-400 group-hover:translate-x-1 transition-transform">
+                <span>Launch MCQ Tool</span>
+                <ArrowRight className="w-4 h-4" />
+              </div>
+            </button>
           </motion.div>
 
           {/* Feature Grid */}

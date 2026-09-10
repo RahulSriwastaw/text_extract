@@ -1,0 +1,1009 @@
+/**
+ * TextExtract Pro Bridge — generic content script for DeepSeek / ChatGPT / Claude
+ * Version: 2.0.0
+ */
+
+(function () {
+  const EXT_VER = "2.0.0";
+  if (window.__tfStudyAiGenericVer === EXT_VER) return;
+  window.__tfStudyAiGenericVer = EXT_VER;
+  const LOG = (...a) => console.log("[TextExtract Bridge Gen]", ...a);
+  const COMPLETE_MARKER = "YOUR_TEST_SERIES_JSON_COMPLETED";
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  let port = null;
+  function connectKeepalive() {
+    try {
+      port = chrome.runtime.connect({ name: "study-ai-keepalive" });
+      port.onDisconnect.addListener(() => {
+        port = null;
+        setTimeout(connectKeepalive, 1200);
+      });
+    } catch {
+      setTimeout(connectKeepalive, 2000);
+    }
+  }
+  connectKeepalive();
+
+  chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+    if (!msg?.type) return;
+    if (msg.type === "STUDY_AI_RUN") {
+      sendResponse({ ok: true, started: true });
+      runExtract(msg).catch((e) => {
+        LOG("runExtract failed", e);
+        report(msg.requestId, false, null, e?.message || String(e), msg.adminTabId);
+      });
+      return false;
+    }
+    if (msg.type === "STUDY_AI_CAPTURE") {
+      sendResponse({ ok: true, started: true });
+      runCaptureOnly(msg)
+        .then((text) => reportSafe(msg.requestId, text, msg.adminTabId))
+        .catch((e) => report(msg.requestId, false, null, e?.message || String(e), msg.adminTabId));
+      return false;
+    }
+  });
+
+  function progress(requestId, step, detail, adminTabId) {
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: "STUDY_AI_PROGRESS",
+          requestId,
+          step,
+          detail,
+          chatUrl: location.href,
+          adminTabId: adminTabId || undefined,
+        },
+        () => void chrome.runtime.lastError,
+      );
+    } catch {}
+    LOG(step, detail || "");
+  }
+
+  function report(requestId, ok, text, error, adminTabId) {
+    const payload = {
+      type: "STUDY_AI_RESULT",
+      requestId,
+      ok,
+      text: text || null,
+      error: error || null,
+      chatUrl: location.href,
+      adminTabId: adminTabId || undefined,
+    };
+    const attempt = (n) => {
+      try {
+        chrome.runtime.sendMessage(payload, (res) => {
+          if (chrome.runtime.lastError || !res?.ok) {
+            if (n < 8) setTimeout(() => attempt(n + 1), 400 + n * 200);
+          }
+        });
+      } catch {
+        if (n < 8) setTimeout(() => attempt(n + 1), 500);
+      }
+    };
+    attempt(0);
+  }
+
+  function getJob(requestId, msg) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: "STUDY_AI_GET_JOB", requestId }, (res) => {
+        const fromSw = res?.job || null;
+        if (fromSw && (fromSw.prompt || fromSw.fullChat != null || fromSw.adminTabId)) {
+          if ((!fromSw.fileBase64 || fromSw.fileBase64 === "[omitted]") && msg?.jobLite?.fileBase64) {
+            fromSw.fileBase64 = msg.jobLite.fileBase64;
+          }
+          return resolve(fromSw);
+        }
+        if (msg?.jobLite) return resolve({ ...msg.jobLite, requestId });
+        resolve(null);
+      });
+    });
+  }
+
+  function startHeartbeat(requestId, adminTabId) {
+    const id = setInterval(() => {
+      try {
+        chrome.runtime.sendMessage({ type: "STUDY_AI_HEARTBEAT", requestId }, () => void chrome.runtime.lastError);
+        progress(requestId, "heartbeat", "Bridge alive — waiting for model reply…", adminTabId);
+        if (!port) connectKeepalive();
+      } catch {}
+    }, 8000);
+    return () => clearInterval(id);
+  }
+
+  function deepQueryAll(selector, root = document) {
+    const out = [];
+    const visit = (node) => {
+      if (!node?.querySelectorAll) return;
+      try {
+        out.push(...node.querySelectorAll(selector));
+      } catch {}
+      for (const el of node.querySelectorAll("*")) {
+        if (el.shadowRoot) visit(el.shadowRoot);
+      }
+    };
+    visit(root);
+    return out;
+  }
+
+  function findComposer() {
+    const selectors = [
+      "textarea#chat-input",
+      'textarea[placeholder*="Message" i]',
+      'textarea[placeholder*="Ask" i]',
+      'textarea[placeholder*="Send" i]',
+      'div[contenteditable="true"][data-placeholder]',
+      'div.ProseMirror[contenteditable="true"]',
+      'div[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"]',
+      "textarea",
+    ];
+    for (const sel of selectors) {
+      const list = deepQueryAll(sel).filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 40 && r.height > 12 && r.bottom > 0 && !el.disabled;
+      });
+      if (!list.length) continue;
+      list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
+      return list[0];
+    }
+    return null;
+  }
+
+  async function waitForComposer(timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (findComposer()) return;
+      await sleep(350);
+    }
+    throw new Error("Chat composer not found — login on this AI tab first.");
+  }
+
+  function composerText(el) {
+    return (el?.innerText || el?.textContent || el?.value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function promptNeedle(prompt) {
+    const p = String(prompt || "").replace(/\s+/g, " ").trim();
+    if (p.includes(COMPLETE_MARKER)) return COMPLETE_MARKER;
+    if (p.includes("expert Indian exam-paper")) return "expert Indian exam-paper";
+    if (p.includes("professional Exam Paper Digitizer")) return "professional Exam Paper Digitizer";
+    if (p.includes("STRICT REQUIREMENT:")) return "STRICT REQUIREMENT:";
+    if (p.length > 80) return p.slice(40, 80);
+    return p.slice(0, Math.min(32, p.length));
+  }
+
+  async function tryEnableDeepSeekExtras() {
+    // Best-effort: click Vision / DeepThink toggles if present
+    const buttons = deepQueryAll("button, [role='button'], div[class*='button']");
+    for (const b of buttons) {
+      const t = ((b.getAttribute("aria-label") || "") + " " + (b.textContent || "")).toLowerCase();
+      if (/deep.?think|deepthink|r1/.test(t) && !/selected|active|on/i.test(b.className || "")) {
+        try {
+          b.click();
+          await sleep(200);
+        } catch {}
+      }
+      if (/vision|search files|upload/.test(t) && /vision/.test(t)) {
+        try {
+          b.click();
+          await sleep(200);
+        } catch {}
+      }
+    }
+  }
+
+  async function injectPrompt(el, prompt) {
+    el = findComposer() || el;
+    el.click();
+    el.focus();
+    await sleep(200);
+    if (/deepseek\.com/i.test(location.href)) await tryEnableDeepSeekExtras();
+
+    const payload = "\n" + prompt;
+    const needle = promptNeedle(prompt);
+    const hasNeedle = () => {
+      const t = composerText(findComposer() || el);
+      return t.includes(needle) || t.includes(String(prompt).slice(0, 24));
+    };
+
+    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+      const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, "value");
+      const next = (el.value || "") + payload;
+      if (desc?.set) desc.set.call(el, next);
+      else el.value = next;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      await sleep(150);
+      if (hasNeedle()) return;
+    }
+
+    try {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch {}
+
+    const chunkSize = 1500;
+    for (let i = 0; i < payload.length; i += chunkSize) {
+      try {
+        document.execCommand("insertText", false, payload.slice(i, i + chunkSize));
+      } catch {}
+      await sleep(30);
+    }
+    await sleep(200);
+    if (hasNeedle()) return;
+
+    try {
+      const dt = new DataTransfer();
+      dt.setData("text/plain", payload);
+      el.dispatchEvent(
+        new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt }),
+      );
+      await sleep(250);
+    } catch {}
+    if (hasNeedle()) return;
+
+    try {
+      el.textContent = (el.textContent || "") + payload;
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: payload.slice(0, 80) }));
+    } catch {}
+    await sleep(150);
+
+    if (!hasNeedle()) {
+      const t = composerText(findComposer() || el);
+      if (t.length > 80 && /json|question|MCQ|exam/i.test(t)) return;
+      throw new Error("Could not inject prompt. Click the chat input once, then retry from admin.");
+    }
+  }
+
+  function findSendButton() {
+    const buttons = deepQueryAll("button, [role='button']");
+    return (
+      buttons.find((b) => /^(send|submit)$/i.test((b.getAttribute("aria-label") || "").trim())) ||
+      buttons.find((b) => {
+        const al = (b.getAttribute("aria-label") || b.textContent || "").toLowerCase();
+        return (al.includes("send") || al === "↑") && !al.includes("stop");
+      }) ||
+      null
+    );
+  }
+
+  async function clickSendOrEnter(el) {
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const send = findSendButton();
+      const disabled = send?.disabled || send?.getAttribute("aria-disabled") === "true";
+      if (send && !disabled) {
+        send.click();
+        await sleep(400);
+        return;
+      }
+      await sleep(250);
+    }
+    const send = findSendButton();
+    if (send) {
+      send.click();
+      await sleep(300);
+      return;
+    }
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }
+
+  function isGenerating() {
+    const buttons = deepQueryAll("button, [role='button']");
+    return buttons.some((b) => {
+      const al = (b.getAttribute("aria-label") || b.getAttribute("title") || "").toLowerCase();
+      if (/stop generating|stop response|cancel response/i.test(al)) return true;
+      if (al === "stop") return true;
+      if (b.querySelector(".ds-icon-stop") || b.querySelector("[class*='stop-icon']")) return true;
+      return false;
+    });
+  }
+
+  function isOurPromptText(text) {
+    return /You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF/i.test(
+      text || "",
+    );
+  }
+
+  function hasStandaloneCompletion(text) {
+    if (!text || isOurPromptText(text)) return false;
+    if (/"question(?:_[a-z]+)?"\s*:/i.test(text || "")) return false;
+    const lines = String(text)
+      .split(/\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    return lines.some((l) => l.toUpperCase() === COMPLETE_MARKER);
+  }
+
+  /**
+   * Sanitizes JSON strings containing unescaped LaTeX (e.g. single backslashes in \%, \$, \frac, \times)
+   * so standard JSON.parse does not fail with 'Bad escaped character in JSON'.
+   */
+  function sanitizeJsonEscapes(jsonStr) {
+    if (!jsonStr) return "";
+    let out = "";
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < jsonStr.length; i++) {
+      const c = jsonStr[i];
+
+      if (escape) {
+        out += c;
+        escape = false;
+        continue;
+      }
+
+      if (c === '"') {
+        inString = !inString;
+        out += c;
+        continue;
+      }
+
+      if (inString && c === '\\') {
+        const next = jsonStr[i + 1] || '';
+        const afterNext = jsonStr[i + 2] || '';
+
+        // Escaped backslash
+        if (next === '\\') {
+          out += '\\\\';
+          i++;
+          continue;
+        }
+
+        if (next === '"' || next === '/') {
+          out += '\\' + next;
+          i++;
+          continue;
+        }
+
+        // Standard escape letters (\n, \r, \t, \b, \f)
+        // If followed by letters (e.g. \frac, \times, \right, \text, \beta), it's a LaTeX command!
+        const isWord = /^[a-zA-Z]/.test(afterNext);
+        if (/^[nrtbf]/.test(next) && !isWord) {
+          out += '\\' + next;
+          i++;
+          continue;
+        }
+
+        // Unicode \uXXXX
+        if (next === 'u' && /^[0-9a-fA-F]{4}/.test(jsonStr.slice(i + 2, i + 6))) {
+          out += jsonStr.slice(i, i + 6);
+          i += 5;
+          continue;
+        }
+
+        // LaTeX or invalid escape (e.g. \%, \$, \frac, \times, \sqrt, \alpha)
+        out += '\\\\';
+        continue;
+      }
+
+      // Raw unescaped newlines inside strings
+      if (inString && c === '\n') {
+        out += '\\n';
+        continue;
+      }
+      if (inString && c === '\r') {
+        out += '\\n';
+        if (jsonStr[i + 1] === '\n') i++;
+        continue;
+      }
+
+      out += c;
+    }
+    return out;
+  }
+
+  function repairJsonStringNewlines(input) {
+    return sanitizeJsonEscapes(input);
+  }
+
+  function extractBalancedObjects(text) {
+    const out = [];
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let escape = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (inString && c === "\\") {
+        escape = true;
+        continue;
+      }
+      if (c === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (c === "{") {
+        if (depth === 0) start = i;
+        depth += 1;
+      } else if (c === "}") {
+        depth -= 1;
+        if (depth === 0 && start >= 0) {
+          out.push(text.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+    return out;
+  }
+
+  function tryParseJsonLoose(s) {
+    for (const a of [
+      s,
+      repairJsonStringNewlines(s),
+      s.replace(/,\s*([\]}])/g, "$1"),
+      repairJsonStringNewlines(s).replace(/,\s*([\]}])/g, "$1"),
+    ]) {
+      try {
+        return JSON.parse(a);
+      } catch {}
+    }
+    return null;
+  }
+
+  /** Recover question objects even from huge / truncated DeepSeek dumps */
+  function extractQuestionsFromText(text) {
+    if (!text) return [];
+    let raw = String(text)
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/(^|\n)\s*json\s*\n\s*(\[)/gi, "$1$2")
+      .replace(/^json\s*/i, "")
+      .trim();
+    const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) raw = fence[1].trim();
+    else {
+      const open = raw.match(/```(?:json)?\s*([\s\S]+)$/i);
+      if (open) raw = open[1].trim();
+    }
+    const a0 = raw.indexOf("[");
+    if (a0 >= 0) raw = raw.slice(a0);
+    const repaired = repairJsonStringNewlines(raw);
+    const a1 = repaired.lastIndexOf("]");
+    if (repaired.startsWith("[") && a1 > 0) {
+      const slice = repaired.slice(0, a1 + 1);
+      const parsed = tryParseJsonLoose(slice);
+      // Accept both standard {question} format and MockTest {question_hi/question_en/question_r} format
+      const isValidMcqObj = (x) =>
+        x && (x.question != null || x.question_hi != null || x.question_en != null ||
+               x.question_r != null || x.type != null || x.content != null);
+      if (Array.isArray(parsed) && parsed.some(isValidMcqObj)) {
+        return parsed.filter(isValidMcqObj);
+      }
+    }
+    const objs = extractBalancedObjects(repaired);
+    const out = [];
+    for (const o of objs) {
+      const p = tryParseJsonLoose(o);
+      if (p && (p.question != null || p.question_hi != null || p.question_en != null ||
+                p.question_r != null || p.type != null || p.content != null)) out.push(p);
+    }
+    return out;
+  }
+
+  function extractJsonCandidate(text) {
+    const qs = extractQuestionsFromText(text);
+    if (qs.length) return JSON.stringify(qs);
+    if (!text) return null;
+    // Never treat prompt-echo / long chatter as empty complete — only short standalone done
+    if (hasStandaloneCompletion(text)) return "[]";
+    const t = String(text).trim();
+    if (
+      t.length < 400 &&
+      /^```(?:json)?\s*\[\s*\]\s*```\s*$/i.test(t) &&
+      !/"question(?:_[a-z]+)?"\s*:/i.test(t)
+    ) {
+      return "[]";
+    }
+    return null;
+  }
+
+  async function scrollDeepSeekChat() {
+    const root =
+      document.querySelector("[class*='scroll']") ||
+      document.querySelector("main") ||
+      document.scrollingElement ||
+      document.body;
+    for (let i = 0; i < 16; i++) {
+      try {
+        root.scrollTop = 0;
+      } catch {}
+      window.scrollTo(0, 0);
+      await sleep(120);
+      try {
+        root.scrollTop = root.scrollHeight || 999999;
+      } catch {}
+      window.scrollTo(0, document.body.scrollHeight);
+      await sleep(180);
+    }
+  }
+
+  function getAssistantTurnNodes() {
+    if (/deepseek\.com/i.test(location.href)) {
+      const ds = deepQueryAll(".ds-markdown, [class*='ds-markdown'], [class*='message-content']");
+      return ds.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+    }
+    if (/chatgpt\.com/i.test(location.href)) {
+      const turns = deepQueryAll('[data-message-author-role="assistant"], article [class*="agent-turn"], .markdown.prose');
+      return turns.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+    }
+    if (/claude\.ai/i.test(location.href)) {
+      const turns = deepQueryAll('[data-is-streaming], [class*="font-claude-message"], .standard-markdown');
+      return turns.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+    }
+    const general = deepQueryAll('[data-message-author-role="assistant"], .markdown, .prose');
+    if (general.length) return general.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+    return deepQueryAll("pre code, pre");
+  }
+
+  function scrapeDeepSeek(minIndex = 0) {
+    const turns = getAssistantTurnNodes();
+    if (turns.length > minIndex) {
+      const newTurns = turns.slice(minIndex);
+      for (let i = newTurns.length - 1; i >= 0; i--) {
+        const text = (newTurns[i].innerText || newTurns[i].textContent || "").trim();
+        if (text.length > 10) {
+          const qs = extractQuestionsFromText(text);
+          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
+          const j = extractJsonCandidate(text);
+          if (j) return j;
+        }
+      }
+      const last = newTurns[newTurns.length - 1];
+      return (last.innerText || last.textContent || "").trim();
+    }
+    if (minIndex > 0) return "";
+
+    const chunks = [];
+    const push = (t) => {
+      const s = (t || "").trim();
+      if (s.length < 20) return;
+      if (isOurPromptText(s) && !/"question(?:_[a-z]+)?"\s*:/i.test(s)) return;
+      chunks.push(s);
+    };
+
+    for (const sel of [
+      "pre code",
+      "pre",
+      ".md-code-block",
+      "[class*='code-block']",
+      ".ds-markdown pre",
+      ".ds-markdown code",
+      ".ds-markdown",
+      "[class*='ds-markdown']",
+      "[class*='markdown-body']",
+      "[class*='ds-message']",
+      "[class*='message-content']",
+      "[class*='hljs']",
+    ]) {
+      for (const n of deepQueryAll(sel)) push(n.innerText || n.textContent || "");
+    }
+
+    // Check direct code blocks in reverse (newest turn first)
+    for (let i = chunks.length - 1; i >= 0; i--) {
+      const c = chunks[i];
+      if (/"question(?:_[a-z]+)?"\s*:/i.test(c)) {
+        const qs = extractQuestionsFromText(c);
+        if (qs.length) return c;
+      }
+    }
+
+    // Prefer chunk with question JSON
+    const withQs = chunks.filter((c) => /"question(?:_[a-z]+)?"\s*:/i.test(c));
+    if (withQs.length) {
+      withQs.sort((a, b) => b.length - a.length);
+      const best = withQs[0];
+      if (extractQuestionsFromText(best).length) return best;
+      return withQs.join("\n\n");
+    }
+
+    for (let i = chunks.length - 1; i >= 0; i--) {
+      if (extractJsonCandidate(chunks[i])) return chunks[i];
+    }
+    if (chunks.length) return chunks[chunks.length - 1];
+
+    let body = (document.body?.innerText || "").trim();
+    body = body
+      .split(/\n{3,}/)
+      .filter((p) => /"question(?:_[a-z]+)?"\s*:/i.test(p) || !isOurPromptText(p))
+      .join("\n\n");
+    return body;
+  }
+
+  function scrapeBestReply(minIndex = 0) {
+    if (/deepseek\.com/i.test(location.href)) return scrapeDeepSeek(minIndex);
+
+    const turns = getAssistantTurnNodes();
+    if (turns.length > minIndex) {
+      const newTurns = turns.slice(minIndex);
+      for (let i = newTurns.length - 1; i >= 0; i--) {
+        const t = (newTurns[i].innerText || newTurns[i].textContent || "").trim();
+        if (extractJsonCandidate(t) || hasStandaloneCompletion(t)) return t;
+      }
+      const last = newTurns[newTurns.length - 1];
+      return (last.innerText || last.textContent || "").trim();
+    }
+    if (minIndex > 0) return "";
+
+    const codeTexts = [...deepQueryAll("code"), ...deepQueryAll("pre")]
+      .map((n) => (n.innerText || n.textContent || "").trim())
+      .filter((t) => t.length > 10 && (!isOurPromptText(t) || /"question(?:_[a-z]+)?"\s*:/i.test(t)));
+    for (let i = codeTexts.length - 1; i >= 0; i--) {
+      if (extractJsonCandidate(codeTexts[i])) return codeTexts[i];
+    }
+    const sels = [
+      '[data-message-author-role="assistant"]',
+      ".markdown",
+      ".prose",
+      "[class*='assistant']",
+      "[class*='response']",
+    ];
+    const texts = [];
+    for (const s of sels) {
+      for (const n of deepQueryAll(s)) {
+        const t = (n.innerText || "").trim();
+        if (t.length > 40 && (!isOurPromptText(t) || /"question(?:_[a-z]+)?"\s*:/i.test(t))) texts.push(t);
+      }
+    }
+    for (let i = texts.length - 1; i >= 0; i--) {
+      if (extractJsonCandidate(texts[i]) || hasStandaloneCompletion(texts[i])) return texts[i];
+    }
+    if (texts.length) return texts[texts.length - 1];
+    return (document.body?.innerText || "").slice(-80000);
+  }
+
+  function packQuestionsForReport(text) {
+    const qs = extractQuestionsFromText(text);
+    if (qs.length) {
+      return "```json\n" + JSON.stringify(qs) + "\n```";
+    }
+    const j = extractJsonCandidate(text);
+    if (j && j !== "[]") return "```json\n" + j + "\n```";
+    return text;
+  }
+
+  async function reportSafe(requestId, text, adminTabId) {
+    const packed = packQuestionsForReport(text);
+    // Large payloads often fail chrome.runtime messaging — clipboard fallback
+    if (packed && packed.length > 700000) {
+      try {
+        await navigator.clipboard.writeText(packed);
+      } catch {}
+      report(
+        requestId,
+        false,
+        null,
+        "Reply too large for bridge relay — JSON copied to clipboard. Use Paste JSON in admin.",
+        adminTabId,
+      );
+      return;
+    }
+    report(requestId, true, packed, null, adminTabId);
+  }
+
+  /** Merge every question object found across chat bubbles (full-chat). */
+  function scrapeAllQuestionJson() {
+    const chunks = [];
+    const seen = new Set();
+    const pushChunk = (t) => {
+      const s = (t || "").trim();
+      if (s.length < 20) return;
+      if (isOurPromptText(s) && !/"question(?:_[a-z]+)?"\s*:/i.test(s)) return;
+      if (seen.has(s.slice(0, 200) + ":" + s.length)) return;
+      seen.add(s.slice(0, 200) + ":" + s.length);
+      chunks.push(s);
+    };
+    for (const sel of [
+      ".ds-markdown",
+      "[class*='ds-markdown']",
+      "[class*='markdown-body']",
+      "pre",
+      "code",
+      "[class*='code-block']",
+      '[data-message-author-role="assistant"]',
+      ".markdown",
+      ".prose",
+    ]) {
+      for (const n of deepQueryAll(sel)) pushChunk(n.innerText || n.textContent || "");
+    }
+    pushChunk(scrapeBestReply());
+    const byKey = new Map();
+    for (const c of chunks) {
+      for (const q of extractQuestionsFromText(c)) {
+        const key = String(q.question || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+        if (!key || byKey.has(key)) continue;
+        byKey.set(key, q);
+      }
+    }
+    return [...byKey.values()];
+  }
+
+  function waitForJsonReplyLive(timeoutMs, requestId, baseline, adminTabId, initialReplyCount = 0) {
+    return new Promise((resolve, reject) => {
+      let lastJson = "";
+      let stable = 0;
+      let lastLen = 0;
+      let idleTicks = 0;
+      const started = Date.now();
+      let lastProgressAt = 0;
+      let sentRetryClick = false;
+
+      const tick = () => {
+        if (Date.now() - started > timeoutMs) {
+          cleanup();
+          const blob = scrapeBestReply(initialReplyCount);
+          const j = extractJsonCandidate(blob);
+          if (j && j !== "[]") return resolve(j);
+          if (j === "[]" && hasStandaloneCompletion(blob)) {
+            return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
+          }
+          if (j) return resolve(j);
+          if (blob && blob.length > 80 && !isOurPromptText(blob)) return resolve(blob);
+          return reject(
+            new Error("Timed out waiting for JSON on this page. Check AI chat tab."),
+          );
+        }
+
+        const generating = isGenerating();
+        const turns = getAssistantTurnNodes();
+        const hasNewTurn = turns.length > initialReplyCount;
+
+        // If after 7 seconds no new turn appeared and not generating, retry clicking send
+        if (!hasNewTurn && !generating && Date.now() - started > 7000 && !sentRetryClick) {
+          sentRetryClick = true;
+          const composer = findComposer();
+          if (composer) clickSendOrEnter(composer);
+        }
+
+        if (!hasNewTurn) {
+          if (Date.now() - lastProgressAt > 2500) {
+            lastProgressAt = Date.now();
+            progress(requestId, "wait", "Waiting for model to start reply…", adminTabId);
+          }
+          return;
+        }
+
+        const blob = scrapeBestReply(initialReplyCount);
+        if (!blob) return;
+
+        // Real completion only: empty [] + standalone marker in assistant text (not prompt echo)
+        if (!generating && hasStandaloneCompletion(blob)) {
+          const j = extractJsonCandidate(blob);
+          if (!j || j === "[]") {
+            cleanup();
+            progress(requestId, "done", "Completion marker — stopping", adminTabId);
+            return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
+          }
+        }
+
+        const json = extractJsonCandidate(blob);
+        if (generating) {
+          idleTicks = 0;
+          stable = 0;
+          if (Date.now() - lastProgressAt > 2000) {
+            lastProgressAt = Date.now();
+            progress(requestId, "stream", `Generating… ${blob.length} chars`, adminTabId);
+          }
+        } else if (blob.length === lastLen) {
+          idleTicks += 1;
+        } else {
+          idleTicks = 0;
+        }
+        lastLen = blob.length;
+
+        if (json && json !== "[]") {
+          if (json === lastJson) {
+            stable += 1;
+            if (stable >= 2 && (!generating || idleTicks >= 2)) {
+              cleanup();
+              progress(requestId, "done", `Captured ${json.length} chars JSON`, adminTabId);
+              return resolve(json);
+            }
+          } else {
+            lastJson = json;
+            stable = 1;
+            progress(requestId, "stream", `JSON found (${json.length} chars)…`, adminTabId);
+          }
+        } else if (
+          json === "[]" &&
+          !generating &&
+          idleTicks >= 2 &&
+          hasStandaloneCompletion(blob) &&
+          !/"question(?:_[a-z]+)?"\s*:/i.test(blob)
+        ) {
+          cleanup();
+          return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
+        } else if (!generating && idleTicks >= 4 && blob.length > 100 && !json) {
+          // Fallback: AI finished generating but JSON wasn't detected via question-field regex.
+          // This happens with MockTest JSON (question_hi/question_en) or other alternate formats.
+          const fallbackObjs = extractBalancedObjects(blob);
+          if (fallbackObjs.length > 0) {
+            const sampleParsed = tryParseJsonLoose(fallbackObjs[0]);
+            if (sampleParsed && typeof sampleParsed === "object" && !Array.isArray(sampleParsed)) {
+              cleanup();
+              progress(requestId, "done", `Fallback JSON captured (${blob.length} chars)`, adminTabId);
+              return resolve(blob);
+            }
+          }
+        }
+      };
+
+      const obs = new MutationObserver(() => tick());
+      try {
+        obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+      } catch {}
+      const interval = setInterval(tick, 500);
+      function cleanup() {
+        try { obs.disconnect(); } catch {}
+        clearInterval(interval);
+      }
+      setTimeout(tick, 1000);
+    });
+  }
+
+  async function pastePdf(job) {
+    if (!job?.fileBase64 || !job.fileName) return false;
+    try {
+      const raw = String(job.fileBase64).replace(/^data:[^;]+;base64,/, "");
+      const binary = atob(raw);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const file = new File([bytes], job.fileName || "page.png", {
+        type: job.mimeType || "image/png",
+      });
+
+      let inputs = deepQueryAll('input[type="file"]');
+      if (!inputs.length) {
+        const attachBtns = deepQueryAll('button, [role="button"]').filter((b) => {
+          const t = (
+            (b.getAttribute("aria-label") || "") +
+            " " +
+            (b.getAttribute("data-testid") || "") +
+            " " +
+            (b.textContent || "")
+          ).toLowerCase();
+          return /attach|upload|file|image|add content/i.test(t);
+        });
+        for (const b of attachBtns.slice(0, 2)) {
+          try {
+            b.click();
+          } catch {}
+          await sleep(250);
+        }
+        inputs = deepQueryAll('input[type="file"]');
+      }
+
+      if (inputs.length) {
+        const input = inputs[inputs.length - 1];
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+
+      const el = findComposer();
+      if (el) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        el.dispatchEvent(
+          new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt }),
+        );
+      }
+      return true;
+    } catch (e) {
+      LOG("pdf paste failed", e);
+      return false;
+    }
+  }
+
+  async function runExtract(msg) {
+    const requestId = msg.requestId;
+    const job = (await getJob(requestId, msg)) || msg.jobLite;
+    const adminTabId = msg.adminTabId || job?.adminTabId;
+    if (!job?.prompt) throw new Error("Job missing — restart extract from admin.");
+    const stopHb = startHeartbeat(requestId, adminTabId);
+    try {
+      progress(requestId, "composer", "Waiting for chat input…", adminTabId);
+      await waitForComposer(90000);
+      const el = findComposer();
+      if (!el) throw new Error("Composer not found — login first.");
+      const skipPdf = !!job.skipPdf && !job.fileBase64;
+      const initialReplyCount = getAssistantTurnNodes().length;
+      const baseline = `${(scrapeBestReply(initialReplyCount) || "").length}:${(scrapeBestReply(initialReplyCount) || "").slice(-400)}`;
+      if (!skipPdf && job.fileBase64) {
+        progress(requestId, "pdf", "Attaching image…", adminTabId);
+        await pastePdf(job);
+        await sleep(1000);
+      }
+      progress(requestId, "prompt", "Injecting prompt…", adminTabId);
+      await injectPrompt(el, job.prompt);
+      await sleep(400);
+      progress(requestId, "send", "Sending…", adminTabId);
+      await clickSendOrEnter(findComposer() || el);
+      progress(requestId, "wait", "Waiting for AI reply…", adminTabId);
+      const text = await waitForJsonReplyLive(180000, requestId, baseline, adminTabId, initialReplyCount);
+      progress(requestId, "done", `Captured ${text.length} chars`, adminTabId);
+      await reportSafe(requestId, text, adminTabId);
+    } finally {
+      stopHb();
+    }
+  }
+
+  async function runCaptureOnly(msg) {
+    const job = (await getJob(msg.requestId, msg)) || msg.jobLite || {};
+    const adminTabId = msg.adminTabId || job.adminTabId;
+    const fullChat = !!(msg.fullChat || job.fullChat);
+    const stopHb = startHeartbeat(msg.requestId, adminTabId);
+    try {
+      const start = Date.now();
+      while (Date.now() - start < 60000 && isGenerating()) {
+        progress(msg.requestId, "capture", "Still generating…", adminTabId);
+        await sleep(1000);
+      }
+      progress(
+        msg.requestId,
+        "capture",
+        fullChat ? "Scrolling chat + scraping every JSON batch…" : "Scraping latest reply…",
+        adminTabId,
+      );
+      if (/deepseek\.com/i.test(location.href) || fullChat) {
+        await scrollDeepSeekChat();
+      }
+      await sleep(400);
+
+      // Prefer recovered question objects (handles bare `json` label + truncated dumps)
+      const allQs = scrapeAllQuestionJson();
+      if (allQs.length) {
+        progress(msg.requestId, "done", `Found ${allQs.length} question(s)`, adminTabId);
+        return "```json\n" + JSON.stringify(allQs) + "\n```";
+      }
+
+      const blob = scrapeBestReply();
+      if (fullChat) {
+        const loose = extractJsonCandidate(blob);
+        if (loose && loose !== "[]") return "```json\n" + loose + "\n```";
+      }
+      if (!blob || blob.length < 20) throw new Error("No reply to capture yet.");
+      if (isOurPromptText(blob) && !extractJsonCandidate(blob)) {
+        throw new Error("Only prompt text found — wait for DeepSeek reply, then Capture again.");
+      }
+      if (hasStandaloneCompletion(blob) && !/"question"\s*:/i.test(blob)) {
+        return "```json\n[]\n```\n" + COMPLETE_MARKER;
+      }
+      const j = extractJsonCandidate(blob);
+      if (j && j !== "[]") return "```json\n" + j + "\n```";
+      if (/"question"\s*:/i.test(blob)) return blob;
+      throw new Error(
+        "No questions found in chat DOM. Click DeepSeek Copy on the JSON, then Paste JSON in admin.",
+      );
+    } finally {
+      stopHb();
+    }
+  }
+})();

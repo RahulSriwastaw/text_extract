@@ -56,7 +56,7 @@ export const renumberQuestionInLine = (
 const cleanBilingualDuplicates = (text: string): string => {
   if (!text) return text;
 
-  // 1. Question level identical text
+  // 1. Question level identical text: 'Question: 1. What is X? / What is X?' -> 'Question: 1. What is X?'
   let cleaned = text.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+\.?|#\d+\.?|\d+\.)\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
     const lNorm = left.trim();
     const rNorm = right.trim();
@@ -66,11 +66,23 @@ const cleanBilingualDuplicates = (text: string): string => {
     return match;
   });
 
-  // 2. Format bilingual question on two lines WITHOUT slash (ONLY FOR QUESTIONS)
-  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n/]+?)\s*\/+\s*([A-Za-z\$\\\(\[\{\d][^\n]+)$/gm, (match, hindiPart, engPart) => {
-    const cleanHindi = hindiPart.replace(/\s*\/+$/, '').trim();
+  // 2. Format single line bilingual questions into two lines WITHOUT slash (ONLY FOR QUESTIONS)
+  // A bilingual question separator '/' must separate a Hindi question from an English question!
+  // It MUST NOT match inside units like 'm/s', 'km/h', or formulas like '1/2', 'a/b'!
+  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n]+?)\s+(?:\/|\|)\s+([A-Za-z][^\n]+)$/gm, (match, hindiPart, engPart) => {
+    // If the slash is inside $...$ or $$...$$, DO NOT split!
+    const dollarsBefore = (hindiPart.match(/\$/g) || []).length;
+    if (dollarsBefore % 2 !== 0) return match;
+
+    const cleanHindi = hindiPart.trim();
     const cleanEng = engPart.trim();
-    if (/[\u0900-\u097F]/.test(cleanHindi) || /[a-zA-Z]/.test(cleanEng)) {
+    
+    const hasHindi = /[\u0900-\u097F]/.test(cleanHindi);
+    const engHindiCharCount = (cleanEng.match(/[\u0900-\u097F]/g) || []).length;
+    const engLatinCharCount = (cleanEng.match(/[a-zA-Z]/g) || []).length;
+
+    // cleanEng must be an actual English question (more Latin letters than Devanagari letters)
+    if (hasHindi && engLatinCharCount > 5 && engLatinCharCount > engHindiCharCount) {
       return cleanHindi + '\n' + cleanEng;
     }
     return match;
@@ -81,7 +93,7 @@ const cleanBilingualDuplicates = (text: string): string => {
     return optHindi.trim() + ' / ' + optEng.trim();
   });
 
-  // 4. Option level clean: '(a) 123 / 123' -> '(a) 123'
+  // 4. Option level duplicates: e.g. '(a) 123 / 123' -> '(a) 123', '(b) 45.5% / 45.5%' -> '(b) 45.5%'
   cleaned = cleaned.replace(/^(\s*(?:\([a-zA-Z0-9]+\)|[a-zA-Z0-9]+[\.\)])\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
     const lNorm = left.trim();
     const rNorm = right.trim();
@@ -91,7 +103,8 @@ const cleanBilingualDuplicates = (text: string): string => {
     return match;
   });
 
-  // 5. Inline duplicates: '123 / 123' -> '123'
+  // 5. Clean standalone numbers/formulas/symbols/units duplicated with / e.g. '123 / 123', '$$x=2$$ / $$x=2$$'
+  // (Only replace if left and right are identical, never touching m/s or km/h)
   cleaned = cleaned.replace(/([^\n/]+?)\s*\/\s*([^\n/]+)/g, (match, left, right) => {
     const lTrim = left.trim();
     const rTrim = right.trim();
@@ -122,7 +135,7 @@ const LATEX_SYMBOLS: Record<string, string> = {
     'neq': '≠', 'approx': '≈', 'leq': '≤', 'geq': '≥', 'le': '≤', 'ge': '≥',
     'forall': '∀', 'exists': '∃', 'in': '∈', 'notin': '∉', 'subset': '⊂', 'subseteq': '⊆',
     'cup': '∪', 'cap': '∩', 'vee': '∨', 'wedge': '∧',
-    'rightarrow': '→', 'leftarrow': '←', 'Rightarrow': '⇒', 'Leftarrow': '⇐',
+    'rightarrow': '→', 'leftarrow': '←', 'longrightarrow': '⟶', 'longleftarrow': '⟵', 'xrightarrow': '→', 'Rightarrow': '⇒', 'Leftarrow': '⇐',
     'to': '→', 'gets': '←', 'iff': '⇔', 'implies': '⇒', 'mapsto': '↦', 'longleftrightarrow': '↔',
     'sim': '∼', 'simeq': '≃', 'll': '≪', 'gg': '≫', 'empty': '∅', 'emptyset': '∅',
     'partial': '∂', 'nabla': '∇', 'sum': '∑', 'prod': '∏', 'int': '∫', 'oint': '∮',
@@ -597,8 +610,168 @@ function parseLatex(latex: string): any[] {
     return nodes;
 }
 
+const MATH_WORDS = new Set([
+  'sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'cosec',
+  'arcsin', 'arccos', 'arctan', 'sinh', 'cosh', 'tanh',
+  'log', 'ln', 'lg', 'lim', 'det', 'exp', 'max', 'min',
+  'pi', 'theta', 'alpha', 'beta', 'gamma', 'delta', 'lambda', 'sigma', 'omega', 'phi',
+  'frac', 'sqrt', 'times', 'div', 'pm', 'cdot', 'text', 'mathrm', 'overline', 'underline',
+  'cm', 'm', 'mm', 'km', 'kg', 'g', 'deg'
+]);
+
+function findMathStartIndex(str: string): number {
+  const prefixMatch = str.match(/^(\s*(?:\*\*)?(?:Question|Q\.?|Prashn|प्रश्न)?\s*[:\-]?\s*#?\s*\(?\d+\)?[\.\)\-:]\s*(?:\*\*)?\s*)/i);
+  const minPrefixIdx = (prefixMatch && prefixMatch[0].length > 0) ? prefixMatch[0].length : 0;
+
+  let idx = str.length;
+
+  while (idx > minPrefixIdx && /\s/.test(str[idx - 1])) {
+    idx--;
+  }
+
+  while (idx > minPrefixIdx) {
+    const prevChar = str[idx - 1];
+
+    if (/[\d\s\+\-\*\/\=\(\)\[\]\{\}\\\^\_\.\,\u00D7\u00F7\u03C0\u03B8\u00B0]/.test(prevChar)) {
+      if (prevChar === '.' && idx - 1 <= minPrefixIdx) {
+        break;
+      }
+      idx--;
+      continue;
+    }
+
+    if (/[a-zA-Z]/.test(prevChar)) {
+      let wordStart = idx - 1;
+      while (wordStart > minPrefixIdx && /[a-zA-Z]/.test(str[wordStart - 1])) {
+        wordStart--;
+      }
+      const word = str.substring(wordStart, idx).toLowerCase();
+
+      const isSingleLetterVar = word.length === 1;
+      const isMathWord = MATH_WORDS.has(word);
+      const isTrigCombo = /^(sin|cos|tan|sec|csc|cot|cosec)[a-z]$/i.test(word);
+
+      if (isSingleLetterVar || isMathWord || isTrigCombo) {
+        idx = wordStart;
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    break;
+  }
+
+  if (idx < minPrefixIdx) {
+    idx = minPrefixIdx;
+  }
+
+  while (idx < str.length && /\s/.test(str[idx])) {
+    idx++;
+  }
+
+  return idx;
+}
+
+export function fixDanglingMathOnLine(line: string): string {
+  if (!line) return line;
+
+  let s = line;
+
+  // Separate Hindi/Devanagari characters glued to $ or $$
+  s = s.replace(/([\u0900-\u097F])(\$+)/g, '$1 $2');
+  s = s.replace(/(\$+)([\u0900-\u097F])/g, '$1 $2');
+
+  // Fix broken units across spaces e.g. "m s$" -> "m/s$", "m / s$" -> "m/s$"
+  s = s.replace(/\bm\s*\/?\s*s(\$+)/g, 'm/s$1');
+  s = s.replace(/\bm\s*\/?\s*s\b/g, 'm/s');
+
+  // 1. Fix squashed math + units + $$:
+  // e.g. "$$\frac{16\pi}{3}$$ cm^2$$" -> "$$\frac{16\pi}{3}\text{ cm}^2$$"
+  s = s.replace(/\$\$([^\$]+)\$\$\s*(?:\\text\{)?\s*(cm|m|mm|km|km\/h|kg|g)\b(\^[0-9]+)?\}?\s*\$\$/g, (_m, math, unit, exp) => {
+    const expStr = exp ? exp : '';
+    return `$$${math.trim()}\\text{ ${unit}}${expStr}$$`;
+  });
+
+  // Also fix: "$$\frac{16\pi}{3}$$ cm^2" (without trailing $$) when cm^2 was left outside math
+  s = s.replace(/\$\$([^\$]+)\$\$\s*(cm\^2|m\^2|cm\^3|m\^3)\b/g, (_m, math, unit) => {
+    return `$$${math.trim()}\\text{ ${unit}}$$`;
+  });
+
+  // 2. Normalize single-dollar $...$ to $$...$$
+  s = s.replace(/(?<!\$)\$(?!\$)([^\$\n]+?)(?<!\$)\$(?!\$)/g, (_m, p1) => `$$${p1}$$`);
+
+  // 3. Normalize multiple consecutive dollars
+  s = s.replace(/\${3,}/g, '$$');
+
+  // 4. Check for dangling closing $$ without opening $$
+  let result = '';
+  let inMath = false;
+  let i = 0;
+
+  while (i < s.length) {
+    if (s.startsWith('$$', i)) {
+      if (inMath) {
+        inMath = false;
+        result += '$$';
+        i += 2;
+      } else {
+        const remaining = s.substring(i + 2);
+        const hasClosingLater = remaining.includes('$$');
+
+        if (hasClosingLater) {
+          inMath = true;
+          result += '$$';
+          i += 2;
+        } else {
+          // Unmatched dangling closing $$! Scan backwards to find where the math started
+          const startIdx = findMathStartIndex(result);
+          if (startIdx < result.length) {
+            const beforeMath = result.substring(0, startIdx);
+            const mathPart = result.substring(startIdx);
+            result = beforeMath + '$$' + mathPart + '$$';
+          } else {
+            result += '$$';
+          }
+          i += 2;
+        }
+      }
+    } else {
+      result += s[i];
+      i++;
+    }
+  }
+
+  if (inMath) {
+    result += '$$';
+  }
+
+  // 5. Clean & format all $$...$$ expressions
+  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_m, mathBody) => {
+    let mb = mathBody;
+
+    // Convert Unicode math operators
+    mb = mb.replace(/×/g, ' \\times ')
+           .replace(/÷/g, ' \\div ')
+           .replace(/°/g, '^\\circ ')
+           .replace(/·/g, ' \\cdot ');
+
+    // Normalize bare trig & math function names without backslash
+    mb = mb.replace(/(?<!\\)\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\s*([a-zA-Z0-9\(\[\{])/g, '\\$1 $2');
+    mb = mb.replace(/(?<!\\)\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\b(?![a-zA-Z])/g, '\\$1');
+    mb = mb.replace(/(?<![a-zA-Z\\])(sin|cos|tan|sec|csc|cot|cosec)([A-Z])/g, '\\$1 $2');
+
+    mb = mb.replace(/\s+/g, ' ').trim();
+    return `$$${mb}$$`;
+  });
+
+  return result;
+}
+
 function cleanMixedMathText(text: string): string {
     if (!text) return text;
+    text = formatChemicalReactions(text);
+    text = text.replace(/(\d)\s*[\u00D7\*]\s*(\d)/g, '$1 \\times $2');
 
     // 1. Fix $\text{Hindi\nEnglish} math$ or $\text{...}$ spanning lines
     let cleaned = text.replace(/\$+\s*\\text\{([\s\S]*?)\}\s*([\s\S]*?)\$+/g, (_m, textContent, mathContent) => {
@@ -614,8 +787,16 @@ function cleanMixedMathText(text: string): string {
         return `${hindi.trim()}\n${eng.trim()}: $$${math.trim()}$$`;
     });
 
-    // 3. Fix standalone \text{...} in normal sentences
-    cleaned = cleaned.replace(/\\text\{([^\}]+)\}/g, '$1');
+    // 3. Fix standalone \text{...} only if it contains full non-math sentences
+    cleaned = cleaned.replace(/\\text\{([^\}]+)\}/g, (match, inner) => {
+        if (/^\s*(cm|m|mm|km|kg|g|s|h|sec|min|km\/h|degree|deg)\b/i.test(inner)) {
+            return match;
+        }
+        if (/[\u0900-\u097F]/.test(inner) || inner.length > 20) {
+            return inner;
+        }
+        return match;
+    });
 
     return cleaned;
 }
@@ -625,7 +806,7 @@ function wrapAllLatexExpressions(text: string): string {
 
     // 1. Repair double backslashes, control characters & raw/corrupted frac
     let s = text
-        .replace(/\\\\+(frac|sqrt|times|beta|rho|neq|alpha|theta|overline|underline|pm|div|cdot|left|right|sum|int|pi|infty|circ|deg|text|mathbf|mathrm|ge|le|approx|quad|to|sim|partial|Delta|lambda|mu|sigma|omega|phi|sin|cos|tan|log|ln|lim|binom)/g, '\\$1')
+        .replace(/\\\\+(frac|sqrt|times|beta|rho|neq|alpha|theta|overline|underline|pm|div|cdot|left|right|sum|int|pi|infty|circ|deg|text|mathbf|mathrm|ge|le|approx|quad|to|sim|partial|Delta|lambda|mu|sigma|omega|phi|sin|cos|tan|sec|csc|cot|log|ln|lim|binom)/g, '\\$1')
         .replace(/[\x0c\f]rac/g, '\\frac')
         .replace(/[\x08\b]eta/g, '\\beta')
         .replace(/(^|[^\\a-zA-Z])rac\{/g, '$1\\frac{')
@@ -636,7 +817,15 @@ function wrapAllLatexExpressions(text: string): string {
         .replace(/(^|[^\\a-zA-Z])frac(\d)(\d{2})/g, '$1\\frac{$2}{$3}')
         .replace(/(^|[^\\a-zA-Z])frac(\d)(\d)(?!\d)/g, '$1\\frac{$2}{$3}')
         .replace(/\${3,}/g, '$$')
-        .replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2');
+        .replace(/([^\n]+?)\s*\/+\s*(Answer\s*[:\-]\s*[a-eA-E])/gi, '$1\n$2')
+        .replace(/([\u0900-\u097F])(\$+)(?!\$)/g, '$1 $2')
+        .replace(/(\$+)([\u0900-\u097F])/g, '$1 $2')
+        .replace(/\bm\s*\n\s*\/?\s*s(\$+)/g, 'm/s$1')
+        .replace(/\bm\s*\n\s*\/?\s*s\b/g, 'm/s');
+
+    // Fix dangling dollars & normalize on every line
+    const fixedLines = s.split('\n').map(fixDanglingMathOnLine);
+    s = fixedLines.join('\n');
 
     const lines = s.split('\n');
     const resultLines = lines.map(line => {
@@ -659,7 +848,7 @@ function wrapAllLatexExpressions(text: string): string {
             let result = '';
             
             while (segment.length > 0) {
-                const match = segment.match(/\\(frac|binom|sqrt|overline|underline|times|div|pm|cdot|alpha|beta|theta|sum|int|pi|sin|cos|tan)/);
+                const match = segment.match(/\\(frac|binom|sqrt|overline|underline|times|div|pm|cdot|alpha|beta|theta|sum|int|pi|sin|cos|tan|sec|csc|cot|cosec|arcsin|arccos|arctan|sinh|cosh|tanh|log|ln|lim|circ|deg|degree|infty|neq|le|ge|approx)/);
                 if (!match || match.index === undefined) {
                     result += segment;
                     break;
@@ -709,6 +898,34 @@ function wrapAllLatexExpressions(text: string): string {
                             }
                         }
                     }
+                } else {
+                    // Binary operators & math functions without braces (\times, \div, \pm, \cdot, \sin, etc.)
+                    // Consume following operand e.g. " 10^8", " 10^{8}", " 5", " A"
+                    while (endIdx < segment.length && /\s/.test(segment[endIdx])) {
+                        endIdx++;
+                    }
+                    while (endIdx < segment.length) {
+                        const char = segment[endIdx];
+                        if (/[\d\w\^\_\{\}\(\)\[\]\+\-\*\/\.]/.test(char)) {
+                            endIdx++;
+                        } else if (char === '\\') {
+                            const cmdMatch = segment.substring(endIdx).match(/^\\[a-zA-Z]+(?:\s*\{[^\}]*\})*/);
+                            if (cmdMatch) {
+                                endIdx += cmdMatch[0].length;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+
+                // Capture any trailing units or exponents (e.g. \text{ cm}^2, cm^2, ^2, m/s)
+                const trailingSegment = segment.substring(endIdx);
+                const unitMatch = trailingSegment.match(/^\s*(?:\\text\{\s*(?:cm|m|mm|km|kg|g|s|h|sec|min|km\/h|m\/s)\b\}|\b(?:cm|m|mm|km|kg|g|s|h|sec|min|km\/h|m\/s)\b)?(?:\^[0-9\-]+)?/);
+                if (unitMatch && unitMatch[0].trim().length > 0) {
+                    endIdx += unitMatch[0].length;
                 }
 
                 const beforeMath = segment.substring(0, startIdx);
@@ -723,7 +940,11 @@ function wrapAllLatexExpressions(text: string): string {
         return processedParts.join('');
     });
 
-    return resultLines.join('\n');
+    let wrapped = resultLines.join('\n');
+    // Wrap standalone scientific notation or powers like 10^8 not already in $...$
+    wrapped = wrapped.replace(/(?<!\$|\w)(\d+(?:\.\d+)?\s*\\times\s*\d+(?:\.\d+)?\^[0-9\-]+(?:\s*(?:cm|m|mm|km|kg|g|s|h|sec|min|km\/h|m\/s))?)(?!\$)/g, '$$$1$$');
+    wrapped = wrapped.replace(/(?<!\$|\w)(\d+\^[0-9\-]+)(?!\$)/g, '$$$1$$');
+    return wrapped;
 }
 
 // --- Content Parsing Logic ---
@@ -737,21 +958,22 @@ function wrapAllLatexExpressions(text: string): string {
  * Returns an array of Docx Children (TextRun, Math, etc.)
  */
 function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?: { isBlockquote?: boolean }): any[] {
-    let content = cleanMixedMathText(trimmed);
+    let content = fixDanglingMathOnLine(trimmed);
+    content = cleanMixedMathText(content)
+        .replace(/([\u0900-\u097F])(\$+)(?!\$)/g, '$1 $2')
+        .replace(/(\$+)([\u0900-\u097F])/g, '$1 $2')
+        .replace(/\bm\s*\n\s*\/?\s*s(\$+)/g, 'm/s$1')
+        .replace(/\bm\s*\n\s*\/?\s*s\b/g, 'm/s');
     if (content.startsWith('>')) {
         if (meta) meta.isBlockquote = true;
         content = content.substring(1).trim();
     }
 
-    // Normalize LaTeX delimiters into $$...$$ BEFORE running the bare-LaTeX repair/wrap
-    // pass. Doing it after (the old order) let wrapAllLatexExpressions' heuristic
-    // backslash-command scanner mis-split already-delimited math like
-    // "$\displaystyle 4 - \frac{...}$" (it doesn't recognize \displaystyle), leaving the
-    // leading "$\displaystyle" and a stray "$" behind as literal, unrendered text.
     let processed = content.replace(/\\\[([\s\S]*?)\\\]/g, (_m, p1) => `$$${p1}$$`);
     processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_m, p1) => `$$${p1}$$`);
     processed = processed.replace(/(?<!\$)\$(?!\$)([^\$]+?)(?<!\$)\$(?!\$)/g, (_m, p1) => `$$${p1}$$`);
     processed = wrapAllLatexExpressions(processed);
+    processed = fixDanglingMathOnLine(processed);
 
     // Split by Math ($$)
     const parts = processed.split(/(\$\$[\s\S]*?\$\$)/g); 
@@ -885,6 +1107,39 @@ function createDocxTable(tableLines: string[]): any {
             insideVertical: { style: BorderStyle.SINGLE, size: 4, color: "000000" },
         }
     });
+}
+
+const SUB_MAP: Record<string, string> = {
+  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+  '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉'
+};
+
+export function formatChemicalReactions(text: string): string {
+  if (!text) return text;
+  let res = text;
+  
+  // 1. Format \xrightarrow[below]{above} or \xrightarrow{above}
+  res = res.replace(/\\?xrightarrow\s*(?:\[([^\]]*)\])?\s*\{([^\}]*)\}/gi, (_m, below, above) => {
+    const cleanAbove = (above || '').replace(/\\text\{([^\}]+)\}/g, '$1').replace(/[\{\}]/g, '').trim();
+    const cleanBelow = (below || '').replace(/\\text\{([^\}]+)\}/g, '$1').replace(/[\{\}]/g, '').trim();
+    const label = cleanBelow ? `${cleanAbove} / ${cleanBelow}` : cleanAbove;
+    return label ? ` ⎯⎯(${label})⎯→ ` : ` → `;
+  });
+
+  // 2. Heal malformed xrightarrow without braces e.g. "xrightarrowताप", "xrightarrowHeat", "xrightarrowसूर्य का प्रकाश"
+  res = res.replace(/\\?xrightarrow\s*([a-zA-Z\u0900-\u097F\s]+?)(?=\s+[A-Z0-9\+\-]|s*$)/g, (_m, label) => {
+    const cleanLabel = label.trim();
+    return cleanLabel ? ` ⎯⎯(${cleanLabel})⎯→ ` : ` → `;
+  });
+
+  // 3. For chemical equations with subscripts like CaCO_3(s), FeSO_4(aq), convert to Unicode subscripts
+  res = res.replace(/([A-Za-z\)])(_[0-9]+|_\{[0-9]+\})/g, (_m, elem, sub) => {
+    const digits = sub.replace(/[_{}]/g, '');
+    const unicodeSub = digits.split('').map(d => SUB_MAP[d] || d).join('');
+    return elem + unicodeSub;
+  });
+
+  return res;
 }
 
 const cleanRefinedText = (text: string): string => {
@@ -1090,7 +1345,8 @@ export const generateDocx = async (
 
     if (!element.content) continue;
     
-    let content = cleanRefinedText(cleanBilingualDuplicates(element.content || ''));
+    let content = cleanRefinedText(cleanBilingualDuplicates(formatChemicalReactions(element.content || '')));
+    content = content.split('\n').map(fixDanglingMathOnLine).join('\n');
     if (!showAnswers) {
         content = content
             .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
@@ -1126,7 +1382,7 @@ export const generateDocx = async (
         const isMetadata = /^(Subject|Time|Max\.?\s*Marks|Marks|Class|Date|Roll\s*No|Duration)\s*[:\-]/i.test(cleanLineText);
         const isInstruction = /^(Note|Instructions?|General\s*Instructions?)\s*[:\-]/i.test(cleanLineText);
         const isSeparator = /^(\(OR\)|OR|अथवा|Athava|[\/]\s*OR|OR\s*[\/]|\s)+$/i.test(cleanLineText.replace(/[^a-zA-Z\u0900-\u097F\/]/g, '').trim());
-        const isFullEquation = line.includes('$$');
+        const isFullEquation = /^\s*\$\$[\s\S]*?\$\$\s*$/.test(line);
         const isMainQuestion = /^#\s/i.test(cleanLineText) || /^(Q\.?\s*\d+|Prashn\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText);
         const isSubQuestion = /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
         const isOption = /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanLineText);
@@ -1148,10 +1404,22 @@ export const generateDocx = async (
                 // If previous line was an option, ALWAYS join with ' / ' on the same line!
                 currentLineBuffer += " / " + line;
             } else if (isPrevQuestion) {
-                // If previous line was a question, join with newline '\n' to place English below Hindi!
-                currentLineBuffer += "\n" + line;
+                const prevHasHindi = /[\u0900-\u097F]/.test(cleanBuf);
+                const currHasHindi = /[\u0900-\u097F]/.test(line);
+                const currIsEnglishOnly = !currHasHindi && /[a-zA-Z]{3,}/.test(line);
+
+                if (prevHasHindi && currIsEnglishOnly && !currentLineBuffer.includes('\n')) {
+                    // English translation below Hindi question
+                    currentLineBuffer += "\n" + line;
+                } else {
+                    // Continuation of the same question text
+                    currentLineBuffer += (currentLineBuffer ? " " : "") + line;
+                }
             } else {
-                currentLineBuffer += (currentLineBuffer ? " " : "") + line;
+                // Previous buffer was NOT an option and NOT a main question (e.g. sub-question IV, equation, header)
+                // DO NOT MERGE! Flush previous line and start a new block!
+                if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
+                currentLineBuffer = line;
             }
         }
     }
@@ -1351,7 +1619,29 @@ export const generateDocx = async (
                 processedLine = renumberQuestionInLine(processedLine, num, numberingStyle);
             }
         }
-        const subLines = processedLine.split('\n');
+        const rawSubLines = processedLine.split('\n').map(l => l.trim()).filter(Boolean);
+        const unifiedSubLines: string[] = [];
+        
+        for (const sub of rawSubLines) {
+          if (unifiedSubLines.length === 0) {
+            unifiedSubLines.push(sub);
+            continue;
+          }
+          const prev = unifiedSubLines[unifiedSubLines.length - 1];
+          const prevHasHindi = /[\u0900-\u097F]/.test(prev);
+          const currHasHindi = /[\u0900-\u097F]/.test(sub);
+          const currIsEnglishOnly = !currHasHindi && /[a-zA-Z]{3,}/.test(sub);
+
+          if (prevHasHindi && currIsEnglishOnly && !prev.includes('\n')) {
+            // Truly an English translation below Hindi question
+            unifiedSubLines.push(sub);
+          } else {
+            // Same language continuation (or parenthetical note like "(वायु का अपवर्तनांक 1 लीजिए)")
+            unifiedSubLines[unifiedSubLines.length - 1] = prev + ' ' + sub;
+          }
+        }
+
+        const subLines = unifiedSubLines;
         if (subLines.length > 1) {
             // First line: Hindi Question (with hanging indent)
             docChildren.push(new Paragraph({

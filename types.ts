@@ -58,3 +58,30 @@ export interface HistoryItem {
   pagesCount: number;
   elements: ExtractedElement[];
 }
+
+export type QuestionType = 'MCQ' | 'MSQ' | 'NAT';
+export type DifficultyLevel = 'easy' | 'medium' | 'hard';
+
+export interface MockTestMcqItem {
+  id: string;
+  question_r: number;
+  question_type: QuestionType;
+  question_hi: string;
+  option1_hi: string;
+  option2_hi: string;
+  option3_hi: string;
+  option4_hi: string;
+  option5_hi?: string;
+  solution_hi: string;
+  question_en: string;
+  option1_en: string;
+  option2_en: string;
+  option3_en: string;
+  option4_en: string;
+  option5_en?: string;
+  solution_en: string;
+  answer: string; // "D", "[\"3\",\"4\"]", or "{\"start\":\"86\",\"end\":\"86\"}"
+  set_name: string;
+  difficulty_level: DifficultyLevel;
+}
+

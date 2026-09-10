@@ -4,8 +4,9 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { ScannedPage, NumberingStyle } from '../types';
-import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon, Sparkles } from 'lucide-react';
 import { formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
+import GeminiExplanationPanel from './GeminiExplanationPanel';
 
 interface ProcessingListProps {
   pages: ScannedPage[];
@@ -87,6 +88,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [aiPanelOpenId, setAiPanelOpenId] = useState<string | null>(null);
 
   const processedPagesMap = React.useMemo(() => {
     let currentCounter = 1;
@@ -269,6 +271,18 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                     <FileText className="w-3.5 h-3.5 text-slate-400" /> MD
                                 </button>
                                 <button 
+                                    onClick={() => setAiPanelOpenId(aiPanelOpenId === page.id ? null : page.id)}
+                                    className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all ${
+                                      aiPanelOpenId === page.id 
+                                        ? 'bg-[#FF6B2B] text-white border-[#FF6B2B]' 
+                                        : 'bg-[#FF6B2B]/10 hover:bg-[#FF6B2B]/20 text-[#FF884D] border-[#FF6B2B]/30'
+                                    }`}
+                                    title="Ask Gemini or Explain Extracted Content"
+                                >
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    <span>Gemini AI</span>
+                                </button>
+                                <button 
                                     onClick={() => onRetry(page.id)}
                                     className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-400 hover:text-[#FF884D] text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
                                     title="Reprocess Page"
@@ -305,14 +319,27 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                ) : (
                    <div>
                       {page.status === 'done' && page.extractedText ? (
-                          <div className="markdown-body prose prose-invert max-w-none text-xs sm:text-sm leading-relaxed">
-                              <ReactMarkdown
-                                remarkPlugins={[remarkGfm, remarkMath]}
-                                rehypePlugins={[rehypeKatex]}
-                              >
-                                {processedPagesMap.get(page.id) || page.extractedText}
-                              </ReactMarkdown>
-                          </div>
+                          <>
+                            <div className="markdown-body prose prose-invert max-w-none text-xs sm:text-sm leading-relaxed">
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm, remarkMath]}
+                                  rehypePlugins={[rehypeKatex]}
+                                >
+                                  {processedPagesMap.get(page.id) || page.extractedText}
+                                </ReactMarkdown>
+                            </div>
+
+                            {/* Inline Gemini AI Assistant for Extracted Page */}
+                            {aiPanelOpenId === page.id && (
+                              <div className="mt-4 pt-3 border-t border-white/[0.08]">
+                                <GeminiExplanationPanel
+                                  questionId={`extracted_page_${page.id}_${page.pageNumber}`}
+                                  questionText={processedPagesMap.get(page.id) || page.extractedText || ''}
+                                  options={[]}
+                                />
+                              </div>
+                            )}
+                          </>
                       ) : page.status === 'processing' ? (
                           <div className="flex flex-col items-center justify-center h-48 gap-3 text-slate-400">
                              <Loader2 className="w-7 h-7 text-[#FF6B2B] animate-spin" />

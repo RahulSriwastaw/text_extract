@@ -1,9 +1,16 @@
-import React, { useMemo, useState } from 'react';
-import { X, Edit, Trash2, BookOpen, FileText, Download, FileDown, Sparkles, Loader2 } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { X, Edit, Trash2, BookOpen, FileText, Download, FileDown, Sparkles, Loader2, History, Settings, CheckCircle2, FileSpreadsheet } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ScannedPage, OptionArrangement } from '../types';
-import { generateDocx } from '../services/docxService';
+import { ScannedPage, OptionArrangement, MockTestMcqItem } from '../types';
+import { generateDocx, fixDanglingMathOnLine, formatChemicalReactions } from '../services/docxService';
 import { proofreadMcqs } from '../services/geminiService';
+import { ensureHtmlParagraph } from '../services/mocktestService';
+import MocktestStudioModal from './MocktestStudioModal';
+import GeminiExplanationPanel from './GeminiExplanationPanel';
+import GeminiConnectModal from './GeminiConnectModal';
+import AiHistoryDrawer from './AiHistoryDrawer';
+import GeminiSettingsModal from './GeminiSettingsModal';
+import { checkUserGeminiAuth } from '../services/userGeminiService';
 
 interface McqOption {
   label: string;
@@ -39,6 +46,8 @@ interface McqSidebarProps {
 
 const cleanBilingualDuplicates = (text: string): string => {
   if (!text) return text;
+
+  // 1. Question level identical text: 'Question: 1. What is X? / What is X?' -> 'Question: 1. What is X?'
   let cleaned = text.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+\.?|#\d+\.?|\d+\.)\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
     const lNorm = left.trim();
     const rNorm = right.trim();
@@ -47,17 +56,35 @@ const cleanBilingualDuplicates = (text: string): string => {
     }
     return match;
   });
-  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n/]+?)\s*\/+\s*([A-Za-z\$\\\(\[\{\d][^\n]+)$/gm, (match, hindiPart, engPart) => {
-    const cleanHindi = hindiPart.replace(/\s*\/+$/, '').trim();
+
+  // 2. Format single line bilingual questions into two lines WITHOUT slash (ONLY FOR QUESTIONS)
+  // A bilingual question separator '/' must separate a Hindi question from an English question!
+  // It MUST NOT match inside units like 'm/s', 'km/h', or formulas like '1/2', 'a/b'!
+  cleaned = cleaned.replace(/^(\s*(?:(?:Question|Q)\.?\s*[:\-]?\s*\d+[\.\)\-:]?|#\d+[\.\)\-:]?|\d+[\.\)\-:]?)\s+[^\n]+?)\s+(?:\/|\|)\s+([A-Za-z][^\n]+)$/gm, (match, hindiPart, engPart) => {
+    // If the slash is inside $...$ or $$...$$, DO NOT split!
+    const dollarsBefore = (hindiPart.match(/\$/g) || []).length;
+    if (dollarsBefore % 2 !== 0) return match;
+
+    const cleanHindi = hindiPart.trim();
     const cleanEng = engPart.trim();
-    if (/[\u0900-\u097F]/.test(cleanHindi) || /[a-zA-Z]/.test(cleanEng)) {
+    
+    const hasHindi = /[\u0900-\u097F]/.test(cleanHindi);
+    const engHindiCharCount = (cleanEng.match(/[\u0900-\u097F]/g) || []).length;
+    const engLatinCharCount = (cleanEng.match(/[a-zA-Z]/g) || []).length;
+
+    // cleanEng must be an actual English question (more Latin letters than Devanagari letters)
+    if (hasHindi && engLatinCharCount > 5 && engLatinCharCount > engHindiCharCount) {
       return cleanHindi + '\n' + cleanEng;
     }
     return match;
   });
+
+  // 3. Ensure bilingual options stay on ONE single line with ' / ' (e.g. '(b) सम / Even')
   cleaned = cleaned.replace(/^(\s*\([a-eA-E]\)\s+[^\n/]+?)\r?\n\s*([a-zA-Z][^\n]+)$/gm, (match, optHindi, optEng) => {
     return optHindi.trim() + ' / ' + optEng.trim();
   });
+
+  // 4. Option level duplicates: e.g. '(a) 123 / 123' -> '(a) 123', '(b) 45.5% / 45.5%' -> '(b) 45.5%'
   cleaned = cleaned.replace(/^(\s*(?:\([a-zA-Z0-9]+\)|[a-zA-Z0-9]+[\.\)])\s*)([^\n/]+?)\s*\/\s*([^\n/]+)$/gm, (match, prefix, left, right) => {
     const lNorm = left.trim();
     const rNorm = right.trim();
@@ -66,6 +93,9 @@ const cleanBilingualDuplicates = (text: string): string => {
     }
     return match;
   });
+
+  // 5. Clean standalone numbers/formulas/symbols/units duplicated with / e.g. '123 / 123', '$$x=2$$ / $$x=2$$'
+  // (Only replace if left and right are identical, never touching m/s or km/h)
   cleaned = cleaned.replace(/([^\n/]+?)\s*\/\s*([^\n/]+)/g, (match, left, right) => {
     const lTrim = left.trim();
     const rTrim = right.trim();
@@ -74,6 +104,7 @@ const cleanBilingualDuplicates = (text: string): string => {
     }
     return match;
   });
+
   return cleaned;
 };
 
@@ -81,6 +112,20 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
   const [isProofreading, setIsProofreading] = useState(false);
   const [manualMcqs, setManualMcqs] = useState<McqItem[] | null>(null);
   const [lastProcessedPageCount, setLastProcessedPageCount] = useState(0);
+  const [showConnectModal, setShowConnectModal] = useState(false);
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showMocktestModal, setShowMocktestModal] = useState(false);
+  const [authStatus, setAuthStatus] = useState<'none' | 'apikey' | 'oauth'>('none');
+
+  useEffect(() => {
+    checkAuth();
+  }, [isOpen]);
+
+  const checkAuth = async () => {
+    const res = await checkUserGeminiAuth();
+    setAuthStatus(res.isAuthenticated ? res.authType : 'none');
+  };
   
   const autoMcqs = useMemo(() => {
     if (!mcqMode) return [];
@@ -150,11 +195,22 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
           if (currentQuestion) {
             if (currentQuestion.options!.length === 0) {
               // Continuation of question text
-              currentQuestion.questionText += (currentQuestion.questionText ? '\n' : '') + line;
+              const prevText = currentQuestion.questionText || '';
+              const prevHasHindi = /[\u0900-\u097F]/.test(prevText);
+              const currHasHindi = /[\u0900-\u097F]/.test(line);
+              const currIsEnglishOnly = !currHasHindi && /[a-zA-Z]{3,}/.test(line);
+
+              if (prevHasHindi && currIsEnglishOnly && !prevText.includes('\n')) {
+                // English translation line
+                currentQuestion.questionText = prevText + '\n' + line;
+              } else {
+                // Continuation of the same sentence
+                currentQuestion.questionText = prevText ? (prevText + ' ' + line) : line;
+              }
             } else {
               // Continuation of the last option
               const lastOption = currentQuestion.options![currentQuestion.options!.length - 1];
-              lastOption.text += '\n' + line;
+              lastOption.text = (lastOption.text ? (lastOption.text + ' ') : '') + line;
             }
           }
         }
@@ -169,6 +225,34 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
   }, [pages, mcqMode]);
 
   const mcqs = manualMcqs || autoMcqs;
+
+  const mocktestItems = useMemo<MockTestMcqItem[]>(() => {
+    return mcqs.map((m, idx) => {
+      const getOpt = (letter: string) => m.options.find(o => o.label.toUpperCase() === letter)?.text || '';
+      return {
+        id: m.id || `mt_item_${idx + 1}`,
+        question_r: idx + 1,
+        question_type: 'MCQ',
+        question_hi: ensureHtmlParagraph(m.questionText),
+        option1_hi: getOpt('A'),
+        option2_hi: getOpt('B'),
+        option3_hi: getOpt('C'),
+        option4_hi: getOpt('D'),
+        option5_hi: getOpt('E'),
+        solution_hi: '',
+        question_en: ensureHtmlParagraph(m.questionText),
+        option1_en: getOpt('A'),
+        option2_en: getOpt('B'),
+        option3_en: getOpt('C'),
+        option4_en: getOpt('D'),
+        option5_en: getOpt('E'),
+        solution_en: '',
+        answer: m.answer || 'A',
+        set_name: 'Mock Test Paper',
+        difficulty_level: 'medium'
+      };
+    });
+  }, [mcqs]);
 
   // Auto-proofread effect
   React.useEffect(() => {
@@ -219,19 +303,29 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
   const exportToWord = async () => {
     if (mcqs.length === 0) return;
     
+    const cleanMathSpacings = (str: string): string => {
+      if (!str) return '';
+      return str
+        .replace(/([\u0900-\u097F])(\$+)(?!\$)/g, '$1 $2')
+        .replace(/(\$+)([\u0900-\u097F])/g, '$1 $2')
+        .replace(/\bm\s*\n\s*\/?\s*s(\$+)/g, 'm/s$1')
+        .replace(/\bm\s*\n\s*\/?\s*s\b/g, 'm/s');
+    };
+
     const elements = mcqs.map((mcq, idx) => {
       // Helper to ensure LaTeX is wrapped in $$ for docxService to pick it up
       const ensureLatexWrapped = (text: string) => {
         if (!text) return "";
+        const t = cleanMathSpacings(fixDanglingMathOnLine(formatChemicalReactions(text)));
         // If it already has any math delimiters, it's probably fine
-        if (text.includes('$') || text.includes('\\(') || text.includes('\\[')) return text;
+        if (t.includes('$') || t.includes('\\(') || t.includes('\\[')) return t;
         
         // If it looks like it has LaTeX but no delimiters, wrap it
         // A simple heuristic: check for backslashes followed by common math commands
-        if (/\\[a-zA-Z]+/.test(text) || /[_^]/.test(text)) {
-           return `$$ ${text} $$`;
+        if (/\\[a-zA-Z]+/.test(t) || /[_^]/.test(t)) {
+           return `$$ ${t} $$`;
         }
-        return text;
+        return t;
       };
 
       const qText = ensureLatexWrapped(mcq.questionText);
@@ -239,7 +333,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
         return `(${o.label.toLowerCase()}) ${ensureLatexWrapped(o.text)}`;
       }).join('\n');
 
-      let content = `**Question: ${showMcqNumbers ? (idx + 1) + '. ' : ''}**${qText}\n${optionsText}`;
+      let content = `**Question: ${showMcqNumbers ? (idx + 1) + '. ' : ''}** ${qText.trim()}\n${optionsText}`;
       if (mcq.answer && showAnswers) {
         content += `\n**Answer: ${mcq.answer}**`;
       }
@@ -339,12 +433,48 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                   <h2 className="text-sm font-bold text-white font-display">MCQ Question Bank</h2>
                   <p className="text-[10px] text-slate-400">{mcqs.length} questions digitized</p>
                 </div>
-                <button
-                  onClick={onClose}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-white/[0.08] rounded-xl transition-all"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {authStatus !== 'none' ? (
+                    <button
+                      onClick={() => setShowSettingsModal(true)}
+                      className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-lg text-[10px] font-bold transition-all"
+                    >
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Gemini ✓</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setShowConnectModal(true)}
+                      className="flex items-center gap-1 px-2 py-1 bg-[#FF6B2B]/10 hover:bg-[#FF6B2B]/20 border border-[#FF6B2B]/30 text-[#FF884D] rounded-lg text-[10px] font-bold transition-all"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Connect Gemini</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setShowHistoryDrawer(true)}
+                    title="My AI Explanations"
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-white/[0.08] rounded-lg transition-all"
+                  >
+                    <History className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    onClick={() => setShowSettingsModal(true)}
+                    title="Gemini Settings"
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-white/[0.08] rounded-lg transition-all"
+                  >
+                    <Settings className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    onClick={onClose}
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-white/[0.08] rounded-lg transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               
               {/* Export Actions */}
@@ -366,6 +496,14 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                       Export PDF
                     </button>
                   </div>
+
+                  <button 
+                    onClick={() => setShowMocktestModal(true)}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 border border-emerald-500/30 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    Open in MockTest Studio (18-Col CSV)
+                  </button>
                   
                   <button 
                     onClick={handleProofread}
@@ -448,11 +586,51 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                         <p className="text-xs font-bold text-emerald-400">Answer: {mcq.answer}</p>
                       </div>
                     )}
+
+                    {/* Integrated User-Owned Gemini Explanation & AI Assistant */}
+                    <GeminiExplanationPanel
+                      questionId={`mcq_${mcq.pageNumber}_${idx}_${mcq.questionText.slice(0, 30).replace(/\s+/g, '_')}`}
+                      questionText={mcq.questionText}
+                      options={mcq.options}
+                      correctAnswer={mcq.answer}
+                    />
                   </div>
                 ))
               )}
             </div>
           </motion.div>
+
+          <GeminiConnectModal
+            isOpen={showConnectModal}
+            onClose={() => {
+              setShowConnectModal(false);
+              checkAuth();
+            }}
+            onConnected={() => {
+              setShowConnectModal(false);
+              checkAuth();
+            }}
+          />
+
+          <AiHistoryDrawer
+            isOpen={showHistoryDrawer}
+            onClose={() => setShowHistoryDrawer(false)}
+          />
+
+          <GeminiSettingsModal
+            isOpen={showSettingsModal}
+            onClose={() => {
+              setShowSettingsModal(false);
+              checkAuth();
+            }}
+          />
+
+          <MocktestStudioModal
+            isOpen={showMocktestModal}
+            onClose={() => setShowMocktestModal(false)}
+            initialItems={mocktestItems}
+            defaultSetName="Mock Test Paper"
+          />
         </>
       )}
     </AnimatePresence>

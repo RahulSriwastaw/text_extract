@@ -1,0 +1,570 @@
+/**
+ * TextExtract Pro Bridge
+ * Version: 2.0.0
+ * Copyright (c) Shivajee Kumar. All rights reserved.
+ */
+
+const PROVIDERS = {
+  gemini: {
+    id: "gemini",
+    home: "https://gemini.google.com/app",
+    match: [ "https://gemini.google.com/*" ],
+    script: "content-gemini.js",
+    chatUrlOk: u => /gemini\.google\.com\/app\//i.test(u || "")
+  },
+  deepseek: {
+    id: "deepseek",
+    home: "https://chat.deepseek.com/",
+    match: [ "https://chat.deepseek.com/*" ],
+    script: "content-bridge-generic.js",
+    chatUrlOk: u => /chat\.deepseek\.com\/a\/chat\/s\//i.test(u || "")
+  },
+  chatgpt: {
+    id: "chatgpt",
+    home: "https://chatgpt.com/",
+    match: [ "https://chatgpt.com/*", "https://chat.openai.com/*" ],
+    script: "content-bridge-generic.js",
+    chatUrlOk: u => /(chatgpt\.com|chat\.openai\.com)/i.test(u || "")
+  },
+  claude: {
+    id: "claude",
+    home: "https://claude.ai/new",
+    match: [ "https://claude.ai/*" ],
+    script: "content-bridge-generic.js",
+    chatUrlOk: u => /claude\.ai/i.test(u || "")
+  }
+};
+
+function resolveProvider(id) {
+  return PROVIDERS[id] || PROVIDERS.gemini;
+}
+
+const EXT_VERSION = "2.0.0";
+
+const JOBS_KEY = "study_ai_jobs_v1";
+
+const SESSION_KEY = "study_ai_session_v1";
+
+const jobs = new Map;
+
+const alivePorts = new Set;
+
+let session = {
+  tabId: null,
+  chatUrl: null,
+  pdfKey: null,
+  batch: 0,
+  provider: "gemini"
+};
+
+(async () => {
+  try {
+    const data = await chrome.storage.session.get([ JOBS_KEY, SESSION_KEY ]);
+    if (data[SESSION_KEY]) session = {
+      ...session,
+      ...data[SESSION_KEY]
+    };
+    const saved = data[JOBS_KEY] || {};
+    for (const [id, job] of Object.entries(saved)) {
+      if (job && Date.now() - (job.createdAt || 0) < 30 * 60 * 1e3) {
+        jobs.set(id, job);
+      }
+    }
+  } catch {}
+})();
+
+chrome.runtime.onConnect.addListener(port => {
+  if (port.name !== "study-ai-keepalive") return;
+  alivePorts.add(port);
+  port.onDisconnect.addListener(() => alivePorts.delete(port));
+  try {
+    port.postMessage({
+      type: "HELLO",
+      version: EXT_VERSION
+    });
+  } catch {}
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || !msg.type) return;
+  if (msg.type === "STUDY_AI_PING") {
+    sendResponse({
+      ok: true,
+      version: EXT_VERSION,
+      session: {
+        tabId: session.tabId,
+        chatUrl: session.chatUrl,
+        batch: session.batch,
+        hasPdf: !!session.pdfKey,
+        provider: session.provider || "gemini",
+        alivePorts: alivePorts.size,
+        openJobs: jobs.size
+      }
+    });
+    return true;
+  }
+  if (msg.type === "STUDY_AI_SET_PROVIDER") {
+    (async () => {
+      try {
+        session.provider = msg.provider || "gemini";
+        session.tabId = null;
+        session.chatUrl = null;
+        session.batch = 0;
+        await persistSession();
+        sendResponse({
+          ok: true,
+          version: EXT_VERSION,
+          session: {
+            tabId: session.tabId,
+            chatUrl: session.chatUrl,
+            batch: session.batch,
+            hasPdf: !!session.pdfKey,
+            provider: session.provider,
+            alivePorts: alivePorts.size,
+            openJobs: jobs.size
+          }
+        });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message });
+      }
+    })();
+    return true;
+  }
+  if (msg.type === "STUDY_AI_START") {
+    (async () => {
+      try {
+        const adminTabId = sender.tab?.id;
+        if (!adminTabId) throw new Error("Admin tab missing");
+        const requestId = msg.requestId || `req_${Date.now()}`;
+        const providerId = msg.provider || session.provider || "gemini";
+        const provider = resolveProvider(providerId);
+        const continueChat = !!msg.continueChat;
+        const skipPdf = !!msg.skipPdf && !msg.fileBase64;
+        const silent = msg.silent !== false;
+        const preferredUrl = msg.chatUrl || (session.provider === providerId ? session.chatUrl : null) || null;
+        const pdfKey = msg.fileName ? `${msg.fileName}:${(msg.fileBase64 || "").length}` : session.pdfKey;
+        const job = {
+          requestId: requestId,
+          prompt: msg.prompt,
+          fileName: skipPdf ? null : msg.fileName || null,
+          fileBase64: skipPdf ? null : msg.fileBase64 || null,
+          mimeType: msg.mimeType || "image/png",
+          pdfOnClipboard: skipPdf ? false : !!msg.pdfOnClipboard,
+          continueChat: continueChat,
+          skipPdf: skipPdf,
+          provider: providerId,
+          adminTabId: adminTabId,
+          createdAt: Date.now(),
+          status: "running"
+        };
+        await saveJob(job);
+        const bridgeTab = await openOrReuseTab({
+          continueChat: continueChat,
+          silent: silent,
+          preferredUrl: preferredUrl,
+          providerId: providerId
+        });
+        session.tabId = bridgeTab.id;
+        session.provider = providerId;
+        if (!skipPdf && pdfKey) session.pdfKey = pdfKey;
+        session.batch = continueChat ? session.batch + 1 : 1;
+        await persistSession();
+        await waitTabComplete(bridgeTab.id, 9e4);
+        await delay(continueChat ? 800 : 1600);
+        await kickBridge(bridgeTab.id, requestId, "STUDY_AI_RUN", adminTabId, {
+          provider: providerId
+        });
+        const slim = jobs.get(requestId);
+        if (slim) {
+          slim.kickedAt = Date.now();
+          await saveJob(slim);
+        }
+        sendResponse({
+          ok: true,
+          requestId: requestId,
+          geminiTabId: bridgeTab.id,
+          continueChat: continueChat,
+          skipPdf: skipPdf,
+          batch: session.batch,
+          chatUrl: session.chatUrl,
+          provider: providerId
+        });
+      } catch (e) {
+        sendResponse({
+          ok: false,
+          error: e?.message || String(e)
+        });
+      }
+    })();
+    return true;
+  }
+  if (msg.type === "STUDY_AI_CAPTURE_START") {
+    (async () => {
+      try {
+        const adminTabId = sender.tab?.id;
+        if (!adminTabId) throw new Error("Admin tab missing");
+        const requestId = msg.requestId || `cap_${Date.now()}`;
+        const fullChat = !!msg.fullChat;
+        const providerId = msg.provider || session.provider || "gemini";
+        await saveJob({
+          requestId: requestId,
+          adminTabId: adminTabId,
+          createdAt: Date.now(),
+          fullChat: fullChat,
+          provider: providerId,
+          status: "capturing"
+        });
+        const preferredUrl = msg.chatUrl || session.chatUrl || null;
+        const tab = await openOrReuseTab({
+          continueChat: true,
+          silent: true,
+          preferredUrl: preferredUrl,
+          providerId: providerId
+        });
+        session.tabId = tab.id;
+        session.provider = providerId;
+        await persistSession();
+        if (preferredUrl) await delay(1500); else await delay(400);
+        await waitTabComplete(tab.id, 6e4).catch(() => {});
+        await kickBridge(tab.id, requestId, "STUDY_AI_CAPTURE", adminTabId, {
+          fullChat: fullChat,
+          provider: providerId
+        });
+        sendResponse({
+          ok: true,
+          requestId: requestId
+        });
+      } catch (e) {
+        sendResponse({
+          ok: false,
+          error: e?.message || String(e)
+        });
+      }
+    })();
+    return true;
+  }
+  if (msg.type === "STUDY_AI_PROGRESS") {
+    (async () => {
+      const job = await getJob(msg.requestId) || null;
+      const adminTabId = job?.adminTabId || msg.adminTabId;
+      if (msg.chatUrl) {
+        session.chatUrl = msg.chatUrl;
+        await persistSession();
+      }
+      if (job) {
+        job.lastProgressAt = Date.now();
+        job.lastStep = msg.step;
+        job.lastDetail = msg.detail;
+        await saveJob(job);
+      }
+      if (adminTabId) {
+        await relayToAdminReliable(adminTabId, {
+          type: "STUDY_AI_PROGRESS",
+          requestId: msg.requestId,
+          step: msg.step,
+          detail: msg.detail,
+          chatUrl: session.chatUrl
+        });
+      }
+      sendResponse({
+        ok: true
+      });
+    })();
+    return true;
+  }
+  if (msg.type === "STUDY_AI_RESULT") {
+    (async () => {
+      const job = await getJob(msg.requestId) || null;
+      const adminTabId = job?.adminTabId || msg.adminTabId;
+      if (msg.chatUrl) {
+        session.chatUrl = msg.chatUrl;
+        await persistSession();
+      }
+      const payload = {
+        ...msg,
+        chatUrl: msg.chatUrl || session.chatUrl
+      };
+      if (adminTabId) {
+        await relayToAdminReliable(adminTabId, payload, 8);
+      } else {
+        await broadcastResultToAdminTabs(payload);
+      }
+      await deleteJob(msg.requestId);
+      sendResponse({
+        ok: true
+      });
+    })();
+    return true;
+  }
+  if (msg.type === "STUDY_AI_GET_JOB") {
+    (async () => {
+      const job = await getJob(msg.requestId);
+      sendResponse({
+        ok: true,
+        job: job || null
+      });
+    })();
+    return true;
+  }
+  if (msg.type === "STUDY_AI_RESET_SESSION") {
+    (async () => {
+      session = {
+        tabId: null,
+        chatUrl: null,
+        pdfKey: null,
+        batch: 0,
+        provider: session.provider || "gemini"
+      };
+      await persistSession();
+      sendResponse({
+        ok: true
+      });
+    })();
+    return true;
+  }
+  if (msg.type === "STUDY_AI_HEARTBEAT") {
+    (async () => {
+      if (msg.requestId) {
+        const job = await getJob(msg.requestId);
+        if (job) {
+          job.lastHeartbeatAt = Date.now();
+          await saveJob(job);
+        }
+      }
+      sendResponse({
+        ok: true,
+        version: EXT_VERSION,
+        t: Date.now()
+      });
+    })();
+    return true;
+  }
+});
+
+async function saveJob(job) {
+  jobs.set(job.requestId, job);
+  try {
+    const data = await chrome.storage.session.get(JOBS_KEY);
+    const all = data[JOBS_KEY] || {};
+    const stub = {
+      ...job,
+      fileBase64: job.fileBase64 ? "[omitted]" : null
+    };
+    if (job.fileBase64 && job.fileBase64.length > 500) {
+      stub.fileBase64 = null;
+      stub.hasFileInMemory = true;
+    }
+    all[job.requestId] = stub;
+    const cutoff = Date.now() - 30 * 60 * 1e3;
+    for (const [k, v] of Object.entries(all)) {
+      if (!v?.createdAt || v.createdAt < cutoff) delete all[k];
+    }
+    await chrome.storage.session.set({
+      [JOBS_KEY]: all
+    });
+  } catch {}
+}
+
+async function getJob(requestId) {
+  if (!requestId) return null;
+  if (jobs.has(requestId)) return jobs.get(requestId);
+  try {
+    const data = await chrome.storage.session.get(JOBS_KEY);
+    const job = data[JOBS_KEY]?.[requestId];
+    if (job) {
+      jobs.set(requestId, job);
+      return job;
+    }
+  } catch {}
+  return null;
+}
+
+async function deleteJob(requestId) {
+  jobs.delete(requestId);
+  try {
+    const data = await chrome.storage.session.get(JOBS_KEY);
+    const all = data[JOBS_KEY] || {};
+    delete all[requestId];
+    await chrome.storage.session.set({
+      [JOBS_KEY]: all
+    });
+  } catch {}
+}
+
+async function persistSession() {
+  try {
+    await chrome.storage.session.set({
+      [SESSION_KEY]: session
+    });
+  } catch {}
+}
+
+function delay(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function waitTabComplete(tabId, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = async () => {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab.status === "complete") return resolve(tab);
+      } catch (e) {
+        return reject(e);
+      }
+      if (Date.now() - start > timeoutMs) {
+        return reject(new Error("Bridge tab load timeout"));
+      }
+      setTimeout(check, 300);
+    };
+    check();
+  });
+}
+
+async function kickBridge(tabId, requestId, type, adminTabId, extra = {}) {
+  const job = await getJob(requestId);
+  const providerId = extra.provider || job?.provider || session.provider || "gemini";
+  const provider = resolveProvider(providerId);
+  const payload = {
+    type: type,
+    requestId: requestId,
+    adminTabId: adminTabId,
+    provider: providerId,
+    fullChat: !!(extra.fullChat || job?.fullChat),
+    jobLite: job ? {
+      prompt: job.prompt,
+      fileName: job.fileName,
+      mimeType: job.mimeType,
+      pdfOnClipboard: job.pdfOnClipboard,
+      continueChat: job.continueChat,
+      skipPdf: job.skipPdf,
+      fullChat: job.fullChat,
+      provider: providerId,
+      adminTabId: adminTabId,
+      fileBase64: jobs.get(requestId)?.fileBase64 || null
+    } : {
+      adminTabId: adminTabId,
+      fullChat: !!extra.fullChat,
+      provider: providerId
+    },
+    ...extra
+  };
+  const trySend = () => new Promise(resolve => {
+    chrome.tabs.sendMessage(tabId, payload, res => {
+      if (chrome.runtime.lastError) {
+        resolve({
+          ok: false,
+          error: chrome.runtime.lastError.message
+        });
+      } else resolve(res || {
+        ok: true
+      });
+    });
+  });
+  let lastErr = "";
+  for (let attempt = 0; attempt < 14; attempt++) {
+    let res = await trySend();
+    if (res?.ok || res?.started) return;
+    lastErr = res?.error || "no listener";
+    try {
+      await chrome.scripting.executeScript({
+        target: {
+          tabId: tabId
+        },
+        files: [ provider.script ]
+      });
+    } catch (e) {
+      lastErr = e?.message || lastErr;
+    }
+    await delay(400 + attempt * 200);
+    res = await trySend();
+    if (res?.ok || res?.started) return;
+    lastErr = res?.error || lastErr;
+  }
+  await relayToAdminReliable(adminTabId, {
+    type: "STUDY_AI_RESULT",
+    requestId: requestId,
+    ok: false,
+    error: lastErr || "Could not reach bridge tab. Reload TextExtract Pro Bridge extension + refresh AI chat tab.",
+    chatUrl: session.chatUrl
+  });
+  await deleteJob(requestId);
+}
+
+async function openOrReuseTab({continueChat: continueChat, silent: silent, preferredUrl: preferredUrl, providerId: providerId}) {
+  const provider = resolveProvider(providerId || session.provider || "gemini");
+  const tabs = await chrome.tabs.query({
+    url: provider.match
+  });
+  let tab = session.tabId && tabs.find(t => t.id === session.tabId) || tabs.find(t => preferredUrl && t.url && preferredUrl && t.url.startsWith(String(preferredUrl).split("?")[0])) || tabs[0] || null;
+  const canReuseChat = continueChat && preferredUrl && provider.chatUrlOk(preferredUrl);
+  const targetUrl = canReuseChat ? preferredUrl : continueChat && tab?.url ? null : provider.home;
+  if (tab) {
+    const update = {
+      active: !silent
+    };
+    if (targetUrl && tab.url !== targetUrl) update.url = targetUrl;
+    await chrome.tabs.update(tab.id, update);
+    if (preferredUrl && provider.chatUrlOk(preferredUrl)) session.chatUrl = preferredUrl; else if (tab.url) session.chatUrl = tab.url;
+    session.provider = provider.id;
+    await persistSession();
+    return tab;
+  }
+  const url = targetUrl || preferredUrl || provider.home;
+  const created = await chrome.tabs.create({
+    url: url,
+    active: !silent
+  });
+  session.chatUrl = url;
+  session.provider = provider.id;
+  await persistSession();
+  return created;
+}
+
+async function relayToAdminReliable(adminTabId, msg, attempts = 5) {
+  for (let i = 0; i < attempts; i++) {
+    const ok = await relayOnce(adminTabId, msg);
+    if (ok) return true;
+    await delay(300 + i * 250);
+  }
+  await broadcastResultToAdminTabs(msg);
+  return false;
+}
+
+function relayOnce(adminTabId, msg) {
+  return new Promise(resolve => {
+    try {
+      chrome.tabs.sendMessage(adminTabId, msg, () => {
+        if (!chrome.runtime.lastError) return resolve(true);
+        const inject = world => chrome.scripting.executeScript({
+          target: {
+            tabId: adminTabId
+          },
+          world: world,
+          func: payload => {
+            window.postMessage({
+              source: "tf-study-ai-extension",
+              ...payload
+            }, "*");
+          },
+          args: [ msg ]
+        });
+        inject("MAIN").then(() => resolve(true)).catch(() => inject(undefined).then(() => resolve(true)).catch(() => resolve(false)));
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function broadcastResultToAdminTabs(msg) {
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [ "https://admin.testfactory.co.in/*", "http://localhost/*", "http://localhost:*/*", "http://127.0.0.1/*", "http://127.0.0.1:*/*" ]
+    });
+    for (const t of tabs) {
+      if (t.id) await relayOnce(t.id, msg);
+    }
+  } catch {}
+}

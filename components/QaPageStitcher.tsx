@@ -4,16 +4,19 @@ import {
   FileText, Trash2, ArrowDownUp, Check, AlertCircle, 
   ChevronRight, ChevronLeft, Scissors, Eye, Undo2, ArrowLeftRight, 
   Layers, Plus, CheckCircle2, Split, ZoomIn, ZoomOut,
-  Maximize2, RotateCw, CheckSquare, Square, Copy, RefreshCcw
+  Maximize2, RotateCw, CheckSquare, Square, Copy, RefreshCcw,
+  GripVertical, ChevronUp, ChevronDown, Search, ArrowLeft, ArrowRight, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { convertPdfToImages } from '../services/pdfUtils';
 import { 
   PageCard, 
+  PageCardItem,
   CropBox,
   renderMergedCardToA4, 
   exportMergedCardsToPdf,
-  cropImageByPercentage 
+  cropImageByPercentage,
+  ensureCardItems
 } from '../services/pdfStitchService';
 
 interface QaPageStitcherProps {
@@ -32,10 +35,26 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState<{ current: number; total: number } | null>(null);
   
-  // All Raw PDF Pages for quick switching in Crop Modal
+  // All Raw PDF Pages for quick switching in Crop Modal & Add Page Modal
   const [allPdfPages, setAllPdfPages] = useState<{ pageNum: number; image: string }[]>([]);
 
-  // Drag & Drop State
+  // Global Page Search Query in header
+  const [pageSearchQuery, setPageSearchQuery] = useState<string>('');
+
+  // Add Page to Card Modal State
+  const [activeAddModalCardId, setActiveAddModalCardId] = useState<string | null>(null);
+  const [searchModalPageQuery, setSearchModalPageQuery] = useState<string>('');
+  const [directPageNumberInput, setDirectPageNumberInput] = useState<string>('');
+
+  // Card Reorder Drag State
+  const [reorderDragCardId, setReorderDragCardId] = useState<string | null>(null);
+  const [reorderDropTargetId, setReorderDropTargetId] = useState<string | null>(null);
+
+  // Move to position dialog
+  const [positionDialogCardId, setPositionDialogCardId] = useState<string | null>(null);
+  const [targetPositionInput, setTargetPositionInput] = useState<string>('');
+
+  // Drag & Drop State for Merging
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [dragOverTargetId, setDragOverTargetId] = useState<string | null>(null);
 
@@ -43,7 +62,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   const [manualMergeSourceId, setManualMergeSourceId] = useState<string | null>(null);
 
   // Visual Cropper Modal State
-  const [cropTarget, setCropTarget] = useState<{ cardId: string; type: 'question' | 'solution' } | null>(null);
+  const [cropTarget, setCropTarget] = useState<{ cardId: string; itemIndex: number; type?: 'question' | 'solution' } | null>(null);
   const [activeCropBox, setActiveCropBox] = useState<CropBox>({ x: 0, y: 0, width: 100, height: 100 });
   const [activeScale, setActiveScale] = useState<number>(1.0);
   const [isDrawingCrop, setIsDrawingCrop] = useState(false);
@@ -69,12 +88,11 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     if (cropTarget) {
       const card = cards.find(c => c.id === cropTarget.cardId);
       if (card) {
-        if (cropTarget.type === 'question') {
-          setActiveCropBox(card.qCrop || { x: 0, y: 0, width: 100, height: 100 });
-          setActiveScale(card.qScale || 1.0);
-        } else {
-          setActiveCropBox(card.solCrop || { x: 0, y: 0, width: 100, height: 100 });
-          setActiveScale(card.solScale || 1.0);
+        const items = ensureCardItems(card);
+        const item = items[cropTarget.itemIndex] || items[0];
+        if (item) {
+          setActiveCropBox(item.crop || { x: 0, y: 0, width: 100, height: 100 });
+          setActiveScale(item.scale || 1.0);
         }
       }
     }
@@ -200,10 +218,29 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     const sourceId = e.dataTransfer.getData('text/plain') || draggedCardId;
     setDragOverTargetId(null);
     setDraggedCardId(null);
+    setReorderDragCardId(null);
+    setDragOverTargetId(null);
+    setReorderDropTargetId(null);
+  };
 
-    if (!sourceId || sourceId === targetCardId) return;
-
-    executeMerge(sourceId, targetCardId);
+  const syncCardFromItems = (card: PageCard, items: PageCardItem[]): PageCard => {
+    const item0 = items[0];
+    const item1 = items[1];
+    return {
+      ...card,
+      items,
+      isMerged: items.length > 1,
+      originalPageNum: item0 ? item0.pageNum : card.originalPageNum,
+      questionImage: item0 ? item0.image : card.questionImage,
+      croppedQuestionImage: item0?.croppedImage,
+      qCrop: item0?.crop,
+      qScale: item0?.scale || 1.0,
+      solutionPageNum: item1?.pageNum,
+      solutionImage: item1?.image,
+      croppedSolutionImage: item1?.croppedImage,
+      solCrop: item1?.crop,
+      solScale: item1?.scale || 1.0,
+    };
   };
 
   const executeMerge = (sourceId: string, targetId: string) => {
@@ -213,18 +250,13 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     if (!sourceCard || !targetCard) return;
 
     setCards(prev => {
+      const sourceItems = ensureCardItems(sourceCard);
+      const targetItems = ensureCardItems(targetCard);
+      const combinedItems = [...targetItems, ...sourceItems];
+
       const updated = prev.map(c => {
         if (c.id === targetId) {
-          return {
-            ...c,
-            solutionImage: sourceCard.questionImage,
-            croppedSolutionImage: sourceCard.croppedQuestionImage,
-            solutionPageNum: sourceCard.originalPageNum,
-            isMerged: true,
-            solCrop: sourceCard.qCrop,
-            solScale: sourceCard.qScale || 1.0,
-            showDivider: showDividerLine,
-          };
+          return syncCardFromItems(c, combinedItems);
         }
         return c;
       });
@@ -236,74 +268,60 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   };
 
   const handleUnmerge = (cardId: string) => {
-    const mergedCard = cards.find(c => c.id === cardId);
-    if (!mergedCard || !mergedCard.solutionImage) return;
+    const card = cards.find(c => c.id === cardId);
+    if (!card) return;
 
-    const restoredCard: PageCard = {
-      id: `card-restored-${Date.now()}-${Math.random()}`,
-      originalPageNum: mergedCard.solutionPageNum || (mergedCard.originalPageNum + 1),
-      questionImage: mergedCard.solutionImage,
-      croppedQuestionImage: mergedCard.croppedSolutionImage,
+    const items = ensureCardItems(card);
+    if (items.length <= 1) return;
+
+    const newCards: PageCard[] = items.map((item, idx) => ({
+      id: `card-split-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+      originalPageNum: item.pageNum,
+      questionImage: item.image,
+      croppedQuestionImage: item.croppedImage,
       isMerged: false,
       isSelected: true,
-      qCrop: mergedCard.solCrop,
-      qScale: mergedCard.solScale || 1.0,
+      qCrop: item.crop,
+      qScale: item.scale || 1.0,
       showDivider: true,
-    };
+      items: [item],
+    }));
 
     setCards(prev => {
-      const updated = prev.map(c => {
-        if (c.id === cardId) {
-          return {
-            ...c,
-            solutionImage: undefined,
-            croppedSolutionImage: undefined,
-            solutionPageNum: undefined,
-            isMerged: false,
-            solCrop: undefined,
-            solScale: 1.0,
-          };
-        }
-        return c;
-      });
-
-      const nextList = [...updated, restoredCard];
-      nextList.sort((a, b) => a.originalPageNum - b.originalPageNum);
-      return nextList;
+      const cardIdx = prev.findIndex(c => c.id === cardId);
+      if (cardIdx === -1) return prev;
+      const copy = [...prev];
+      copy.splice(cardIdx, 1, ...newCards);
+      return copy;
     });
   };
 
   const handleSwap = (cardId: string) => {
     setCards(prev => prev.map(c => {
-      if (c.id === cardId && c.solutionImage) {
-        return {
-          ...c,
-          originalPageNum: c.solutionPageNum || c.originalPageNum,
-          solutionPageNum: c.originalPageNum,
-          questionImage: c.solutionImage,
-          croppedQuestionImage: c.croppedSolutionImage,
-          solutionImage: c.questionImage,
-          croppedSolutionImage: c.croppedQuestionImage,
-          qCrop: c.solCrop,
-          solCrop: c.qCrop,
-          qScale: c.solScale,
-          solScale: c.qScale,
-        };
+      if (c.id === cardId) {
+        const items = [...ensureCardItems(c)];
+        if (items.length >= 2) {
+          const temp = items[0];
+          items[0] = items[1];
+          items[1] = temp;
+          return syncCardFromItems(c, items);
+        }
       }
       return c;
     }));
   };
 
-  // Duplicate Card Handler (allows multi-question extraction from same page)
+  // Duplicate Card Handler
   const handleDuplicate = (cardId: string) => {
     const idx = cards.findIndex(c => c.id === cardId);
     if (idx === -1) return;
     const original = cards[idx];
+    const originalItems = ensureCardItems(original);
 
     const duplicateCard: PageCard = {
       ...original,
       id: `card-copy-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      isMerged: original.isMerged,
+      items: originalItems.map(it => ({ ...it, id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}` })),
     };
 
     const nextCards = [...cards];
@@ -315,8 +333,171 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     setCards(prev => prev.filter(c => c.id !== cardId));
   };
 
+  // Add a specific Page Number into a Card
+  const handleAddPageToCard = (cardId: string, pageNum: number) => {
+    if (pageNum < 1 || pageNum > allPdfPages.length) {
+      alert(`Invalid page number. Please enter between 1 and ${allPdfPages.length}.`);
+      return;
+    }
+    const pageData = allPdfPages[pageNum - 1];
+    if (!pageData) return;
+
+    setCards(prev => prev.map(c => {
+      if (c.id === cardId) {
+        const items = ensureCardItems(c);
+        const newItemIndex = items.length;
+        const newItem: PageCardItem = {
+          id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          pageNum: pageNum,
+          image: pageData.image,
+          scale: 1.0,
+          label: newItemIndex === 0 ? 'Question' : newItemIndex === 1 ? 'Solution' : `Part ${newItemIndex + 1} (P.${pageNum})`,
+        };
+        const nextItems = [...items, newItem];
+        return syncCardFromItems(c, nextItems);
+      }
+      return c;
+    }));
+  };
+
+  // Remove individual snippet/page from card
+  const handleRemoveItemFromCard = (cardId: string, itemIndex: number) => {
+    const card = cards.find(c => c.id === cardId);
+    if (!card) return;
+    const items = ensureCardItems(card);
+    if (items.length <= 1) {
+      handleDelete(cardId);
+      return;
+    }
+
+    const removedItem = items[itemIndex];
+    const remainingItems = items.filter((_, idx) => idx !== itemIndex);
+
+    const restoredCard: PageCard = {
+      id: `card-detached-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      originalPageNum: removedItem.pageNum,
+      questionImage: removedItem.image,
+      croppedQuestionImage: removedItem.croppedImage,
+      isMerged: false,
+      isSelected: true,
+      qCrop: removedItem.crop,
+      qScale: removedItem.scale || 1.0,
+      showDivider: true,
+      items: [removedItem],
+    };
+
+    setCards(prev => {
+      const updated = prev.map(c => {
+        if (c.id === cardId) {
+          return syncCardFromItems(c, remainingItems);
+        }
+        return c;
+      });
+      const cardIdx = updated.findIndex(c => c.id === cardId);
+      const nextList = [...updated];
+      nextList.splice(cardIdx + 1, 0, restoredCard);
+      return nextList;
+    });
+  };
+
+  // Move snippet up/down inside a card
+  const handleMoveItemInsideCard = (cardId: string, fromIndex: number, direction: 'up' | 'down') => {
+    setCards(prev => prev.map(c => {
+      if (c.id === cardId) {
+        const items = [...ensureCardItems(c)];
+        const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+        if (toIndex < 0 || toIndex >= items.length) return c;
+        const temp = items[fromIndex];
+        items[fromIndex] = items[toIndex];
+        items[toIndex] = temp;
+        return syncCardFromItems(c, items);
+      }
+      return c;
+    }));
+  };
+
+  // Move Whole Card Left/Right in Document Grid
+  const handleMoveCard = (cardId: string, direction: 'prev' | 'next' | 'left' | 'right') => {
+    setCards(prev => {
+      const idx = prev.findIndex(c => c.id === cardId);
+      if (idx === -1) return prev;
+      const targetIdx = (direction === 'prev' || direction === 'left') ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const copy = [...prev];
+      const temp = copy[idx];
+      copy[idx] = copy[targetIdx];
+      copy[targetIdx] = temp;
+      return copy;
+    });
+  };
+
+  // Move Card to a specific position number
+  const handleMoveCardToPosition = (cardId: string, targetPos1Indexed: number) => {
+    setCards(prev => {
+      const idx = prev.findIndex(c => c.id === cardId);
+      if (idx === -1) return prev;
+      const targetIdx = Math.max(0, Math.min(prev.length - 1, targetPos1Indexed - 1));
+      if (targetIdx === idx) return prev;
+      const copy = [...prev];
+      const [removed] = copy.splice(idx, 1);
+      copy.splice(targetIdx, 0, removed);
+      return copy;
+    });
+    setPositionDialogCardId(null);
+  };
+
+  // Drag-and-drop handlers for Reordering & Merging
+  const handleReorderDragStart = (e: React.DragEvent, cardId: string) => {
+    e.stopPropagation();
+    setReorderDragCardId(cardId);
+    e.dataTransfer.setData('text/card-reorder', cardId);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleCardDragOver = (e: React.DragEvent, targetCardId: string) => {
+    e.preventDefault();
+    if (reorderDragCardId && reorderDragCardId !== targetCardId) {
+      setReorderDropTargetId(targetCardId);
+      e.dataTransfer.dropEffect = 'move';
+      return;
+    }
+    if (draggedCardId && draggedCardId !== targetCardId) {
+      setDragOverTargetId(targetCardId);
+      e.dataTransfer.dropEffect = 'move';
+    }
+  };
+
+  const handleCardDrop = (e: React.DragEvent, targetCardId: string) => {
+    e.preventDefault();
+    const reorderSource = e.dataTransfer.getData('text/card-reorder') || reorderDragCardId;
+    if (reorderSource && reorderSource !== targetCardId) {
+      setReorderDragCardId(null);
+      setReorderDropTargetId(null);
+      setCards(prev => {
+        const fromIdx = prev.findIndex(c => c.id === reorderSource);
+        const toIdx = prev.findIndex(c => c.id === targetCardId);
+        if (fromIdx === -1 || toIdx === -1) return prev;
+        const copy = [...prev];
+        const [moved] = copy.splice(fromIdx, 1);
+        copy.splice(toIdx, 0, moved);
+        return copy;
+      });
+      return;
+    }
+
+    // Merge drop
+    const sourceId = e.dataTransfer.getData('text/plain') || draggedCardId;
+    setDragOverTargetId(null);
+    setDraggedCardId(null);
+    setReorderDragCardId(null);
+    setReorderDropTargetId(null);
+
+    if (!sourceId || sourceId === targetCardId) return;
+    executeMerge(sourceId, targetCardId);
+  };
+
   // -------------------------------------------------------------
-  // Interactive Visual Crop Mouse Handlers
+  // Interactive Visual Crop Mouse Handlers & Navigation
   // -------------------------------------------------------------
   const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -336,28 +517,18 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   // Helper to build list of all croppable page targets across cards in order
   const getFlatTargets = (cardList: PageCard[]) => {
     return cardList.flatMap(card => {
-      const list: { cardId: string; type: 'question' | 'solution'; label: string; pageNum: number }[] = [
-        {
-          cardId: card.id,
-          type: 'question',
-          label: `Question (P.${card.originalPageNum})`,
-          pageNum: card.originalPageNum
-        }
-      ];
-      if (card.isMerged) {
-        list.push({
-          cardId: card.id,
-          type: 'solution',
-          label: `Solution (P.${card.solutionPageNum || (card.originalPageNum + 1)})`,
-          pageNum: card.solutionPageNum || (card.originalPageNum + 1)
-        });
-      }
-      return list;
+      const items = ensureCardItems(card);
+      return items.map((item, itemIdx) => ({
+        cardId: card.id,
+        itemIndex: itemIdx,
+        label: item.label || (items.length === 1 ? `Page ${item.pageNum}` : itemIdx === 0 ? `Question (P.${item.pageNum})` : itemIdx === 1 ? `Solution (P.${item.pageNum})` : `Part ${itemIdx + 1} (P.${item.pageNum})`),
+        pageNum: item.pageNum,
+      }));
     });
   };
 
   const saveCropForTarget = async (
-    target: { cardId: string; type: 'question' | 'solution' },
+    target: { cardId: string; itemIndex: number },
     box: CropBox,
     scale: number
   ) => {
@@ -366,32 +537,30 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
     try {
       const isFull = box.width >= 99.5 && box.height >= 99.5 && box.x <= 0.5 && box.y <= 0.5;
-      const imageSrc = target.type === 'question' 
-        ? card.questionImage 
-        : (card.solutionImage || card.questionImage);
+      const items = ensureCardItems(card);
+      const activeItem = items[target.itemIndex] || items[0];
+      if (!activeItem) return;
 
       let croppedBase64: string | undefined = undefined;
       if (!isFull && box.width > 2 && box.height > 2) {
-        croppedBase64 = await cropImageByPercentage(imageSrc, box);
+        croppedBase64 = await cropImageByPercentage(activeItem.image, box);
       }
+
+      const updatedItems = items.map((it, idx) => {
+        if (idx === target.itemIndex) {
+          return {
+            ...it,
+            croppedImage: croppedBase64,
+            crop: isFull ? undefined : box,
+            scale,
+          };
+        }
+        return it;
+      });
 
       setCards(prev => prev.map(c => {
         if (c.id === target.cardId) {
-          if (target.type === 'question') {
-            return {
-              ...c,
-              croppedQuestionImage: croppedBase64,
-              qCrop: isFull ? undefined : box,
-              qScale: scale,
-            };
-          } else {
-            return {
-              ...c,
-              croppedSolutionImage: croppedBase64,
-              solCrop: isFull ? undefined : box,
-              solScale: scale,
-            };
-          }
+          return syncCardFromItems(c, updatedItems);
         }
         return c;
       }));
@@ -409,19 +578,19 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   const handleNavigateCrop = async (direction: 'prev' | 'next') => {
     if (!cropTarget) return;
 
-    // Auto-save the current crop on this page before moving
+    // Auto-save current crop before moving
     await saveCropForTarget(cropTarget, activeCropBox, activeScale);
 
     const targets = getFlatTargets(cards);
     const targetIndex = targets.findIndex(
-      t => t.cardId === cropTarget.cardId && t.type === cropTarget.type
+      t => t.cardId === cropTarget.cardId && t.itemIndex === cropTarget.itemIndex
     );
     if (targetIndex === -1) return;
 
     const nextIndex = direction === 'next' ? targetIndex + 1 : targetIndex - 1;
     if (nextIndex >= 0 && nextIndex < targets.length) {
       const nextT = targets[nextIndex];
-      setCropTarget({ cardId: nextT.cardId, type: nextT.type });
+      setCropTarget({ cardId: nextT.cardId, itemIndex: nextT.itemIndex });
     }
   };
 
@@ -434,25 +603,22 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
     setCards(prev => prev.map(c => {
       if (c.id === cropTarget.cardId) {
-        if (cropTarget.type === 'question') {
-          return {
-            ...c,
-            originalPageNum: newPageNum,
-            questionImage: targetPage.image,
-            croppedQuestionImage: undefined,
-            qCrop: undefined,
-            qScale: 1.0,
-          };
-        } else {
-          return {
-            ...c,
-            solutionPageNum: newPageNum,
-            solutionImage: targetPage.image,
-            croppedSolutionImage: undefined,
-            solCrop: undefined,
-            solScale: 1.0,
-          };
-        }
+        const items = ensureCardItems(c);
+        const updatedItems = items.map((it, idx) => {
+          if (idx === cropTarget.itemIndex) {
+            return {
+              ...it,
+              pageNum: newPageNum,
+              image: targetPage.image,
+              croppedImage: undefined,
+              crop: undefined,
+              scale: 1.0,
+              label: it.label ? it.label.replace(/\(P\.\d+\)/, `(P.${newPageNum})`) : `Page ${newPageNum}`,
+            };
+          }
+          return it;
+        });
+        return syncCardFromItems(c, updatedItems);
       }
       return c;
     }));
@@ -461,14 +627,17 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     setActiveScale(1.0);
   };
 
-  const handleResetCropOnCard = (cardId: string, type: 'question' | 'solution') => {
+  const handleResetCropOnCard = (cardId: string, itemIndex: number) => {
     setCards(prev => prev.map(c => {
       if (c.id === cardId) {
-        if (type === 'question') {
-          return { ...c, croppedQuestionImage: undefined, qCrop: undefined, qScale: 1.0 };
-        } else {
-          return { ...c, croppedSolutionImage: undefined, solCrop: undefined, solScale: 1.0 };
-        }
+        const items = ensureCardItems(c);
+        const updatedItems = items.map((it, idx) => {
+          if (idx === itemIndex) {
+            return { ...it, croppedImage: undefined, crop: undefined, scale: 1.0 };
+          }
+          return it;
+        });
+        return syncCardFromItems(c, updatedItems);
       }
       return c;
     }));
@@ -593,7 +762,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
   const flatTargets = getFlatTargets(cards);
   const currentTargetIndex = cropTarget
-    ? flatTargets.findIndex(t => t.cardId === cropTarget.cardId && t.type === cropTarget.type)
+    ? flatTargets.findIndex(t => t.cardId === cropTarget.cardId && t.itemIndex === cropTarget.itemIndex)
     : -1;
   const hasPrevPage = currentTargetIndex > 0;
   const hasNextPage = currentTargetIndex >= 0 && currentTargetIndex < flatTargets.length - 1;
@@ -601,15 +770,21 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   const nextTarget = hasNextPage ? flatTargets[currentTargetIndex + 1] : null;
 
   const currentCroppingCard = cropTarget ? cards.find(c => c.id === cropTarget.cardId) : null;
-  const currentDisplayedPageNum = currentCroppingCard 
-    ? (cropTarget?.type === 'question' 
-        ? currentCroppingCard.originalPageNum 
-        : (currentCroppingCard.solutionPageNum || currentCroppingCard.originalPageNum + 1))
-    : 1;
-
-  const currentCroppingImageSrc = currentCroppingCard 
-    ? (cropTarget?.type === 'question' ? currentCroppingCard.questionImage : currentCroppingCard.solutionImage || currentCroppingCard.questionImage) 
+  const currentCroppingItems = currentCroppingCard ? ensureCardItems(currentCroppingCard) : [];
+  const currentItemIndex = cropTarget?.itemIndex ?? 0;
+  const currentCroppingItem = currentCroppingItems[currentItemIndex] || currentCroppingItems[0];
+  const currentDisplayedPageNum = currentCroppingItem ? currentCroppingItem.pageNum : 1;
+  const currentCroppingImageSrc = currentCroppingItem 
+    ? (currentCroppingItem.croppedImage || currentCroppingItem.image) 
     : '';
+
+  // Filtered Cards based on pageSearchQuery
+  const displayedCards = cards.filter(card => {
+    if (!pageSearchQuery.trim()) return true;
+    const q = pageSearchQuery.trim().toLowerCase();
+    const items = ensureCardItems(card);
+    return items.some(it => String(it.pageNum).includes(q) || (it.label && it.label.toLowerCase().includes(q)));
+  });
 
   // Keyboard arrow keys for crop navigation
   useEffect(() => {
@@ -701,6 +876,28 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
         <div className="flex items-center gap-2 flex-wrap">
           {cards.length > 0 && (
             <>
+              {/* Global Page Search Input */}
+              <div className="relative flex items-center">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Find Page # (e.g. 63)..."
+                  value={pageSearchQuery}
+                  onChange={(e) => setPageSearchQuery(e.target.value)}
+                  className="pl-8 pr-7 py-1.5 bg-white/[0.05] hover:bg-white/[0.08] focus:bg-black/60 border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-xs text-white placeholder-slate-500 outline-none w-36 sm:w-44 transition-all"
+                  title="Search cards containing this page number"
+                />
+                {pageSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setPageSearchQuery('')}
+                    className="absolute right-2 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
               {/* Divider Line Toggle */}
               <button
                 type="button"
@@ -776,6 +973,25 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
         </div>
       )}
 
+      {/* Active Search Filter Banner */}
+      {pageSearchQuery.trim() && (
+        <div className="bg-blue-600/20 border-b border-blue-500/30 px-6 py-2 flex items-center justify-between text-xs font-semibold text-blue-200">
+          <div className="flex items-center gap-2">
+            <Search className="w-3.5 h-3.5 text-blue-400" />
+            <span>
+              Showing cards matching Page <strong>&ldquo;{pageSearchQuery}&rdquo;</strong> ({displayedCards.length} found)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPageSearchQuery('')}
+            className="underline text-white hover:text-slate-300"
+          >
+            Clear Filter (Show All {cards.length})
+          </button>
+        </div>
+      )}
+
       {/* Manual Selection Notification Bar */}
       {manualMergeSourceId && (
         <div className="bg-[#FF6B2B]/20 border-b border-[#FF6B2B]/40 px-6 py-2 flex items-center justify-between text-xs font-semibold text-orange-200 animate-in fade-in">
@@ -796,19 +1012,25 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
         {cards.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-6">
-            {cards.map((card) => {
+            {displayedCards.map((card, cardIdx) => {
+              const items = ensureCardItems(card);
               const isTargetHovered = dragOverTargetId === card.id;
-              const isSourceBeingDragged = draggedCardId === card.id;
+              const isReorderHovered = reorderDropTargetId === card.id;
+              const isSourceBeingDragged = draggedCardId === card.id || reorderDragCardId === card.id;
               const isManualSource = manualMergeSourceId === card.id;
+              const isMulti = items.length > 1;
 
               return (
                 <div
                   key={card.id}
-                  draggable={!card.isMerged}
+                  draggable
                   onDragStart={(e) => handleDragStart(e, card.id)}
-                  onDragOver={(e) => handleDragOver(e, card.id)}
-                  onDragLeave={() => handleDragLeave(card.id)}
-                  onDrop={(e) => handleDrop(e, card.id)}
+                  onDragOver={(e) => handleCardDragOver(e, card.id)}
+                  onDragLeave={() => {
+                    if (dragOverTargetId === card.id) setDragOverTargetId(null);
+                    if (reorderDropTargetId === card.id) setReorderDropTargetId(null);
+                  }}
+                  onDrop={(e) => handleCardDrop(e, card.id)}
                   onClick={() => {
                     if (manualMergeSourceId && manualMergeSourceId !== card.id) {
                       executeMerge(manualMergeSourceId, card.id);
@@ -817,9 +1039,11 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   className={`relative flex flex-col rounded-2xl border transition-all duration-150 overflow-hidden group shadow-xl ${
                     card.isSelected === false ? 'opacity-40 grayscale-[0.4] hover:opacity-85' : 'opacity-100'
                   } ${
-                    isTargetHovered
+                    isReorderHovered
+                      ? 'border-blue-400 ring-4 ring-blue-500/40 bg-blue-950/40 scale-[1.02]'
+                      : isTargetHovered
                       ? 'border-emerald-400 ring-4 ring-emerald-500/30 bg-emerald-950/40 scale-[1.02]'
-                      : card.isMerged
+                      : isMulti
                       ? (card.isSelected !== false ? 'border-orange-500/50 bg-[#121622] hover:border-orange-500/80' : 'border-orange-500/20 bg-[#121622]/60')
                       : isManualSource
                       ? 'border-[#FF6B2B] ring-2 ring-[#FF6B2B] bg-[#FF6B2B]/10'
@@ -828,30 +1052,88 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                     manualMergeSourceId && manualMergeSourceId !== card.id ? 'cursor-pointer hover:ring-2 hover:ring-emerald-400' : ''
                   }`}
                 >
-                  {/* Drop Indicator Overlay */}
+                  {/* Drop Merge Indicator Overlay */}
                   {isTargetHovered && (
                     <div className="absolute inset-0 z-30 bg-emerald-600/30 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center pointer-events-none">
                       <div className="p-3 rounded-full bg-emerald-500 text-black mb-2 animate-bounce">
                         <ArrowDownUp className="w-6 h-6" />
                       </div>
                       <span className="text-sm font-extrabold text-white">
-                        Drop to Merge as Solution!
+                        Drop to Merge All Pages Here!
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Drop Reorder Indicator Overlay */}
+                  {isReorderHovered && (
+                    <div className="absolute inset-0 z-30 bg-blue-600/30 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center pointer-events-none">
+                      <div className="p-3 rounded-full bg-blue-500 text-white mb-2 animate-pulse">
+                        <ArrowLeftRight className="w-6 h-6" />
+                      </div>
+                      <span className="text-sm font-extrabold text-white">
+                        Move Card to Position #{cardIdx + 1}
                       </span>
                     </div>
                   )}
 
                   {/* CARD HEADER */}
-                  <div className={`p-3 border-b flex items-center justify-between gap-2 ${
-                    card.isMerged 
+                  <div className={`p-2.5 border-b flex items-center justify-between gap-1.5 ${
+                    isMulti 
                       ? (card.isSelected !== false ? 'bg-orange-500/10 border-orange-500/20 text-orange-300' : 'bg-orange-500/5 border-orange-500/10 text-orange-400/60')
                       : (card.isSelected !== false ? 'bg-white/[0.03] border-white/[0.06] text-slate-300' : 'bg-white/[0.01] border-white/[0.03] text-slate-500')
                   }`}>
-                    <div className="flex items-center gap-2">
-                      {/* Checkbox for selecting / deselecting this page */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {/* Grip handle for reordering card position */}
+                      <div
+                        draggable
+                        onDragStart={(e) => handleReorderDragStart(e, card.id)}
+                        className="cursor-grab active:cursor-grabbing p-0.5 rounded hover:bg-white/[0.12] text-slate-400 hover:text-white transition-colors"
+                        title="Drag to change card position in document"
+                      >
+                        <GripVertical className="w-4 h-4" />
+                      </div>
+
+                      {/* Position Badge (Clickable to change position) */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPositionDialogCardId(card.id);
+                          setTargetPositionInput(String(cardIdx + 1));
+                        }}
+                        className="px-1.5 py-0.5 rounded bg-white/[0.07] hover:bg-[#FF6B2B]/20 text-[10px] font-mono font-black text-slate-300 hover:text-orange-300 border border-white/[0.1] transition-all shrink-0"
+                        title="Click to jump to a specific page position"
+                      >
+                        #{cardIdx + 1}
+                      </button>
+
+                      {/* Move Left / Right buttons */}
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleMoveCard(card.id, 'left'); }}
+                          disabled={cardIdx === 0}
+                          className="p-0.5 rounded hover:bg-white/[0.12] text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+                          title="Move card left / earlier"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleMoveCard(card.id, 'right'); }}
+                          disabled={cardIdx === cards.length - 1}
+                          className="p-0.5 rounded hover:bg-white/[0.12] text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+                          title="Move card right / later"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      {/* Select / Deselect Checkbox */}
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); toggleSelectCard(card.id); }}
-                        className={`p-1 rounded-md transition-all flex items-center justify-center ${
+                        className={`p-1 rounded-md transition-all flex items-center justify-center shrink-0 ${
                           card.isSelected !== false 
                             ? 'text-[#FF884D] bg-[#FF884D]/15 hover:bg-[#FF884D]/25 ring-1 ring-[#FF884D]/30' 
                             : 'text-slate-500 bg-white/[0.04] hover:bg-white/[0.08] hover:text-slate-300'
@@ -859,35 +1141,52 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                         title={card.isSelected !== false ? "Click to Deselect from Export" : "Click to Select for Export"}
                       >
                         {card.isSelected !== false ? (
-                          <CheckSquare className="w-4 h-4 text-[#FF884D]" />
+                          <CheckSquare className="w-3.5 h-3.5 text-[#FF884D]" />
                         ) : (
-                          <Square className="w-4 h-4 text-slate-500" />
+                          <Square className="w-3.5 h-3.5 text-slate-500" />
                         )}
                       </button>
 
-                      <span className="text-xs font-extrabold text-white">
-                        {card.isMerged 
-                          ? `Set: Page ${card.originalPageNum} + ${card.solutionPageNum}` 
-                          : `Page ${card.originalPageNum}`}
-                      </span>
-                      {card.isMerged ? (
-                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          Merged
+                      {/* Card Title & Badges */}
+                      <div className="flex items-center gap-1 min-w-0 truncate">
+                        <span className="text-[11px] font-extrabold text-white truncate" title={items.map(it => `P.${it.pageNum}`).join(' + ')}>
+                          {items.length > 1
+                            ? `Set: P.${items.map(it => it.pageNum).join('+')}`
+                            : `Page ${items[0]?.pageNum || card.originalPageNum}`}
                         </span>
-                      ) : (
-                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-white/[0.06] text-slate-400">
-                          Single
-                        </span>
-                      )}
+                        {items.length > 1 ? (
+                          <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                            {items.length}P
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-white/[0.06] text-slate-400 shrink-0">
+                            1P
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Top Action Icons: Duplicate & Delete */}
-                    <div className="flex items-center gap-1">
+                    {/* Top Action Icons: Add Page, Duplicate & Delete */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* Search & Add Page Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveAddModalCardId(card.id);
+                          setSearchModalPageQuery('');
+                        }}
+                        className="px-1.5 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-0.5 transition-all"
+                        title="Search & attach another page number to this card"
+                      >
+                        <span>+ Page</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleDuplicate(card.id); }}
                         className="p-1 rounded bg-white/[0.04] hover:bg-white/[0.12] text-slate-300 hover:text-white transition-all"
-                        title="Duplicate page (to crop another question from the same page)"
+                        title="Duplicate card"
                       >
                         <Copy className="w-3.5 h-3.5" />
                       </button>
@@ -903,142 +1202,147 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                     </div>
                   </div>
 
-                  {/* CARD BODY: 100% WYSIWYG PREVIEW (Actual Clean Cropped Images) */}
-                  <div className="p-3 flex-1 flex flex-col gap-2 bg-white/[0.01]">
-                    {card.isMerged ? (
-                      /* MERGED SET: QUESTION TOP, SOLUTION BOTTOM */
-                      <div className="flex-1 flex flex-col gap-2">
-                        {/* Question Snippet */}
-                        <div className="relative group/preview rounded-xl border border-orange-500/30 overflow-hidden bg-white p-1">
-                          <img
-                            src={card.croppedQuestionImage || card.questionImage}
-                            alt="Question"
-                            className="w-full h-auto max-h-44 object-contain block mx-auto"
-                            style={{
-                              transform: card.qScale && card.qScale !== 1 ? `scale(${card.qScale})` : undefined,
-                              transformOrigin: 'center center'
-                            }}
-                          />
-                          <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-90 group-hover/preview:opacity-100 transition-all">
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setCropTarget({ cardId: card.id, type: 'question' }); }}
-                              className="px-2 py-1 rounded bg-black/80 hover:bg-[#FF6B2B] text-white text-[10px] font-bold flex items-center gap-1 shadow-md"
-                            >
-                              <Scissors className="w-3 h-3 text-amber-400" />
-                              <span>{card.croppedQuestionImage ? 'Re-Crop Q' : 'Crop Q'}</span>
-                            </button>
-                            {card.croppedQuestionImage && (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleResetCropOnCard(card.id, 'question'); }}
-                                className="p-1 rounded bg-black/80 hover:bg-rose-600 text-white text-[10px]"
-                                title="Reset Question to full page"
-                              >
-                                <RefreshCcw className="w-3 h-3" />
-                              </button>
-                            )}
+                  {/* CARD BODY: MULTI-SNIPPET STACK (Supports 1, 2, 3, 4, 5+ Pages) */}
+                  <div className="p-2.5 flex-1 flex flex-col gap-2 bg-white/[0.01]">
+                    {items.map((item, itemIdx) => {
+                      const isCropped = Boolean(item.croppedImage);
+                      const displayImg = item.croppedImage || item.image;
+
+                      return (
+                        <div key={item.id || `${card.id}-${itemIdx}`} className="flex flex-col">
+                          {/* Mini header for item in card */}
+                          <div className="flex items-center justify-between pb-1 px-1 text-[10px] text-slate-400 font-semibold">
+                            <span className="flex items-center gap-1 font-bold text-slate-300">
+                              <span className="px-1 rounded bg-white/[0.08] text-[9px] text-amber-400 font-mono">#{itemIdx + 1}</span>
+                              <span>{item.label || (itemIdx === 0 ? 'Question' : `Part ${itemIdx + 1}`)} (P.{item.pageNum})</span>
+                            </span>
+
+                            <div className="flex items-center gap-0.5">
+                              {items.length > 1 && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleMoveItemInsideCard(card.id, itemIdx, 'up'); }}
+                                    disabled={itemIdx === 0}
+                                    className="p-0.5 rounded hover:bg-white/[0.12] text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+                                    title="Move snippet up"
+                                  >
+                                    <ChevronUp className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleMoveItemInsideCard(card.id, itemIdx, 'down'); }}
+                                    disabled={itemIdx === items.length - 1}
+                                    className="p-0.5 rounded hover:bg-white/[0.12] text-slate-400 hover:text-white disabled:opacity-20 transition-all"
+                                    title="Move snippet down"
+                                  >
+                                    <ChevronDown className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleRemoveItemFromCard(card.id, itemIdx); }}
+                                    className="p-0.5 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 ml-1 transition-all"
+                                    title="Detach this page to a separate card"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                        </div>
 
-                        {/* Divider Line */}
-                        {showDividerLine && (
-                          <div className="w-full my-0.5 border-t border-slate-700" />
-                        )}
-
-                        {/* Solution Snippet */}
-                        {card.solutionImage && (
-                          <div className="relative group/preview rounded-xl border border-emerald-500/30 overflow-hidden bg-white p-1">
+                          {/* Image preview box with Crop button */}
+                          <div className="relative group/preview rounded-xl border border-white/[0.08] overflow-hidden bg-white p-1 flex items-center justify-center">
                             <img
-                              src={card.croppedSolutionImage || card.solutionImage}
-                              alt="Solution"
-                              className="w-full h-auto max-h-44 object-contain block mx-auto"
+                              src={displayImg}
+                              alt={`Page ${item.pageNum}`}
+                              className={`w-full h-auto object-contain block mx-auto ${
+                                items.length > 2 ? 'max-h-32' : items.length === 2 ? 'max-h-44' : 'max-h-72'
+                              }`}
                               style={{
-                                transform: card.solScale && card.solScale !== 1 ? `scale(${card.solScale})` : undefined,
+                                transform: item.scale && item.scale !== 1 ? `scale(${item.scale})` : undefined,
                                 transformOrigin: 'center center'
                               }}
                             />
+
+                            {/* Floating Action Buttons */}
                             <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-90 group-hover/preview:opacity-100 transition-all">
                               <button
                                 type="button"
-                                onClick={(e) => { e.stopPropagation(); setCropTarget({ cardId: card.id, type: 'solution' }); }}
-                                className="px-2 py-1 rounded bg-black/80 hover:bg-emerald-600 text-white text-[10px] font-bold flex items-center gap-1 shadow-md"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCropTarget({
+                                    cardId: card.id,
+                                    itemIndex: itemIdx,
+                                    type: itemIdx === 0 ? 'question' : 'solution'
+                                  });
+                                }}
+                                className="px-2 py-1 rounded bg-black/85 hover:bg-[#FF6B2B] text-white text-[10px] font-bold flex items-center gap-1 shadow-md transition-all"
                               >
-                                <Scissors className="w-3 h-3 text-emerald-400" />
-                                <span>{card.croppedSolutionImage ? 'Re-Crop Sol' : 'Crop Sol'}</span>
+                                <Scissors className="w-3 h-3 text-amber-400" />
+                                <span>{isCropped ? 'Re-Crop' : 'Crop'}</span>
                               </button>
-                              {card.croppedSolutionImage && (
+
+                              {isCropped && (
                                 <button
                                   type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleResetCropOnCard(card.id, 'solution'); }}
-                                  className="p-1 rounded bg-black/80 hover:bg-rose-600 text-white text-[10px]"
-                                  title="Reset Solution to full page"
+                                  onClick={(e) => { e.stopPropagation(); handleResetCropOnCard(card.id, itemIdx); }}
+                                  className="p-1 rounded bg-black/85 hover:bg-rose-600 text-white text-[10px] transition-all"
+                                  title="Reset to full page"
                                 >
                                   <RefreshCcw className="w-3 h-3" />
                                 </button>
                               )}
                             </div>
                           </div>
-                        )}
-                      </div>
-                    ) : (
-                      /* SINGLE STANDALONE PAGE */
-                      <div className="relative group/preview rounded-xl border border-white/[0.08] overflow-hidden bg-white p-1 flex items-center justify-center">
-                        <img
-                          src={card.croppedQuestionImage || card.questionImage}
-                          alt={`Page ${card.originalPageNum}`}
-                          className="w-full h-auto max-h-72 object-contain block mx-auto"
-                          style={{
-                            transform: card.qScale && card.qScale !== 1 ? `scale(${card.qScale})` : undefined,
-                            transformOrigin: 'center center'
-                          }}
-                        />
-                        <div className="absolute bottom-2 right-2 flex items-center gap-1 opacity-90 group-hover/preview:opacity-100 transition-all">
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); setCropTarget({ cardId: card.id, type: 'question' }); }}
-                            className="px-2.5 py-1 rounded bg-black/80 hover:bg-[#FF6B2B] text-white text-[10px] font-bold flex items-center gap-1 shadow-md"
-                          >
-                            <Scissors className="w-3 h-3 text-amber-400" />
-                            <span>{card.croppedQuestionImage ? 'Re-Crop Box' : 'Crop Box'}</span>
-                          </button>
-                          {card.croppedQuestionImage && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleResetCropOnCard(card.id, 'question'); }}
-                              className="p-1 rounded bg-black/80 hover:bg-rose-600 text-white text-[10px]"
-                              title="Reset to full page"
-                            >
-                              <RefreshCcw className="w-3 h-3" />
-                            </button>
+
+                          {/* Divider line between snippets */}
+                          {showDividerLine && itemIdx < items.length - 1 && (
+                            <div className="w-full my-1.5 border-t border-dashed border-slate-700/80" />
                           )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })}
                   </div>
 
                   {/* CARD FOOTER */}
-                  <div className="p-3 border-t border-white/[0.06] bg-black/20 flex items-center justify-between gap-1.5">
-                    {card.isMerged ? (
+                  <div className="p-2.5 border-t border-white/[0.06] bg-black/20 flex items-center justify-between gap-1.5 flex-wrap">
+                    {items.length > 1 ? (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => handleUnmerge(card.id)}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/[0.06] hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 text-xs font-semibold transition-all"
-                          title="Separate back into 2 cards"
-                        >
-                          <Undo2 className="w-3.5 h-3.5" />
-                          <span>Unmerge</span>
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleUnmerge(card.id)}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 text-[11px] font-semibold transition-all"
+                            title="Separate all pages back into individual cards"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>Unmerge All</span>
+                          </button>
+
+                          {items.length === 2 && (
+                            <button
+                              type="button"
+                              onClick={() => handleSwap(card.id)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-slate-300 hover:text-white text-[11px] transition-all"
+                              title="Swap Top & Bottom"
+                            >
+                              <ArrowLeftRight className="w-3 h-3" />
+                              <span>Swap</span>
+                            </button>
+                          )}
+                        </div>
 
                         <button
                           type="button"
-                          onClick={() => handleSwap(card.id)}
-                          className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-slate-300 hover:text-white text-xs transition-all"
-                          title="Swap Top & Bottom"
+                          onClick={() => {
+                            setActiveAddModalCardId(card.id);
+                            setSearchModalPageQuery('');
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[11px] font-bold transition-all border border-emerald-500/30 ml-auto"
+                          title="Search & attach another page number to this card"
                         >
-                          <ArrowLeftRight className="w-3.5 h-3.5" />
-                          <span>Swap</span>
+                          <span>+ Add Page</span>
                         </button>
                       </>
                     ) : (
@@ -1046,7 +1350,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                         <button
                           type="button"
                           onClick={() => setManualMergeSourceId(isManualSource ? null : card.id)}
-                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
                             isManualSource 
                               ? 'bg-[#FF6B2B] text-white' 
                               : 'bg-white/[0.06] hover:bg-white/[0.1] text-slate-300'
@@ -1056,9 +1360,17 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                           <span>{isManualSource ? 'Cancel' : 'Merge into...'}</span>
                         </button>
 
-                        <span className="text-[10px] text-slate-500 italic">
-                          Drag onto Question
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveAddModalCardId(card.id);
+                            setSearchModalPageQuery('');
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-emerald-500/20 hover:text-emerald-300 text-slate-300 text-[11px] font-semibold transition-all border border-white/[0.08]"
+                          title="Search & attach another page number to this card"
+                        >
+                          <span>+ Add Page</span>
+                        </button>
                       </>
                     )}
                   </div>
@@ -1109,10 +1421,10 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-bold text-white">
-                        Crop {cropTarget.type === 'question' ? 'Question' : 'Solution'} (Page {currentDisplayedPageNum})
+                        Crop {currentCroppingItem?.label || (currentItemIndex === 0 ? 'Question' : `Part ${currentItemIndex + 1}`)} (Page {currentDisplayedPageNum})
                       </h3>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#FF6B2B]/15 text-[#FF884D] border border-[#FF6B2B]/30 uppercase tracking-wider">
-                        {cropTarget.type === 'question' ? 'Question' : 'Solution'}
+                        {currentCroppingItem?.label || (currentItemIndex === 0 ? 'Question' : `Part ${currentItemIndex + 1}`)}
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 truncate">
@@ -1121,7 +1433,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   </div>
                 </div>
 
-                {/* Center / Action Navigation: Prev / Next Page & Tabs */}
+                {/* Center / Action Navigation: Prev / Next Page & Snippet Tabs */}
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Next / Previous Page Navigation Pill */}
                   <div className="flex items-center gap-1 bg-black/50 border border-white/[0.1] p-1 rounded-xl shadow-inner">
@@ -1133,7 +1445,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                       title={prevTarget ? `Previous: ${prevTarget.label} (Arrow Left)` : 'No previous page'}
                     >
                       <ChevronLeft className="w-4 h-4 text-orange-400" />
-                      <span>Prev Page</span>
+                      <span>Prev</span>
                     </button>
 
                     <div className="px-2.5 py-1 text-xs font-mono font-extrabold text-amber-400 bg-white/[0.05] rounded-md border border-white/[0.06] flex items-center gap-1">
@@ -1147,40 +1459,44 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                       className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-white/[0.08] active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
                       title={nextTarget ? `Next: ${nextTarget.label} (Arrow Right)` : 'No next page'}
                     >
-                      <span>Next Page</span>
+                      <span>Next</span>
                       <ChevronRight className="w-4 h-4 text-orange-400" />
                     </button>
                   </div>
 
-                  {/* Switch Q / Sol tabs if merged */}
-                  {currentCroppingCard.isMerged && (
-                    <div className="flex items-center gap-1 bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.08]">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          saveCropForTarget(cropTarget, activeCropBox, activeScale);
-                          setCropTarget({ cardId: currentCroppingCard.id, type: 'question' });
-                        }}
-                        className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${
-                          cropTarget.type === 'question' ? 'bg-[#FF6B2B] text-white shadow' : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Question (P.{currentCroppingCard.originalPageNum})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          saveCropForTarget(cropTarget, activeCropBox, activeScale);
-                          setCropTarget({ cardId: currentCroppingCard.id, type: 'solution' });
-                        }}
-                        className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${
-                          cropTarget.type === 'solution' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        Solution (P.{currentCroppingCard.solutionPageNum || currentCroppingCard.originalPageNum + 1})
-                      </button>
-                    </div>
-                  )}
+                  {/* Dynamic Snippet Tabs for this Card */}
+                  <div className="flex items-center gap-1 bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.08] flex-wrap max-w-sm sm:max-w-md overflow-x-auto">
+                    {currentCroppingItems.map((item, idx) => {
+                      const isActive = idx === currentItemIndex;
+                      return (
+                        <button
+                          key={item.id || idx}
+                          type="button"
+                          onClick={() => {
+                            saveCropForTarget(cropTarget, activeCropBox, activeScale);
+                            setCropTarget({ cardId: currentCroppingCard.id, itemIndex: idx });
+                          }}
+                          className={`px-2.5 py-1 rounded text-xs font-bold transition-all shrink-0 ${
+                            isActive ? 'bg-[#FF6B2B] text-white shadow' : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {item.label || (idx === 0 ? 'Question' : `Part ${idx + 1}`)} (P.{item.pageNum})
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        saveCropForTarget(cropTarget, activeCropBox, activeScale);
+                        setActiveAddModalCardId(currentCroppingCard.id);
+                        setSearchModalPageQuery('');
+                      }}
+                      className="px-2 py-1 rounded text-xs font-bold text-emerald-400 hover:bg-emerald-500/20 shrink-0 transition-colors"
+                      title="Search & add another page to this card"
+                    >
+                      + Add Page
+                    </button>
+                  </div>
 
                   {/* Source PDF Page Selector */}
                   {allPdfPages.length > 1 && (
@@ -1466,6 +1782,215 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   Auto-Pair Now
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 5. SEARCH & ADD PAGE TO CARD MODAL */}
+      <AnimatePresence>
+        {activeAddModalCardId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-2xl bg-[#141824] border border-white/[0.1] rounded-2xl p-5 shadow-2xl flex flex-col max-h-[88vh] space-y-4 overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-3 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                    <Plus className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">
+                      Attach Any Page to Card #{cards.findIndex(c => c.id === activeAddModalCardId) + 1}
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Search or enter page number to add another question, solution, or continuation snippet to this card.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveAddModalCardId(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/[0.08]"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Direct Page Input Form */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const num = parseInt(directPageNumberInput, 10);
+                  if (!isNaN(num) && num >= 1 && num <= allPdfPages.length) {
+                    handleAddPageToCard(activeAddModalCardId, num);
+                    setDirectPageNumberInput('');
+                  }
+                }}
+                className="flex items-center gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/[0.08] shrink-0"
+              >
+                <span className="text-xs text-slate-300 font-bold shrink-0">Quick Add by Page #:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={allPdfPages.length}
+                  placeholder={`1 - ${allPdfPages.length}`}
+                  value={directPageNumberInput}
+                  onChange={(e) => setDirectPageNumberInput(e.target.value)}
+                  className="w-28 px-3 py-1.5 bg-black/50 border border-white/[0.12] focus:border-emerald-500 rounded-lg text-white font-mono text-sm outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!directPageNumberInput}
+                  className="px-4 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
+                >
+                  + Add to Card
+                </button>
+              </form>
+
+              {/* Filter Search Input */}
+              <div className="relative shrink-0">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Filter PDF pages (e.g. 219, 63)..."
+                  value={searchModalPageQuery}
+                  onChange={(e) => setSearchModalPageQuery(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 bg-black/40 border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-xs text-white placeholder-slate-500 outline-none"
+                />
+                {searchModalPageQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchModalPageQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Thumbnail Grid of Pages */}
+              <div className="flex-1 overflow-y-auto pr-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {allPdfPages
+                    .filter((p) =>
+                      searchModalPageQuery.trim()
+                        ? String(p.pageNum).includes(searchModalPageQuery.trim())
+                        : true
+                    )
+                    .map((p) => (
+                      <button
+                        key={p.pageNum}
+                        type="button"
+                        onClick={() => handleAddPageToCard(activeAddModalCardId, p.pageNum)}
+                        className="group flex flex-col rounded-xl border border-white/[0.08] hover:border-emerald-500 bg-white/[0.02] hover:bg-emerald-950/20 p-2 text-left transition-all relative overflow-hidden"
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-mono font-bold text-slate-300 group-hover:text-white">
+                            Page {p.pageNum}
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                            + Add
+                          </span>
+                        </div>
+                        <div className="rounded-lg overflow-hidden bg-white aspect-[3/4] flex items-center justify-center p-0.5">
+                          <img
+                            src={p.image}
+                            alt={`Page ${p.pageNum}`}
+                            className="w-full h-full object-contain pointer-events-none"
+                          />
+                        </div>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-white/[0.08] shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveAddModalCardId(null)}
+                  className="px-4 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg bg-white/[0.05]"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 6. MOVE CARD POSITION DIALOG */}
+      <AnimatePresence>
+        {positionDialogCardId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-[#141824] border border-white/[0.1] rounded-2xl p-5 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-white/[0.08] pb-2.5">
+                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <ArrowLeftRight className="w-4 h-4 text-[#FF6B2B]" />
+                  <span>Move Card Position</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setPositionDialogCardId(null)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-400">
+                Enter the target position number in the PDF (1 to {cards.length}):
+              </p>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const pos = parseInt(targetPositionInput, 10);
+                  if (!isNaN(pos) && pos >= 1 && pos <= cards.length) {
+                    handleMoveCardToPosition(positionDialogCardId, pos - 1);
+                  }
+                }}
+                className="space-y-4"
+              >
+                <div className="flex items-center justify-center gap-3">
+                  <span className="text-xs font-bold text-slate-300">Position #:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={cards.length}
+                    value={targetPositionInput}
+                    onChange={(e) => setTargetPositionInput(e.target.value)}
+                    className="w-24 px-3 py-1.5 bg-black/50 border border-white/[0.15] focus:border-[#FF6B2B] rounded-xl text-center text-white font-mono font-bold text-base outline-none"
+                    autoFocus
+                  />
+                  <span className="text-xs text-slate-500 font-mono">/ {cards.length}</span>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/[0.08]">
+                  <button
+                    type="button"
+                    onClick={() => setPositionDialogCardId(null)}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-1.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-xl text-xs font-bold shadow-md hover:shadow-orange-500/20 active:scale-95 transition-all"
+                  >
+                    Move Position
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

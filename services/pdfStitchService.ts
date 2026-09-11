@@ -448,6 +448,16 @@ export interface CropBox {
   height: number; // percentage of image height (0 - 100)
 }
 
+export interface PageCardItem {
+  id: string;
+  pageNum: number;
+  image: string; // base64
+  croppedImage?: string; // Pre-rendered clean cropped base64 snapshot
+  crop?: CropBox;
+  scale?: number;
+  label?: string; // e.g. "Question", "Solution", "Part 1", "Diagram"
+}
+
 export interface PageCard {
   id: string;
   originalPageNum: number;
@@ -463,7 +473,40 @@ export interface PageCard {
   qScale?: number; // Zoom/Scale multiplier (e.g., 0.8 to 2.0, default 1.0)
   solScale?: number;
   showDivider?: boolean;
+  items?: PageCardItem[]; // Multi-item support (2, 3, 4+ pages/snippets per card)
 }
+
+/**
+ * Ensures a card has a valid items array, populating from legacy question/solution fields if needed.
+ */
+export const ensureCardItems = (card: PageCard): PageCardItem[] => {
+  if (card.items && card.items.length > 0) {
+    return card.items;
+  }
+  const items: PageCardItem[] = [
+    {
+      id: `${card.id}-item-0`,
+      pageNum: card.originalPageNum,
+      image: card.questionImage,
+      croppedImage: card.croppedQuestionImage,
+      crop: card.qCrop,
+      scale: card.qScale || 1.0,
+      label: card.isMerged ? 'Question' : `Page ${card.originalPageNum}`,
+    }
+  ];
+  if (card.isMerged && card.solutionImage) {
+    items.push({
+      id: `${card.id}-item-1`,
+      pageNum: card.solutionPageNum || (card.originalPageNum + 1),
+      image: card.solutionImage,
+      croppedImage: card.croppedSolutionImage,
+      crop: card.solCrop,
+      scale: card.solScale || 1.0,
+      label: 'Solution',
+    });
+  }
+  return items;
+};
 
 /**
  * Crops an image base64 using percentage coordinates (0 - 100) and returns clean base64 data URL
@@ -493,7 +536,7 @@ export const cropImageByPercentage = async (
 };
 
 /**
- * Renders a single PageCard (merged or standalone) onto a high-DPI A4 canvas
+ * Renders a single PageCard (with 1, 2, 3, or more pages/snippets) onto a high-DPI A4 canvas
  * WYSIWYG: Clean layout with NO artificial question/solution tags.
  */
 export const renderMergedCardToA4 = async (
@@ -518,99 +561,91 @@ export const renderMergedCardToA4 = async (
   const marginY = Math.round(50 * (targetHeight / CANVAS_A4_HEIGHT));
   const availableHeight = targetHeight - marginY * 2;
 
-  // Case 1: Standalone Page (Not merged)
-  if (!card.isMerged || (!card.solutionImage && !card.croppedSolutionImage)) {
-    const qSrc = card.croppedQuestionImage || card.questionImage;
-    const img = await loadImage(qSrc);
+  const items = ensureCardItems(card);
 
-    // If pre-rendered cropped image is present, use it directly; else calculate from qCrop
-    const sx = !card.croppedQuestionImage && card.qCrop ? Math.max(0, Math.round((card.qCrop.x / 100) * img.naturalWidth)) : 0;
-    const sy = !card.croppedQuestionImage && card.qCrop ? Math.max(0, Math.round((card.qCrop.y / 100) * img.naturalHeight)) : 0;
-    const sw = !card.croppedQuestionImage && card.qCrop ? Math.min(img.naturalWidth - sx, Math.max(1, Math.round((card.qCrop.width / 100) * img.naturalWidth))) : img.naturalWidth;
-    const sh = !card.croppedQuestionImage && card.qCrop ? Math.min(img.naturalHeight - sy, Math.max(1, Math.round((card.qCrop.height / 100) * img.naturalHeight))) : img.naturalHeight;
+  // Case 1: Standalone Single Item
+  if (items.length <= 1) {
+    const item = items[0];
+    const src = item.croppedImage || item.image;
+    const img = await loadImage(src);
 
-    const scaleMult = card.qScale || 1.0;
-    // Scale up proportionally to fill the printable width of the A4 page
+    const sx = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.x / 100) * img.naturalWidth)) : 0;
+    const sy = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.y / 100) * img.naturalHeight)) : 0;
+    const sw = !item.croppedImage && item.crop ? Math.min(img.naturalWidth - sx, Math.max(1, Math.round((item.crop.width / 100) * img.naturalWidth))) : img.naturalWidth;
+    const sh = !item.croppedImage && item.crop ? Math.min(img.naturalHeight - sy, Math.max(1, Math.round((item.crop.height / 100) * img.naturalHeight))) : img.naturalHeight;
+
+    const scaleMult = item.scale || 1.0;
     const fitWidthScale = availableWidth / sw;
     const fitHeightScale = availableHeight / sh;
-    // Allow zoom multiplier while ensuring it fits page height
     const chosenScale = Math.min(fitWidthScale * scaleMult, fitHeightScale);
     const drawW = Math.round(sw * chosenScale);
     const drawH = Math.round(sh * chosenScale);
 
     const drawX = marginX + (availableWidth - drawW) / 2;
-    // Align to top margin so cropped question starts at the top of the page (like a real document)
     const drawY = marginY;
 
     ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
     return canvas.toDataURL('image/jpeg', 0.94);
   }
 
-  // Case 2: Merged Q&A Page (Question on top, Solution on bottom - NO ARTIFICIAL TAGS)
-  const qSrc = card.croppedQuestionImage || card.questionImage;
-  const sSrc = card.croppedSolutionImage || card.solutionImage!;
-  const qImg = await loadImage(qSrc);
-  const sImg = await loadImage(sSrc);
+  // Case 2: Multi-Item Merged Set (2, 3, 4+ snippets stacked cleanly)
+  const loaded = await Promise.all(
+    items.map(async (item) => {
+      const src = item.croppedImage || item.image;
+      const img = await loadImage(src);
+      const sx = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.x / 100) * img.naturalWidth)) : 0;
+      const sy = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.y / 100) * img.naturalHeight)) : 0;
+      const sw = !item.croppedImage && item.crop ? Math.min(img.naturalWidth - sx, Math.max(1, Math.round((item.crop.width / 100) * img.naturalWidth))) : img.naturalWidth;
+      const sh = !item.croppedImage && item.crop ? Math.min(img.naturalHeight - sy, Math.max(1, Math.round((item.crop.height / 100) * img.naturalHeight))) : img.naturalHeight;
 
-  // Question dimensions
-  const qSx = !card.croppedQuestionImage && card.qCrop ? Math.max(0, Math.round((card.qCrop.x / 100) * qImg.naturalWidth)) : 0;
-  const qSy = !card.croppedQuestionImage && card.qCrop ? Math.max(0, Math.round((card.qCrop.y / 100) * qImg.naturalHeight)) : 0;
-  const qSw = !card.croppedQuestionImage && card.qCrop ? Math.min(qImg.naturalWidth - qSx, Math.max(1, Math.round((card.qCrop.width / 100) * qImg.naturalWidth))) : qImg.naturalWidth;
-  const qSh = !card.croppedQuestionImage && card.qCrop ? Math.min(qImg.naturalHeight - qSy, Math.max(1, Math.round((card.qCrop.height / 100) * qImg.naturalHeight))) : qImg.naturalHeight;
+      const scaleMult = item.scale || 1.0;
+      const maxW = targetWidth - 20;
+      let drawW = Math.min(maxW, Math.round(availableWidth * scaleMult));
+      let drawH = Math.round(sh * (drawW / sw));
 
-  // Solution dimensions
-  const sSx = !card.croppedSolutionImage && card.solCrop ? Math.max(0, Math.round((card.solCrop.x / 100) * sImg.naturalWidth)) : 0;
-  const sSy = !card.croppedSolutionImage && card.solCrop ? Math.max(0, Math.round((card.solCrop.y / 100) * sImg.naturalHeight)) : 0;
-  const sSw = !card.croppedSolutionImage && card.solCrop ? Math.min(sImg.naturalWidth - sSx, Math.max(1, Math.round((card.solCrop.width / 100) * sImg.naturalWidth))) : sImg.naturalWidth;
-  const sSh = !card.croppedSolutionImage && card.solCrop ? Math.min(sImg.naturalHeight - sSy, Math.max(1, Math.round((card.solCrop.height / 100) * sImg.naturalHeight))) : sImg.naturalHeight;
+      return { img, sx, sy, sw, sh, drawW, drawH };
+    })
+  );
 
-  const gap = Math.round(30 * (targetHeight / CANVAS_A4_HEIGHT));
-  const dividerHeight = card.showDivider !== false ? Math.round(20 * (targetHeight / CANVAS_A4_HEIGHT)) : gap;
+  const gap = Math.round(24 * (targetHeight / CANVAS_A4_HEIGHT));
+  const dividerHeight = card.showDivider !== false ? Math.round(18 * (targetHeight / CANVAS_A4_HEIGHT)) : gap;
+  const numDividers = items.length - 1;
+  const totalDividersHeight = numDividers * dividerHeight + numDividers * gap;
 
-  // Calculate target heights with zoom multipliers
-  const maxW = targetWidth - 20;
-  const qScaleMult = card.qScale || 1.0;
-  const sScaleMult = card.solScale || 1.0;
+  let totalItemsHeight = loaded.reduce((sum, it) => sum + it.drawH, 0);
+  const totalNeededHeight = totalItemsHeight + totalDividersHeight;
 
-  let qDrawW = Math.min(maxW, Math.round(availableWidth * qScaleMult));
-  let qDrawH = Math.round(qSh * (qDrawW / qSw));
-
-  let sDrawW = Math.min(maxW, Math.round(availableWidth * sScaleMult));
-  let sDrawH = Math.round(sSh * (sDrawW / sSw));
-
-  const totalNeededH = qDrawH + sDrawH + dividerHeight + gap;
-  if (totalNeededH > availableHeight) {
-    const shrink = (availableHeight - dividerHeight - gap) / (qDrawH + sDrawH);
-    qDrawH = Math.round(qDrawH * shrink);
-    qDrawW = Math.round(qSw * (qDrawH / qSh));
-    sDrawH = Math.round(sDrawH * shrink);
-    sDrawW = Math.round(sSw * (sDrawH / sSh));
+  let shrinkFactor = 1.0;
+  if (totalNeededHeight > availableHeight) {
+    const spaceForItems = Math.max(100, availableHeight - totalDividersHeight);
+    shrinkFactor = spaceForItems / Math.max(1, totalItemsHeight);
   }
 
   let currentY = marginY;
 
-  // 1. DRAW QUESTION IMAGE (Top, Centered)
-  const qX = marginX + (availableWidth - qDrawW) / 2;
-  ctx.drawImage(qImg, qSx, qSy, qSw, qSh, qX, currentY, qDrawW, qDrawH);
-  currentY += qDrawH + gap;
+  for (let i = 0; i < loaded.length; i++) {
+    const it = loaded[i];
+    const finalDrawH = Math.round(it.drawH * shrinkFactor);
+    const finalDrawW = Math.round(it.sw * (finalDrawH / it.sh));
+    const drawX = marginX + (availableWidth - finalDrawW) / 2;
 
-  // 2. SUBTLE DIVIDER LINE (Clean separator, NO artificial text badge)
-  if (card.showDivider !== false) {
-    ctx.save();
-    const lineY = currentY + dividerHeight / 2;
-    ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = Math.max(1.5, Math.round(1.5 * (targetWidth / CANVAS_A4_WIDTH)));
-    ctx.beginPath();
-    ctx.moveTo(marginX + 20, lineY);
-    ctx.lineTo(marginX + availableWidth - 20, lineY);
-    ctx.stroke();
-    ctx.restore();
-    currentY += dividerHeight;
+    ctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, drawX, currentY, finalDrawW, finalDrawH);
+    currentY += finalDrawH + gap;
+
+    // Divider Line between items
+    if (i < loaded.length - 1 && card.showDivider !== false) {
+      ctx.save();
+      const lineY = currentY + dividerHeight / 2;
+      ctx.strokeStyle = '#E2E8F0';
+      ctx.lineWidth = Math.max(1.5, Math.round(1.5 * (targetWidth / CANVAS_A4_WIDTH)));
+      ctx.beginPath();
+      ctx.moveTo(marginX + 20, lineY);
+      ctx.lineTo(marginX + availableWidth - 20, lineY);
+      ctx.stroke();
+      ctx.restore();
+      currentY += dividerHeight;
+    }
   }
-
-  // 3. DRAW SOLUTION IMAGE (Bottom, Centered)
-  const sX = marginX + (availableWidth - sDrawW) / 2;
-  ctx.drawImage(sImg, sSx, sSy, sSw, sSh, sX, currentY, sDrawW, sDrawH);
 
   return canvas.toDataURL('image/jpeg', 0.94);
 };

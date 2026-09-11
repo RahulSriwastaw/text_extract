@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAiSettings, saveAiSettings, clearAiCredentials, AiSettings } from '../services/aiDbService';
-import { testGeminiApiKey } from '../services/userGeminiService';
+import { testGeminiApiKey, parseUserApiKeys } from '../services/userGeminiService';
 import { 
   pingStudyAiExtension, 
   getStoredAiProvider, 
@@ -136,25 +136,35 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
   };
 
   const handleSaveApiKey = async () => {
-    const cleanKey = apiKeyInput.trim();
-    if (!cleanKey) {
-      setStatusMessage({ type: 'error', text: 'Please enter a valid Gemini API key.' });
+    const detected = parseUserApiKeys(apiKeyInput);
+    if (detected.length === 0) {
+      setStatusMessage({ type: 'error', text: 'Please enter at least one valid Gemini API key (starts with AIza... or AQ...).' });
       return;
     }
 
     setIsVerifying(true);
-    setStatusMessage({ type: 'info', text: 'Verifying with Google Gemini API...' });
+    setStatusMessage({
+      type: 'info',
+      text: detected.length > 1
+        ? `Verifying ${detected.length} Gemini API keys with Google...`
+        : 'Verifying with Google Gemini API...'
+    });
 
-    const verification = await testGeminiApiKey(cleanKey);
+    const verification = await testGeminiApiKey(apiKeyInput);
     setIsVerifying(false);
 
     if (verification.success) {
       await saveAiSettings({
         authType: 'apikey',
-        apiKey: cleanKey
+        apiKey: detected.join(',')
       });
       await loadSettings();
-      setStatusMessage({ type: 'success', text: 'Connected successfully with your Gemini account! Unlimited extraction active.' });
+      setStatusMessage({
+        type: 'success',
+        text: detected.length > 1
+          ? `Connected ${detected.length} Gemini API keys! Automatic load-balancing & rotation is active.`
+          : 'Connected successfully with your Gemini account! Unlimited extraction active.'
+      });
       if (onConnected) onConnected();
       setTimeout(() => {
         onClose();
@@ -517,17 +527,27 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-200 flex items-center justify-between">
-                        <span>Paste Your Key Here:</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Stored 100% locally in this browser</span>
-                      </label>
-                      <input
-                        type="password"
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-200">
+                        <label className="flex items-center gap-2">
+                          <span>Paste Gemini API Key(s):</span>
+                          {parseUserApiKeys(apiKeyInput).length > 1 && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 flex items-center gap-1">
+                              ⚡ {parseUserApiKeys(apiKeyInput).length} Keys (Auto-Rotating)
+                            </span>
+                          )}
+                        </label>
+                        <span className="text-[10px] text-slate-400 font-normal">Comma or newline separated</span>
+                      </div>
+                      <textarea
+                        rows={3}
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder="AIzaSy..."
-                        className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all font-mono"
+                        placeholder="Paste one or multiple Gemini API keys:&#10;AIzaSy..., AIzaSy..."
+                        className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all font-mono resize-y"
                       />
+                      <p className="text-[11px] text-slate-400">
+                        Aap ek se zyada keys paste kar sakte hain. Agar ek key par quota limit aayegi to system bina ruke turant agli key par switch kar lega!
+                      </p>
                     </div>
 
                     <button

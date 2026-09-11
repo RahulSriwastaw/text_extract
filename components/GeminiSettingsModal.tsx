@@ -13,14 +13,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  getAiSettings, 
-  saveAiSettings, 
-  clearAiCredentials, 
-  clearAllAiHistory, 
-  getAllConversations, 
-  AiSettings 
-} from '../services/aiDbService';
+import { getAiSettings, saveAiSettings, clearAiCredentials, clearAllAiHistory, getAllConversations, AiSettings } from '../services/aiDbService';
+import { parseUserApiKeys } from '../services/userGeminiService';
 import GeminiConnectModal from './GeminiConnectModal';
 
 interface GeminiSettingsModalProps {
@@ -73,6 +67,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
   };
 
   const isConnected = settings && settings.authType !== 'none' && (settings.apiKey || settings.accessToken);
+  const activeKeyCount = settings?.apiKey ? parseUserApiKeys(settings.apiKey).length : 0;
 
   return (
     <AnimatePresence>
@@ -128,14 +123,18 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                       <p className="text-xs font-bold text-white">Gemini Connection</p>
                       <p className="text-[11px] text-slate-400">
                         {isConnected 
-                          ? settings.authType === 'apikey' ? 'Personal API Key' : 'Google OAuth Account'
+                          ? settings?.authType === 'apikey' 
+                            ? activeKeyCount > 1 
+                              ? `${activeKeyCount} Personal API Keys (Auto-Rotating)`
+                              : 'Personal API Key'
+                            : 'Google OAuth Account'
                           : 'No Gemini account connected'}
                       </p>
                     </div>
                     {isConnected ? (
                       <span className="flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                         <CheckCircle2 className="w-3 h-3" />
-                        Connected ✓
+                        {activeKeyCount > 1 ? `⚡ ${activeKeyCount} Keys Active` : 'Connected ✓'}
                       </span>
                     ) : (
                       <span className="text-[11px] font-medium text-slate-500 bg-white/[0.04] px-2 py-0.5 rounded-full">
@@ -146,13 +145,24 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
 
                   <div className="flex items-center gap-2 pt-1">
                     {isConnected ? (
-                      <button
-                        onClick={handleDisconnect}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-lg text-xs font-bold border border-rose-500/20 transition-all"
-                      >
-                        <LogOut className="w-3.5 h-3.5" />
-                        Disconnect Gemini
-                      </button>
+                      <>
+                        {settings?.authType === 'apikey' && (
+                          <button
+                            onClick={() => setShowConnectModal(true)}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-white/[0.05] hover:bg-white/[0.1] text-slate-200 rounded-lg text-xs font-bold border border-white/[0.1] transition-all"
+                          >
+                            <Key className="w-3.5 h-3.5 text-amber-400" />
+                            Manage Keys ({activeKeyCount})
+                          </button>
+                        )}
+                        <button
+                          onClick={handleDisconnect}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-lg text-xs font-bold border border-rose-500/20 transition-all"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          Disconnect
+                        </button>
+                      </>
                     ) : (
                       <button
                         onClick={() => setShowConnectModal(true)}

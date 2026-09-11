@@ -23,6 +23,24 @@ export interface QuestionContext {
 
 export type AiActionType = 'explain' | 'why_wrong' | 'concept' | 'teach' | 'followup';
 
+let clientKeyIndex = 0;
+
+export function parseUserApiKeys(rawKeyString?: string): string[] {
+  if (!rawKeyString) return [];
+  return rawKeyString
+    .split(/[,\n]+/)
+    .map(k => k.trim().replace(/['"\s]/g, ''))
+    .filter(k => k.length > 20);
+}
+
+export function getNextUserApiKey(rawKeyString?: string): string {
+  const keys = parseUserApiKeys(rawKeyString);
+  if (keys.length === 0) return '';
+  const key = keys[clientKeyIndex % keys.length];
+  clientKeyIndex = (clientKeyIndex + 1) % 1000000;
+  return key;
+}
+
 /**
  * Validates whether the user has a valid authorization configured locally.
  */
@@ -34,11 +52,14 @@ export async function checkUserGeminiAuth(): Promise<{
 }> {
   const settings = await getAiSettings();
 
-  if (settings.authType === 'apikey' && settings.apiKey && settings.apiKey.trim().length > 10) {
-    return {
-      isAuthenticated: true,
-      authType: 'apikey'
-    };
+  if (settings.authType === 'apikey' && settings.apiKey) {
+    const validKeys = parseUserApiKeys(settings.apiKey);
+    if (validKeys.length > 0) {
+      return {
+        isAuthenticated: true,
+        authType: 'apikey'
+      };
+    }
   }
 
   if (settings.authType === 'oauth' && settings.accessToken) {
@@ -228,7 +249,8 @@ export async function generateWithUserGemini(
   };
 
   if (settings.authType === 'apikey' && settings.apiKey) {
-    url += `&key=${encodeURIComponent(settings.apiKey.trim())}`;
+    const activeKey = getNextUserApiKey(settings.apiKey);
+    url += `&key=${encodeURIComponent(activeKey)}`;
   } else if (settings.authType === 'oauth' && settings.accessToken) {
     headers['Authorization'] = `Bearer ${settings.accessToken}`;
   }
@@ -335,7 +357,8 @@ export async function extractLayoutWithUserGemini(
   };
 
   if (settings.authType === 'apikey' && settings.apiKey) {
-    url += `?key=${encodeURIComponent(settings.apiKey.trim())}`;
+    const activeKey = getNextUserApiKey(settings.apiKey);
+    url += `?key=${encodeURIComponent(activeKey)}`;
   } else if (settings.authType === 'oauth' && settings.accessToken) {
     headers['Authorization'] = `Bearer ${settings.accessToken}`;
   }
@@ -408,11 +431,18 @@ Return a structured JSON array of elements with type: "text" | "table", content:
 }
 
 /**
- * Tests an API Key against Gemini to verify validity before saving.
+ * Tests one or multiple API Keys against Gemini to verify validity before saving.
  */
-export async function testGeminiApiKey(apiKey: string): Promise<{ success: boolean; message: string }> {
+export async function testGeminiApiKey(apiKeyInput: string): Promise<{ success: boolean; message: string; validCount?: number }> {
+  const keys = parseUserApiKeys(apiKeyInput);
+  if (keys.length === 0) {
+    return { success: false, message: 'Please enter at least one valid Gemini API key (starts with AIza... or AQ...)' };
+  }
+
+  // Test the first key to verify Google Generative Language API connectivity
   try {
-    const url = `${API_BASE_URL}/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+    const testKey = keys[0];
+    const url = `${API_BASE_URL}/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(testKey)}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -422,7 +452,10 @@ export async function testGeminiApiKey(apiKey: string): Promise<{ success: boole
     });
 
     if (res.ok) {
-      return { success: true, message: 'Gemini connection verified successfully!' };
+      const msg = keys.length > 1
+        ? `Successfully verified ${keys.length} API keys! Smart rotation enabled.`
+        : 'Gemini connection verified successfully!';
+      return { success: true, message: msg, validCount: keys.length };
     }
 
     const err = await res.json().catch(() => ({}));

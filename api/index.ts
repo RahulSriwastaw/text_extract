@@ -25,20 +25,28 @@ app.get('/api/debug-key', (req, res) => {
   res.json({ key: k, length: k.length });
 });
 
-let keyIndex = 0;
-const keyHealth = new Map<string, { 
-  lastErrorTime: number, 
-  lastSuccessTime: number, 
-  consecutiveErrors: number, 
-  totalErrors: number, 
-  totalSuccesses: number,
-  errorType?: string 
-}>();
+let roundRobinIndex = 0;
+
+interface KeyHealthMetrics {
+  lastErrorTime: number;
+  lastSuccessTime: number;
+  consecutiveErrors: number;
+  totalErrors: number;
+  totalSuccesses: number;
+  cooldownUntil: number;
+  errorType?: string;
+}
+
+const keyHealth = new Map<string, KeyHealthMetrics>();
 const deadKeys = new Set<string>();
 
 const FALLBACK_KEYS: string[] = [];
 
-const getAllKeys = () => {
+/**
+ * Returns all active keys, combining user-provided keys with server-side keys.
+ * userKeys take priority if provided.
+ */
+const getAllKeys = (userKeyInput?: string): string[] => {
   try {
     process.loadEnvFile();
   } catch(e) {}
@@ -72,24 +80,38 @@ const getAllKeys = () => {
     }
   }
   
-  let allKeys = (keysString || '')
-    .split(',')
+  // Parse server pool keys
+  const serverKeys = (keysString || '')
+    .split(/[,\n]+/)
     .map(k => k.trim().replace(/['"\s]/g, ''))
     .filter(k => k && k.length > 20);
     
   if (primaryKey && primaryKey.length > 20) {
     const cleanPrimary = primaryKey.trim().replace(/['"\s]/g, '');
-    if (!allKeys.includes(cleanPrimary)) {
-      allKeys.unshift(cleanPrimary);
+    if (!serverKeys.includes(cleanPrimary)) {
+      serverKeys.unshift(cleanPrimary);
     }
   }
 
-  // If no keys found from env/file, use verified fallback keys
-  if (allKeys.length === 0) {
-    allKeys = [...FALLBACK_KEYS];
+  // Parse user-supplied keys from request headers/settings
+  const userKeys: string[] = [];
+  if (userKeyInput && typeof userKeyInput === 'string') {
+    const parsed = userKeyInput
+      .split(/[,\n]+/)
+      .map(k => k.trim().replace(/['"\s]/g, ''))
+      .filter(k => k && k.length > 20);
+    userKeys.push(...parsed);
   }
 
-  return allKeys.filter(k => !deadKeys.has(k));
+  // Combine: user keys first, then all server keys, removing duplicates and dead keys
+  const combined: string[] = [];
+  for (const k of [...userKeys, ...serverKeys, ...FALLBACK_KEYS]) {
+    if (!combined.includes(k) && !deadKeys.has(k)) {
+      combined.push(k);
+    }
+  }
+
+  return combined;
 };
 
 // Admin Auth Middleware
@@ -168,62 +190,45 @@ app.post('/api/admin/dead-key', checkAdminAuth, (req, res) => {
   }
 });
 
-const getGeminiClient = (skipKeys: string[] = []) => {
-  const allKeys = getAllKeys();
+const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: string) => {
+  const allKeys = getAllKeys(userKeyInput);
   const now = Date.now();
+  const skipSet = skipKeys instanceof Set ? skipKeys : new Set(skipKeys);
 
   if (allKeys.length === 0) {
-    throw new Error("No valid API keys found. Please verify your keys in the Settings menu (GEMINI_API_KEY or GEMINI_API_KEYS).");
+    throw new Error("No valid API keys found. Please verify your keys in .env (GEMINI_API_KEYS) or Settings menu.");
   }
 
-  // Filter out dead/skip keys
-  let candidates = allKeys.filter(k => !skipKeys.includes(k));
+  // 1. Available candidate keys not yet tried in this request sequence
+  let candidates = allKeys.filter(k => !skipSet.has(k));
 
-  if (candidates.length === 0 && skipKeys.length > 0) {
-    candidates = allKeys.filter(k => k !== skipKeys[skipKeys.length - 1]);
+  // If all keys have been attempted once in this sequence, reset candidates to all active keys
+  if (candidates.length === 0) {
+    candidates = allKeys;
   }
 
-  if (candidates.length === 0) candidates = allKeys;
-
-  let selectedKey = '';
-  
-  // 1. Prioritize keys that have NEVER errored or haven't errored in 2 min
-  const healthyCandidates = candidates.filter(c => {
-    const health = keyHealth.get(c);
-    return !health || (now - health.lastErrorTime > 120000);
+  // 2. Filter candidate keys not currently under temporary cooldown
+  const availableHealthy = candidates.filter(k => {
+    const health = keyHealth.get(k);
+    if (!health) return true;
+    return now >= health.cooldownUntil;
   });
 
-  if (healthyCandidates.length > 0) {
-    // Pick the one used least recently for success (to distribute load)
-    selectedKey = healthyCandidates.sort((a, b) => {
-      const hA = keyHealth.get(a)?.lastSuccessTime || 0;
-      const hB = keyHealth.get(b)?.lastSuccessTime || 0;
-      return hA - hB;
-    })[0];
-  }
+  let selectedKey = '';
 
-  // 2. Fallback: try any key not recently errored (60s)
-  if (!selectedKey) {
-    const okayCandidates = candidates.filter(c => {
-      const health = keyHealth.get(c);
-      return !health || (now - health.lastErrorTime > 60000);
+  if (availableHealthy.length > 0) {
+    // True Round-Robin distribution across healthy keys to spread the load evenly across all keys
+    const idx = Math.abs(roundRobinIndex % availableHealthy.length);
+    selectedKey = availableHealthy[idx];
+    roundRobinIndex = (roundRobinIndex + 1) % 1000000;
+  } else {
+    // All candidates are currently under cooldown; pick the one whose cooldown expires the soonest
+    const sorted = [...candidates].sort((a, b) => {
+      const cdA = keyHealth.get(a)?.cooldownUntil || 0;
+      const cdB = keyHealth.get(b)?.cooldownUntil || 0;
+      return cdA - cdB;
     });
-    if (okayCandidates.length > 0) {
-      selectedKey = okayCandidates.sort((a, b) => {
-        const hA = keyHealth.get(a)?.lastSuccessTime || 0;
-        const hB = keyHealth.get(b)?.lastSuccessTime || 0;
-        return hA - hB;
-      })[0];
-    }
-  }
-
-  // 3. Last resort: pick the one with most distant lastErrorTime among candidates
-  if (!selectedKey) {
-    selectedKey = candidates.sort((a, b) => {
-      const hA = keyHealth.get(a)?.lastErrorTime || 0;
-      const hB = keyHealth.get(b)?.lastErrorTime || 0;
-      return hA - hB;
-    })[0];
+    selectedKey = sorted[0];
   }
 
   return { client: new GoogleGenAI({ apiKey: selectedKey }), key: selectedKey, totalKeys: allKeys.length };
@@ -235,18 +240,20 @@ const reportKeySuccess = (key: string) => {
     lastSuccessTime: 0, 
     consecutiveErrors: 0, 
     totalErrors: 0, 
-    totalSuccesses: 0 
+    totalSuccesses: 0,
+    cooldownUntil: 0
   };
   health.lastSuccessTime = Date.now();
   health.consecutiveErrors = 0;
+  health.cooldownUntil = 0; // instantly clear cooldown on success
   health.totalSuccesses++;
   keyHealth.set(key, health);
 };
 
-const reportKeyError = (key: string, type?: string, isPermanent = false) => {
+const reportKeyError = (key: string, type: string, isPermanent = false) => {
   if (isPermanent) {
     deadKeys.add(key);
-    console.error(`Key ${key.substring(0, 8)}... marked as PERMANENTLY DEAD (Invalid or Denied)`);
+    console.error(`[API-Key] Key ${key.substring(0, 8)}... marked as PERMANENTLY DEAD (Invalid or Denied)`);
     return;
   }
   const health = keyHealth.get(key) || { 
@@ -254,27 +261,51 @@ const reportKeyError = (key: string, type?: string, isPermanent = false) => {
     lastSuccessTime: 0, 
     consecutiveErrors: 0, 
     totalErrors: 0, 
-    totalSuccesses: 0 
+    totalSuccesses: 0,
+    cooldownUntil: 0
   };
-  health.lastErrorTime = Date.now();
+  const now = Date.now();
+  health.lastErrorTime = now;
   health.consecutiveErrors++;
   health.totalErrors++;
   health.errorType = type;
+
+  // Circuit Breaker: Quota/Rate-limit gets 40s cooldown, Server overload gets 15s, Transient gets 5s
+  let cooldownSec = 15;
+  if (type === 'QUOTA' || type === 'RATE_LIMIT') {
+    cooldownSec = Math.min(30 + health.consecutiveErrors * 10, 90);
+  } else if (type === 'OVERLOAD') {
+    cooldownSec = 15;
+  } else {
+    cooldownSec = 5;
+  }
+
+  health.cooldownUntil = now + (cooldownSec * 1000);
   keyHealth.set(key, health);
+  console.warn(`[API-Key] Key ${key.substring(0, 8)}... error: ${type}. Cooldown set for ${cooldownSec}s.`);
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: number) {
-  const allKeys = getAllKeys();
-  const effectiveRetries = maxRetries ?? Math.max(8, allKeys.length * 2);
-  let triedKeys: string[] = [];
+async function runAIAction(
+  action: (client: any) => Promise<any>, 
+  userKeyInput?: string,
+  maxRetries?: number
+) {
+  const allKeys = getAllKeys(userKeyInput);
+  // Allow enough attempts to rotate across the entire key pool twice (minimum 10 attempts)
+  const effectiveRetries = maxRetries ?? Math.max(10, allKeys.length * 2);
+  const triedKeys = new Set<string>();
   let lastError: any = null;
 
   for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
-    const { client, key, totalKeys } = getGeminiClient(triedKeys);
-    triedKeys.push(key);
-    if (triedKeys.length > 5) triedKeys.shift();
+    // If all keys have been tried in this request, reset the set to allow a second pass
+    if (triedKeys.size >= allKeys.length && allKeys.length > 0) {
+      triedKeys.clear();
+    }
+
+    const { client, key, totalKeys } = getGeminiClient(triedKeys, userKeyInput);
+    triedKeys.add(key);
 
     try {
       const result = await action(client);
@@ -302,6 +333,7 @@ async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: n
 
       if (isInvalidKey) {
         reportKeyError(key, 'INVALID', true);
+        // Immediately try the next key with no delay
         continue; 
       }
 
@@ -316,13 +348,16 @@ async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: n
                           errorStr.includes("MAX_TOKENS");
 
       if (isRetryable) {
-        const errType = isQuotaError ? 'Quota' : (isServerOverloaded ? 'Overload' : 'Transient/Empty');
-        console.warn(`Key ${key.substring(0, 8)}... transient error (${errType}: ${error?.message || errorStr}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Rotating to next key. Active keys: ${totalKeys}`);
+        const errType = isQuotaError ? 'QUOTA' : (isServerOverloaded ? 'OVERLOAD' : 'TRANSIENT');
+        console.warn(`[API-Key] Key ${key.substring(0, 8)}... failed (${errType}: ${error?.message || errorStr}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Fast-rotating to next key in pool (${totalKeys} active keys).`);
         reportKeyError(key, errType);
         
-        // Backoff: 800ms, 1600ms, 2400ms... with jitter
-        const backoffMs = Math.min(attempt * 800, 3000) + Math.random() * 500;
-        await delay(backoffMs); 
+        // Fast Instant Rotation:
+        // If there are other available keys in the pool not yet attempted, rotate immediately with only 50ms jitter!
+        // Only if all keys have been exhausted in this request sequence, apply a short backoff.
+        const remainingUntried = allKeys.filter(k => !triedKeys.has(k)).length;
+        const delayMs = remainingUntried > 0 ? 50 : Math.min(attempt * 250, 1200);
+        await delay(delayMs); 
         continue;
       }
       
@@ -330,7 +365,7 @@ async function runAIAction(action: (client: any) => Promise<any>, maxRetries?: n
     }
   }
   
-  const finalError = new Error(`Exhausted ${triedKeys.length} attempts across available keys. ${lastError?.message || "Service unavailable"}.`);
+  const finalError = new Error(`Exhausted attempts across all ${allKeys.length} available Gemini API keys. Last error: ${lastError?.message || "Service unavailable"}.`);
   (finalError as any).status = 429;
   throw finalError;
 }
@@ -1161,12 +1196,7 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
     });
   };
 
-  if (userKey && userKey.trim().length > 10) {
-    const userClient = new GoogleGenAI({ apiKey: userKey.trim() });
-    return executeCall(userClient);
-  }
-
-  return runAIAction(executeCall);
+  return runAIAction(executeCall, userKey);
 };
 
 const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false, userKey?: string): Promise<any> => {
@@ -1241,12 +1271,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
     return questions;
   };
 
-  if (userKey && userKey.trim().length > 10) {
-    const userClient = new GoogleGenAI({ apiKey: userKey.trim() });
-    return executeProofread(userClient);
-  }
-
-  return runAIAction(executeProofread);
+  return runAIAction(executeProofread, userKey);
 };
 
 app.post('/api/extract', async (req, res) => {
@@ -1367,13 +1392,7 @@ DEEP RESEARCH & SOLUTION REQUIREMENTS:
       }
     };
 
-    let rawJson = '';
-    if (userKey) {
-      const userClient = new GoogleGenAI({ apiKey: userKey });
-      rawJson = await executeSolve(userClient);
-    } else {
-      rawJson = await runAIAction(executeSolve);
-    }
+    const rawJson = await runAIAction(executeSolve, userKey);
 
     const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned);
@@ -1488,13 +1507,7 @@ Respond ONLY with a valid JSON object:
       }
     };
 
-    let rawJson = '';
-    if (userKey) {
-      const userClient = new GoogleGenAI({ apiKey: userKey });
-      rawJson = await executeRepair(userClient);
-    } else {
-      rawJson = await runAIAction(executeRepair);
-    }
+    const rawJson = await runAIAction(executeRepair, userKey);
 
     const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned);
@@ -1587,13 +1600,7 @@ RULES:
       return responseText;
     };
 
-    let rawJson = '';
-    if (userKey) {
-      const userClient = new GoogleGenAI({ apiKey: userKey });
-      rawJson = await executeExtract(userClient);
-    } else {
-      rawJson = await runAIAction(executeExtract);
-    }
+    const rawJson = await runAIAction(executeExtract, userKey);
 
     const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned);
@@ -1681,13 +1688,7 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
       }
     };
 
-    let rawJson = '';
-    if (userKey) {
-      const userClient = new GoogleGenAI({ apiKey: userKey });
-      rawJson = await executeProofread(userClient);
-    } else {
-      rawJson = await runAIAction(executeProofread);
-    }
+    const rawJson = await runAIAction(executeProofread, userKey);
 
     const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned);

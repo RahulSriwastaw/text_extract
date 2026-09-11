@@ -223,6 +223,16 @@ export function normalizeStrictSubject(
     'सामान्य जागरूकता': 'Static GK',
   };
 
+  const combinedText = `${questionText || ''} ${solutionText || ''}`.toLowerCase();
+
+  // 0. Strong Reasoning override: Alphabet order, letter sequence, words arrangement, puzzles, seating arrangement
+  // (Prevents letter puzzles containing words like "ION" or "EBB" from being falsely classified as Chemistry)
+  if (
+    /(?:alphabetical order|वर्णमाला|वर्णमाला क्रम|अक्षर और|अक्षर के बीच|तीसरे अक्षर|पहले अक्षर|दूसरे अक्षर|दाएं से|बाएं से|left and right|word from the left|words from the right|words:\s*\(left\)|शब्दों पर आधारित|following words|बैठक व्यवस्था|seating arrangement|कथन और निष्कर्ष|रक्त संबंध|दिशा और दूरी|दर्पण प्रतिबिंब|जल प्रतिबिंब|पासा|कोडिंग-डिकोडिंग|coding-decoding|syllogism|blood relation|number series|letter series|odd one out|विषम चुनें)/i.test(combinedText)
+  ) {
+    return 'Reasoning';
+  }
+
   const lower = cleaned.toLowerCase();
   for (const [key, val] of Object.entries(subjectMap)) {
     if (lower === key || lower.startsWith(key + ' ') || lower.endsWith(' ' + key)) {
@@ -231,7 +241,6 @@ export function normalizeStrictSubject(
   }
 
   // If candidate is still not mapped, strictly deduce from question + solution text
-  const combinedText = `${questionText || ''} ${solutionText || ''}`.toLowerCase();
 
   // 1. Current Affairs
   if (
@@ -249,7 +258,7 @@ export function normalizeStrictSubject(
 
   // 3. Reasoning
   if (
-    /(?:कथन और निष्कर्ष|रक्त संबंध|दिशा और दूरी|दर्पण प्रतिबिंब|जल प्रतिबिंब|पासा|कोडिंग-डिकोडिंग|श्रृंखला को पूरा|लुप्त पद|syllogism|blood relation|coding-decoding|mirror image|water image|venn diagram|dice|analogy)/i.test(combinedText)
+    /(?:alphabetical order|वर्णमाला|वर्णमाला क्रम|अक्षर और|अक्षर के बीच|तीसरे अक्षर|पहले अक्षर|दूसरे अक्षर|दाएं से|बाएं से|left and right|word from the left|words from the right|शब्दों पर आधारित|following words|कथन और निष्कर्ष|रक्त संबंध|दिशा और दूरी|दर्पण प्रतिबिंब|जल प्रतिबिंब|पासा|कोडिंग-डिकोडिंग|श्रृंखला को पूरा|लुप्त पद|syllogism|blood relation|coding-decoding|mirror image|water image|venn diagram|dice|analogy|seating arrangement|बैठक व्यवस्था|odd one out|विषम चुनें)/i.test(combinedText)
   ) {
     return 'Reasoning';
   }
@@ -504,50 +513,203 @@ export function cleanMocktestText(text: string): string {
   return res.trim();
 }
 
-/**
- * Deep cleans an entire MockTestMcqItem to ensure clean KaTeX and HTML compatibility in mocktest portals.
- * Strictly verifies and normalizes the academic subject field.
- */
-export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
-  const qHi = cleanMocktestText(item.question_hi);
-  const qEn = cleanMocktestText(item.question_en);
-  const solHi = cleanMocktestText(item.solution_hi);
-  const solEn = cleanMocktestText(item.solution_en);
+export interface ItemFieldIssues {
+  hasMissingOptions: boolean;
+  missingOptionsList: string[];
+  hasEmptyQuestion: boolean;
+  hasDummySolution: boolean;
+  hasIssues: boolean;
+  issueSummary: string;
+}
 
-  const cleanSubject = normalizeStrictSubject(item.subject, `${qHi} ${qEn}`, `${solHi} ${solEn}`);
+/**
+ * Validates a MockTestMcqItem and detects any blank/empty/incomplete fields.
+ */
+export function detectItemFieldIssues(item: MockTestMcqItem): ItemFieldIssues {
+  const missingOptionsList: string[] = [];
+  
+  const opt1 = (item.option1_hi || item.option1_en || '').replace(/<[^>]*>/g, '').trim();
+  const opt2 = (item.option2_hi || item.option2_en || '').replace(/<[^>]*>/g, '').trim();
+  const opt3 = (item.option3_hi || item.option3_en || '').replace(/<[^>]*>/g, '').trim();
+  const opt4 = (item.option4_hi || item.option4_en || '').replace(/<[^>]*>/g, '').trim();
+
+  if (!opt1 || opt1.toLowerCase() === 'blank') missingOptionsList.push('A');
+  if (!opt2 || opt2.toLowerCase() === 'blank') missingOptionsList.push('B');
+  if (!opt3 || opt3.toLowerCase() === 'blank') missingOptionsList.push('C');
+  if (!opt4 || opt4.toLowerCase() === 'blank') missingOptionsList.push('D');
+
+  const hasMissingOptions = missingOptionsList.length > 0;
+  
+  const qHi = (item.question_hi || '').replace(/<[^>]*>/g, '').trim();
+  const qEn = (item.question_en || '').replace(/<[^>]*>/g, '').trim();
+  const hasEmptyQuestion = !qHi && !qEn;
+
+  const solHi = (item.solution_hi || '').replace(/<[^>]*>/g, '').trim();
+  const solEn = (item.solution_en || '').replace(/<[^>]*>/g, '').trim();
+  const isGenericHi = !solHi || /^(?:हल:)?\s*सही उत्तर विकल्प\s+[A-E1-5]\s*है।?$/i.test(solHi) || solHi.length < 25;
+  const isGenericEn = !solEn || /^(?:Solution:)?\s*The correct option is\s+[A-E1-5]\.?$/i.test(solEn) || solEn.length < 25;
+  const hasDummySolution = isGenericHi && isGenericEn;
+
+  const issueParts: string[] = [];
+  if (hasMissingOptions) {
+    issueParts.push(`Missing Options (${missingOptionsList.join(', ')})`);
+  }
+  if (hasEmptyQuestion) {
+    issueParts.push('Missing Question Text');
+  }
+  if (hasDummySolution) {
+    issueParts.push('Placeholder/Generic Solution');
+  }
+
+  const hasIssues = hasMissingOptions || hasEmptyQuestion || hasDummySolution;
+  const issueSummary = issueParts.join(' • ');
+
+  return {
+    hasMissingOptions,
+    missingOptionsList,
+    hasEmptyQuestion,
+    hasDummySolution,
+    hasIssues,
+    issueSummary: issueSummary || 'All fields complete'
+  };
+}
+
+/**
+ * Intelligently scans question text for trailing options that got merged into the stem,
+ * extracting them into Option 1-4 and cleaning the stem cleanly.
+ */
+export function autoRecoverItemOptionsFromStem(item: MockTestMcqItem): MockTestMcqItem {
+  // Check if options are already fully populated and not empty/blank
+  const opt1 = (item.option1_hi || item.option1_en || '').replace(/<[^>]*>/g, '').trim();
+  const opt2 = (item.option2_hi || item.option2_en || '').replace(/<[^>]*>/g, '').trim();
+  const opt3 = (item.option3_hi || item.option3_en || '').replace(/<[^>]*>/g, '').trim();
+  const opt4 = (item.option4_hi || item.option4_en || '').replace(/<[^>]*>/g, '').trim();
+
+  const allFilled = opt1 && opt2 && opt3 && opt4 && 
+    opt1.toLowerCase() !== 'blank' && opt2.toLowerCase() !== 'blank' &&
+    opt3.toLowerCase() !== 'blank' && opt4.toLowerCase() !== 'blank';
+
+  if (allFilled) {
+    return item;
+  }
+
+  let qEn = item.question_en || '';
+  let qHi = item.question_hi || '';
+
+  const tryExtractFromText = (text: string): { stem: string; opts: [string, string, string, string] } | null => {
+    if (!text) return null;
+    let raw = text.trim();
+    let hasClosingP = false;
+    if (raw.endsWith('</p>')) {
+      raw = raw.slice(0, -4).trim();
+      hasClosingP = true;
+    }
+
+    // Pattern 1: Question ends with "? 7 6 5 8" or "? opt1 opt2 opt3 opt4"
+    const fourTokensMatch = raw.match(/^(.*?\?)\s+([^\s?]+)\s+([^\s?]+)\s+([^\s?]+)\s+([^\s?]+)\s*$/s);
+    if (fourTokensMatch) {
+      const stem = hasClosingP ? `${fourTokensMatch[1].trim()}</p>` : fourTokensMatch[1].trim();
+      return {
+        stem,
+        opts: [fourTokensMatch[2].trim(), fourTokensMatch[3].trim(), fourTokensMatch[4].trim(), fourTokensMatch[5].trim()]
+      };
+    }
+
+    // Pattern 2: Labeled options at end: "(A) opt1 (B) opt2 (C) opt3 (D) opt4" or "A. opt1 B. opt2 C. opt3 D. opt4"
+    const labeledMatch = raw.match(/^(.*?)(?:[\s\n\?]+)(?:\(?[A1a][\.\)\:\-]\s*|\b[A1a]\b[\.\)\:\-]\s*)([^\n\(\)]+?)(?:\(?[B2b][\.\)\:\-]\s*|\b[B2b]\b[\.\)\:\-]\s*)([^\n\(\)]+?)(?:\(?[C3c][\.\)\:\-]\s*|\b[C3c]\b[\.\)\:\-]\s*)([^\n\(\)]+?)(?:\(?[D4d][\.\)\:\-]\s*|\b[D4d]\b[\.\)\:\-]\s*)([^\n\(\)]+?)\s*$/s);
+    if (labeledMatch) {
+      const stem = hasClosingP ? `${labeledMatch[1].trim()}</p>` : labeledMatch[1].trim();
+      return {
+        stem,
+        opts: [labeledMatch[2].trim(), labeledMatch[3].trim(), labeledMatch[4].trim(), labeledMatch[5].trim()]
+      };
+    }
+
+    // Pattern 3: 4 newline separated lines at the end
+    const fourLinesMatch = raw.match(/^(.*?)\n\s*([^\n]+)\s*\n\s*([^\n]+)\s*\n\s*([^\n]+)\s*\n\s*([^\n]+)\s*$/s);
+    if (fourLinesMatch) {
+      const stem = hasClosingP ? `${fourLinesMatch[1].trim()}</p>` : fourLinesMatch[1].trim();
+      return {
+        stem,
+        opts: [fourLinesMatch[2].trim(), fourLinesMatch[3].trim(), fourLinesMatch[4].trim(), fourLinesMatch[5].trim()]
+      };
+    }
+
+    return null;
+  };
+
+  const extractedEn = tryExtractFromText(qEn);
+  const extractedHi = tryExtractFromText(qHi);
+
+  const bestExtract = extractedEn || extractedHi;
+  if (!bestExtract) {
+    return item;
+  }
+
+  const [opt1Val, opt2Val, opt3Val, opt4Val] = bestExtract.opts;
 
   return {
     ...item,
+    question_en: extractedEn ? extractedEn.stem : qEn,
+    question_hi: extractedHi ? extractedHi.stem : qHi,
+    option1_hi: (!item.option1_hi || item.option1_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[0] : opt1Val) : item.option1_hi,
+    option2_hi: (!item.option2_hi || item.option2_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[1] : opt2Val) : item.option2_hi,
+    option3_hi: (!item.option3_hi || item.option3_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[2] : opt3Val) : item.option3_hi,
+    option4_hi: (!item.option4_hi || item.option4_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[3] : opt4Val) : item.option4_hi,
+    option1_en: (!item.option1_en || item.option1_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[0] : opt1Val) : item.option1_en,
+    option2_en: (!item.option2_en || item.option2_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[1] : opt2Val) : item.option2_en,
+    option3_en: (!item.option3_en || item.option3_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[2] : opt3Val) : item.option3_en,
+    option4_en: (!item.option4_en || item.option4_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[3] : opt4Val) : item.option4_en,
+  };
+}
+
+/**
+ * Deep cleans an entire MockTestMcqItem to ensure clean KaTeX and HTML compatibility in mocktest portals.
+ * Strictly verifies and normalizes the academic subject field and recovers missing options if merged in stem.
+ */
+export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
+  // First, auto-recover trailing options from stem if options are blank:
+  const recovered = autoRecoverItemOptionsFromStem(item);
+
+  const qHi = cleanMocktestText(recovered.question_hi);
+  const qEn = cleanMocktestText(recovered.question_en);
+  const solHi = cleanMocktestText(recovered.solution_hi);
+  const solEn = cleanMocktestText(recovered.solution_en);
+
+  const cleanSubject = normalizeStrictSubject(recovered.subject, `${qHi} ${qEn}`, `${solHi} ${solEn}`);
+
+  return {
+    ...recovered,
     question_hi: qHi,
-    option1_hi: cleanMocktestText(item.option1_hi),
-    option2_hi: cleanMocktestText(item.option2_hi),
-    option3_hi: cleanMocktestText(item.option3_hi),
-    option4_hi: cleanMocktestText(item.option4_hi),
-    option5_hi: cleanMocktestText(item.option5_hi),
+    option1_hi: cleanMocktestText(recovered.option1_hi),
+    option2_hi: cleanMocktestText(recovered.option2_hi),
+    option3_hi: cleanMocktestText(recovered.option3_hi),
+    option4_hi: cleanMocktestText(recovered.option4_hi),
+    option5_hi: cleanMocktestText(recovered.option5_hi),
     solution_hi: solHi,
     question_en: qEn,
-    option1_en: cleanMocktestText(item.option1_en),
-    option2_en: cleanMocktestText(item.option2_en),
-    option3_en: cleanMocktestText(item.option3_en),
-    option4_en: cleanMocktestText(item.option4_en),
-    option5_en: cleanMocktestText(item.option5_en),
+    option1_en: cleanMocktestText(recovered.option1_en),
+    option2_en: cleanMocktestText(recovered.option2_en),
+    option3_en: cleanMocktestText(recovered.option3_en),
+    option4_en: cleanMocktestText(recovered.option4_en),
+    option5_en: cleanMocktestText(recovered.option5_en),
     solution_en: solEn,
     subject: cleanSubject,
-    subject_level: item.subject_level || '',
-    test_date: item.test_date || '',
-    test_time: item.test_time || '',
-    figure_notes: item.figure_notes || '',
-    correction_notes: item.correction_notes || '',
-    source_pdf: item.source_pdf || '',
-    source_pages: item.source_pages || '',
-    source_question_reference: item.source_question_reference || (item.question_r ? `Q.${item.question_r}` : ''),
-    latex_check: item.latex_check || 'checked',
-    html_check: item.html_check || 'checked',
-    answer_check: item.answer_check || 'checked',
-    solution_check: item.solution_check || 'checked',
-    hash_figure: item.hash_figure || '',
-    manually_review: item.manually_review || 'checked',
-    duplicate_statistics: item.duplicate_statistics || 'Unique within this shift; duplicate check completed.'
+    subject_level: recovered.subject_level || '',
+    test_date: recovered.test_date || '',
+    test_time: recovered.test_time || '',
+    figure_notes: recovered.figure_notes || '',
+    correction_notes: recovered.correction_notes || '',
+    source_pdf: recovered.source_pdf || '',
+    source_pages: recovered.source_pages || '',
+    source_question_reference: recovered.source_question_reference || (recovered.question_r ? `Q.${recovered.question_r}` : ''),
+    latex_check: recovered.latex_check || 'checked',
+    html_check: recovered.html_check || 'checked',
+    answer_check: recovered.answer_check || 'checked',
+    solution_check: recovered.solution_check || 'checked',
+    hash_figure: recovered.hash_figure || '',
+    manually_review: recovered.manually_review || 'checked',
+    duplicate_statistics: recovered.duplicate_statistics || 'Unique within this shift; duplicate check completed.'
   };
 }
 
@@ -1053,6 +1215,59 @@ export async function generateDeepSolutionForItem(
     solution_en: cleanMocktestText(data.solution_en || ''),
     difficulty_level: data.difficulty_level || item.difficulty_level
   };
+}
+
+/**
+ * Automatically repairs incomplete questions with AI: recovers missing options, cleans stems,
+ * determines true answer, sets strict academic subject, and generates deep pedagogical solutions.
+ */
+export async function repairMockTestItemWithAi(
+  item: MockTestMcqItem
+): Promise<MockTestMcqItem> {
+  // First, apply deterministic trailing-options recovery
+  const baseItem = autoRecoverItemOptionsFromStem(item);
+
+  const settings = await getAiSettings();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (settings.apiKey) {
+    headers['x-user-gemini-key'] = settings.apiKey.trim();
+  }
+
+  const response = await fetch('/api/mocktest-repair-item', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ item: baseItem })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to auto-repair question with AI');
+  }
+
+  const data = await response.json();
+
+  const mergedItem: MockTestMcqItem = {
+    ...baseItem,
+    question_hi: data.question_hi || baseItem.question_hi,
+    question_en: data.question_en || baseItem.question_en,
+    option1_hi: data.option1_hi || baseItem.option1_hi,
+    option2_hi: data.option2_hi || baseItem.option2_hi,
+    option3_hi: data.option3_hi || baseItem.option3_hi,
+    option4_hi: data.option4_hi || baseItem.option4_hi,
+    option1_en: data.option1_en || baseItem.option1_en,
+    option2_en: data.option2_en || baseItem.option2_en,
+    option3_en: data.option3_en || baseItem.option3_en,
+    option4_en: data.option4_en || baseItem.option4_en,
+    solution_hi: data.solution_hi || baseItem.solution_hi,
+    solution_en: data.solution_en || baseItem.solution_en,
+    answer: data.answer || baseItem.answer,
+    subject: data.subject || baseItem.subject,
+    difficulty_level: (data.difficulty_level || baseItem.difficulty_level || 'medium').toLowerCase() as DifficultyLevel,
+  };
+
+  return cleanMockTestItem(mergedItem);
 }
 
 /**

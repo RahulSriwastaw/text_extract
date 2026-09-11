@@ -1388,6 +1388,123 @@ DEEP RESEARCH & SOLUTION REQUIREMENTS:
   }
 });
 
+app.post('/api/mocktest-repair-item', async (req, res) => {
+  try {
+    const { item } = req.body;
+    if (!item) {
+      return res.status(400).json({ error: "Missing question item in request body" });
+    }
+
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    const repairPrompt = `You are an elite competitive exam test-series architect, educator, and question digitizer (SSC CGL, Railway RRB, Banking, UPSC).
+You are given an INCOMPLETE exam question item. Some fields may be blank, options may be missing or stuck at the end of the question stem, or the subject and solution may need deep pedagogical repair.
+
+INPUT QUESTION DATA:
+Subject: "${item.subject || ''}"
+Question (Hindi): "${item.question_hi || ''}"
+Option 1 (Hindi): "${item.option1_hi || ''}"
+Option 2 (Hindi): "${item.option2_hi || ''}"
+Option 3 (Hindi): "${item.option3_hi || ''}"
+Option 4 (Hindi): "${item.option4_hi || ''}"
+Question (English): "${item.question_en || ''}"
+Option 1 (English): "${item.option1_en || ''}"
+Option 2 (English): "${item.option2_en || ''}"
+Option 3 (English): "${item.option3_en || ''}"
+Option 4 (English): "${item.option4_en || ''}"
+Answer Candidate: "${item.answer || ''}"
+
+MANDATORY TASKS TO EXECUTE:
+1. QUESTION STEM CLEANUP:
+   - If options are attached at the end of the question text (e.g. "? 7 6 5 8" or "? A 7 B 6..."), STRIP THEM COMPLETELY from both 'question_hi' and 'question_en' so the question ends cleanly with the punctuation mark (e.g. '?').
+   - Wrap both 'question_hi' and 'question_en' in semantic HTML (<p>...</p>).
+   - If question is in only one language, translate and generate the counterpart language.
+2. 4 OPTIONS (A, B, C, D) RESTORATION:
+   - All 4 options MUST be fully populated in BOTH Hindi (option1_hi..option4_hi) and English (option1_en..option4_en).
+   - If options were trailing in the question text, extract them into Option 1 (A), Option 2 (B), Option 3 (C), Option 4 (D).
+   - If options are missing altogether, deduce and generate 4 standard, realistic exam options suitable for this question.
+   - Do NOT use generic words like "Blank" or leave them empty.
+3. CORRECT ANSWER DEDUCTION:
+   - Solve the question rigorously. Verify or set "answer" to the exact correct option ("A", "B", "C", or "D").
+4. STRICT ACADEMIC SUBJECT:
+   - Select ONLY from: ["Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK"].
+   - CRITICAL: Letter puzzles, word arrangements, alphabetical order questions (e.g. words like ION, EBB, PET, GET or letter counting between letters) MUST BE "Reasoning", NEVER "Chemistry" or other subjects!
+5. COMPREHENSIVE STEP-BY-STEP SOLUTION:
+   - 'solution_hi': Detailed explanation in Hindi in semantic HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+   - 'solution_en': Rigorous explanation in English in semantic HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+   - Both must clearly prove why option is correct with calculations and proofs.
+6. DIFFICULTY LEVEL:
+   - 'easy' | 'medium' | 'hard'.
+
+Respond ONLY with a valid JSON object:
+{
+  "question_hi": "<p>...</p>",
+  "question_en": "<p>...</p>",
+  "option1_hi": "...",
+  "option2_hi": "...",
+  "option3_hi": "...",
+  "option4_hi": "...",
+  "option1_en": "...",
+  "option2_en": "...",
+  "option3_en": "...",
+  "option4_en": "...",
+  "answer": "B",
+  "subject": "Reasoning",
+  "difficulty_level": "medium",
+  "solution_hi": "<p><b>हल:</b>...</p>",
+  "solution_en": "<p><b>Solution:</b>...</p>"
+}`;
+
+    const executeRepair = async (client: any) => {
+      let modelToUse = 'gemini-2.5-flash';
+      try {
+        const response = await client.models.generateContent({
+          model: modelToUse,
+          contents: [{ text: repairPrompt }],
+          config: {
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      } catch (err: any) {
+        const response = await client.models.generateContent({
+          model: 'gemini-flash-lite-latest',
+          contents: [{ text: repairPrompt }],
+          config: {
+            temperature: 0.15,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      }
+    };
+
+    let rawJson = '';
+    if (userKey) {
+      const userClient = new GoogleGenAI({ apiKey: userKey });
+      rawJson = await executeRepair(userClient);
+    } else {
+      rawJson = await runAIAction(executeRepair);
+    }
+
+    const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    const parsed = JSON.parse(cleaned);
+    res.json(parsed);
+  } catch (error: any) {
+    console.warn("MockTest repair failed:", error?.message || error);
+    res.status(500).json({ error: error.message || "Failed to auto-repair question" });
+  }
+});
+
 app.post('/api/mocktest-extract', async (req, res) => {
   try {
     const { base64Image, setName = 'Exam Paper' } = req.body;

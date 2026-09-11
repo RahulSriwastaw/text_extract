@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
-  AlertCircle, Loader2, Sparkles, Download, Copy, Check, Plus, 
+  AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
   ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye
 } from 'lucide-react';
@@ -27,7 +27,10 @@ import {
   proofreadMocktestItems,
   cleanMockTestItem,
   STANDARD_SUBJECTS,
-  normalizeStrictSubject
+  normalizeStrictSubject,
+  detectItemFieldIssues,
+  autoRecoverItemOptionsFromStem,
+  repairMockTestItemWithAi
 } from '../services/mocktestService';
 import { 
   extractWithStudyAiBridge, 
@@ -106,6 +109,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [activeTab, setActiveTab] = useState<'split' | 'grid' | 'csv'>('split');
   const [solvingId, setSolvingId] = useState<string | null>(null);
   const [isSolvingAll, setIsSolvingAll] = useState(false);
+  const [repairingId, setRepairingId] = useState<string | null>(null);
+  const [isRepairingAll, setIsRepairingAll] = useState(false);
+  const [repairProgress, setRepairProgress] = useState<{ current: number; total: number } | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Inline editing & Image Zoom modal
@@ -665,10 +671,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   };
 
   const updateItem = (id: string, updates: Partial<MockTestMcqItem>) => {
-    setExtractedMcqs(prev => prev.map(it => it.id === id ? { ...it, ...updates } : it));
+    setExtractedMcqs(prev => prev.map(it => it.id === id ? cleanMockTestItem({ ...it, ...updates }) : it));
     setPages(prev => prev.map(p => ({
       ...p,
-      items: (p.items || []).map(it => it.id === id ? { ...it, ...updates } : it)
+      items: (p.items || []).map(it => it.id === id ? cleanMockTestItem({ ...it, ...updates }) : it)
     })));
   };
 
@@ -685,6 +691,84 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         mcqCount: nextItems.length
       };
     }));
+  };
+
+  // Single Question AI Repair
+  const handleAiRepairSingle = async (item: MockTestMcqItem) => {
+    setRepairingId(item.id);
+    try {
+      setLiveStatusText(`⚡ AI Repairing Q#${item.question_r}: Deducing options, answer & solution...`);
+      const repaired = await repairMockTestItemWithAi(item);
+      updateItem(item.id, repaired);
+      setLiveStatusText(`✓ Q#${item.question_r} successfully repaired and completed!`);
+    } catch (err: any) {
+      alert(`AI Repair failed for Q#${item.question_r}: ${err.message || err}`);
+    } finally {
+      setRepairingId(null);
+    }
+  };
+
+  // Bulk Repair for questions on a single page
+  const handleAiRepairPageItems = async (pageItems: MockTestMcqItem[]) => {
+    const targets = pageItems.filter(it => detectItemFieldIssues(it).hasIssues);
+    if (targets.length === 0) {
+      alert('All questions on this page are already complete!');
+      return;
+    }
+    setIsRepairingAll(true);
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const item = targets[i];
+        setRepairingId(item.id);
+        setLiveStatusText(`AI Repairing Q#${item.question_r} (${i + 1}/${targets.length})...`);
+        try {
+          const repaired = await repairMockTestItemWithAi(item);
+          updateItem(item.id, repaired);
+        } catch (e) {
+          console.warn(`Repair failed for Q#${item.question_r}:`, e);
+        }
+        await new Promise(r => setTimeout(r, 400));
+      }
+      setLiveStatusText(`✓ Page questions repaired successfully!`);
+    } finally {
+      setIsRepairingAll(false);
+      setRepairingId(null);
+    }
+  };
+
+  // Bulk Repair All Incomplete Questions across the document
+  const handleAiRepairAllIncomplete = async () => {
+    const incompleteItems = extractedMcqs.filter(it => detectItemFieldIssues(it).hasIssues);
+    if (incompleteItems.length === 0) {
+      alert('All questions already have complete options and detailed solutions!');
+      return;
+    }
+
+    setIsRepairingAll(true);
+    setRepairProgress({ current: 0, total: incompleteItems.length });
+    setLiveStatusText(`⚡ AI Auto-Repairing ${incompleteItems.length} incomplete questions...`);
+
+    try {
+      for (let i = 0; i < incompleteItems.length; i++) {
+        const item = incompleteItems[i];
+        setRepairProgress({ current: i + 1, total: incompleteItems.length });
+        setRepairingId(item.id);
+        setLiveStatusText(`Repairing Q#${item.question_r} (${i + 1}/${incompleteItems.length})...`);
+        try {
+          const repaired = await repairMockTestItemWithAi(item);
+          updateItem(item.id, repaired);
+        } catch (e) {
+          console.warn(`Repair failed for Q#${item.question_r}:`, e);
+        }
+        await new Promise(r => setTimeout(r, 400));
+      }
+      setLiveStatusText(`✓ All ${incompleteItems.length} questions successfully repaired!`);
+      alert(`✨ AI Repair Complete!\n\nSuccessfully checked and repaired ${incompleteItems.length} questions. Missing options and pedagogical solutions have been generated.`);
+    } finally {
+      setIsRepairingAll(false);
+      setRepairingId(null);
+      setRepairProgress(null);
+    }
   };
 
   // Jump to specific page card
@@ -1354,25 +1438,50 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                     <div className="flex-1 min-w-0 bg-[#0C0F17] flex flex-col p-4 space-y-3">
                       {/* Right Panel Header */}
                       <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
-                            Page {page.pageNumber} MCQs
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/[0.06] text-slate-300">
-                            {pageQuestions.length} Questions
-                          </span>
-                        </div>
+                        {(() => {
+                          const pageIncompleteCount = pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues).length;
+                          return (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
+                                  Page {page.pageNumber} MCQs
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/[0.06] text-slate-300">
+                                  {pageQuestions.length} Questions
+                                </span>
+                                {pageIncompleteCount > 0 && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 animate-pulse">
+                                    <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                    <span>{pageIncompleteCount} Incomplete</span>
+                                  </span>
+                                )}
+                              </div>
 
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleAddQuestionToPage(page)}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-semibold transition-all"
-                          >
-                            <Plus className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Add Question</span>
-                          </button>
-                        </div>
+                              <div className="flex items-center gap-2">
+                                {pageIncompleteCount > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAiRepairPageItems(pageQuestions)}
+                                    disabled={isRepairingAll}
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                    title="Auto-fill missing options & solutions for incomplete questions on this page"
+                                  >
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>AI Fill Page ({pageIncompleteCount})</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddQuestionToPage(page)}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-semibold transition-all"
+                                >
+                                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Add Question</span>
+                                </button>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       {/* Content Area according to Status */}
@@ -1435,11 +1544,17 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                           {pageQuestions.map((item) => {
                             const isEditing = editingItemId === item.id;
                             const isSolving = solvingId === item.id;
+                            const isRepairing = repairingId === item.id;
+                            const issues = detectItemFieldIssues(item);
 
                             return (
                               <div
                                 key={item.id}
-                                className="rounded-xl border border-white/[0.08] bg-black/40 p-4 space-y-3 hover:border-white/[0.15] transition-all"
+                                className={`rounded-xl border p-4 space-y-3 transition-all ${
+                                  issues.hasIssues
+                                    ? 'border-amber-500/60 bg-black/60 shadow-xl shadow-amber-500/10 ring-1 ring-amber-500/30'
+                                    : 'border-white/[0.08] bg-black/40 hover:border-white/[0.15]'
+                                }`}
                               >
                                 {/* MCQ Header Bar */}
                                 <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/[0.06]">
@@ -1491,11 +1606,27 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                       />
                                     </div>
 
+                                    {/* AI Auto-Repair / Fill Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAiRepairSingle(item)}
+                                      disabled={isRepairing || isSolving}
+                                      className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-extrabold transition-all disabled:opacity-50 ${
+                                        issues.hasIssues
+                                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-md shadow-amber-500/20'
+                                          : 'bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300'
+                                      }`}
+                                      title="Auto-fill missing options, deduce answer, and generate solutions"
+                                    >
+                                      {isRepairing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                                      <span>{issues.hasIssues ? '⚡ Auto-Fill' : 'Repair'}</span>
+                                    </button>
+
                                     {/* Auto-Solve Single Button */}
                                     <button
                                       type="button"
                                       onClick={() => handleSolveSingle(item)}
-                                      disabled={isSolving}
+                                      disabled={isSolving || isRepairing}
                                       className="flex items-center gap-1 px-2.5 py-1 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded text-xs font-semibold transition-all disabled:opacity-50"
                                       title="Generate deep research step-by-step solutions"
                                     >
@@ -1530,6 +1661,42 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                     </button>
                                   </div>
                                 </div>
+
+                                {/* WARNING MESSAGE BANNER FOR MISSING/BLANK FIELDS */}
+                                {issues.hasIssues && (
+                                  <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/40 rounded-xl text-xs">
+                                    <div className="flex items-center gap-2">
+                                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
+                                      <div>
+                                        <div className="font-extrabold text-amber-300 flex items-center gap-1.5">
+                                          <span>⚠️ चेतावनी: रिक्त विकल्प व फ़ील्ड (Blank Fields Detected)</span>
+                                          <span className="px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 text-[10px]">Action Required</span>
+                                        </div>
+                                        <div className="text-slate-300 text-[11px] mt-0.5 font-medium">
+                                          {issues.issueSummary} — इस प्रश्न के विकल्प खाली हैं। कृपया <strong>⚡ Auto-Fill</strong> दबाकर AI से भरें।
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAiRepairSingle(item)}
+                                      disabled={isRepairing}
+                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow-md shadow-amber-500/20 transition-all disabled:opacity-50 ml-auto sm:ml-0"
+                                    >
+                                      {isRepairing ? (
+                                        <>
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          <span>AI Filling...</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Sparkles className="w-3.5 h-3.5 fill-black" />
+                                          <span>⚡ AI Auto-Fill Missing Fields</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                )}
 
                                 {/* Extra Metadata Editing when Expanded */}
                                 {isEditing && (
@@ -1602,6 +1769,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                         const optLetter = String.fromCharCode(65 + optIdx);
                                         const optNum = String(optIdx + 1);
                                         const isCorrect = item.answer === optLetter || item.answer === optNum || item.answer?.includes(optLetter) || item.answer?.includes(optNum);
+                                        const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
+                                        const isBlank = !valClean || valClean.toLowerCase() === 'blank';
 
                                         return (
                                           <div
@@ -1609,11 +1778,13 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                             className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
                                               isCorrect
                                                 ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                                                : isBlank
+                                                ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-200'
                                                 : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
                                             }`}
                                           >
                                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
-                                              isCorrect ? 'bg-emerald-500 text-black' : 'bg-white/[0.08] text-slate-400'
+                                              isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
                                             }`}>
                                               {optLetter}
                                             </span>
@@ -1622,11 +1793,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                                 type="text"
                                                 value={item[key] || ''}
                                                 onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                placeholder={`Option ${optLetter}`}
                                                 className="w-full bg-transparent text-xs text-white focus:outline-none"
                                               />
                                             ) : (
                                               <span className="flex-1 truncate" title={item[key]}>
-                                                {item[key] || <em className="text-slate-600">Blank</em>}
+                                                {!isBlank ? (
+                                                  item[key]
+                                                ) : (
+                                                  <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
+                                                    <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                                                    <span>Blank Option (Click "⚡ Auto-Fill" above)</span>
+                                                  </span>
+                                                )}
                                               </span>
                                             )}
                                             {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
@@ -1678,6 +1857,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                         const optLetter = String.fromCharCode(65 + optIdx);
                                         const optNum = String(optIdx + 1);
                                         const isCorrect = item.answer === optLetter || item.answer === optNum || item.answer?.includes(optLetter) || item.answer?.includes(optNum);
+                                        const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
+                                        const isBlank = !valClean || valClean.toLowerCase() === 'blank';
 
                                         return (
                                           <div
@@ -1685,11 +1866,13 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                             className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
                                               isCorrect
                                                 ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                                                : isBlank
+                                                ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-200'
                                                 : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
                                             }`}
                                           >
                                             <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
-                                              isCorrect ? 'bg-emerald-500 text-black' : 'bg-white/[0.08] text-slate-400'
+                                              isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
                                             }`}>
                                               {optLetter}
                                             </span>
@@ -1698,11 +1881,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                                 type="text"
                                                 value={item[key] || ''}
                                                 onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                placeholder={`Option ${optLetter}`}
                                                 className="w-full bg-transparent text-xs text-white focus:outline-none"
                                               />
                                             ) : (
                                               <span className="flex-1 truncate" title={item[key]}>
-                                                {item[key] || <em className="text-slate-600">Blank</em>}
+                                                {!isBlank ? (
+                                                  item[key]
+                                                ) : (
+                                                  <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
+                                                    <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                                                    <span>Blank Option (Click "⚡ Auto-Fill" above)</span>
+                                                  </span>
+                                                )}
                                               </span>
                                             )}
                                             {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
@@ -1721,11 +1912,11 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                           rows={3}
                                           value={item.solution_en}
                                           onChange={(e) => updateItem(item.id, { solution_en: e.target.value })}
-                                          className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-teal-200 focus:outline-none"
+                                          className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-blue-200 focus:outline-none"
                                         />
                                       ) : (
-                                        <div className="p-2.5 rounded-lg bg-teal-500/[0.03] border border-teal-500/20">
-                                          <LatexRenderer content={item.solution_en || '<p>Solution not available</p>'} className="text-teal-200/90 text-xs" />
+                                        <div className="p-2.5 rounded-lg bg-blue-500/[0.03] border border-blue-500/20">
+                                          <LatexRenderer content={item.solution_en || '<p>Solution not available</p>'} className="text-blue-200/90 text-xs" />
                                         </div>
                                       )}
                                     </div>
@@ -1852,25 +2043,58 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           )}
 
           {/* Bottom Summary Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 rounded-2xl border border-white/[0.08] bg-black/50 backdrop-blur-xl text-xs text-slate-400">
-            <div className="flex items-center gap-4">
-              <span>Total Questions: <strong className="text-white">{extractedMcqs.length}</strong></span>
-              <span>Fully Solved: <strong className="text-emerald-400">{solvedCount}</strong></span>
-              <span>Pages Digitized: <strong className="text-blue-400">{pages.filter(p => p.status === 'ready').length} of {pages.length}</strong></span>
-            </div>
+          {(() => {
+            const incompleteTotal = extractedMcqs.filter(it => detectItemFieldIssues(it).hasIssues).length;
+            return (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 rounded-2xl border border-white/[0.08] bg-black/50 backdrop-blur-xl text-xs text-slate-400">
+                <div className="flex flex-wrap items-center gap-4">
+                  <span>Total Questions: <strong className="text-white">{extractedMcqs.length}</strong></span>
+                  <span>Fully Solved: <strong className="text-emerald-400">{solvedCount}</strong></span>
+                  <span>Pages Digitized: <strong className="text-blue-400">{pages.filter(p => p.status === 'ready').length} of {pages.length}</strong></span>
+                  {incompleteTotal > 0 && (
+                    <span className="text-amber-400 font-extrabold flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 animate-pulse">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                      <span>{incompleteTotal} Incomplete (Blank Options/Fields)</span>
+                    </span>
+                  )}
+                </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleDownloadCsv}
-                disabled={extractedMcqs.length === 0}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download 34-Column CSV</span>
-              </button>
-            </div>
-          </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  {incompleteTotal > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAiRepairAllIncomplete}
+                      disabled={isRepairingAll}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+                      title="AI will deduce options, verify answers, and generate solutions for all incomplete items"
+                    >
+                      {isRepairingAll ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Repairing ({repairProgress?.current || 0}/{repairProgress?.total || incompleteTotal})...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                          <span>⚡ AI Auto-Fill All Incomplete ({incompleteTotal})</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadCsv}
+                    disabled={extractedMcqs.length === 0}
+                    className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download 34-Column CSV</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

@@ -148,6 +148,23 @@
     if (!job?.prompt) throw new Error("Job missing — restart extract from admin.");
     const stopHb = startHeartbeat(requestId, adminTabId);
     try {
+      if (!job.continueChat) {
+        try {
+          const existingTurns = getModelResponseNodes();
+          if (existingTurns.length > 0) {
+            const newChatBtn = deepQueryAll('button, a, [role="button"]').find(b => {
+              const label = ((b.getAttribute("aria-label") || "") + " " + (b.title || "") + " " + (b.textContent || "")).toLowerCase();
+              return (label.includes("new chat") || label.includes("start new") || label.includes("नयी बातचीत") || label.includes("नई चैट")) && !label.includes("history");
+            });
+            if (newChatBtn) {
+              LOG("Starting clean new chat for fresh page extraction");
+              newChatBtn.click();
+              await sleep(600);
+            }
+          }
+        } catch {}
+      }
+
       progress(requestId, "composer", "Waiting for input…", adminTabId);
       await waitForComposer(9e4);
       const el = findComposer();
@@ -321,57 +338,88 @@
       return null;
     }
   }
+  function clearComposerAttachments() {
+    try {
+      const composer = findComposer();
+      const container = composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, main') || document;
+      const removeButtons = deepQueryAll('button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="clear" i], button[aria-label*="close" i]', container);
+      for (const btn of removeButtons) {
+        btn.click();
+      }
+    } catch {}
+  }
+
+  async function tryDropFile(el, file) {
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const evInit = {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt
+      };
+      el.dispatchEvent(new DragEvent("dragenter", evInit));
+      await sleep(60);
+      el.dispatchEvent(new DragEvent("dragover", evInit));
+      await sleep(60);
+      el.dispatchEvent(new DragEvent("drop", evInit));
+      LOG("native drag-and-drop dispatched for", file.name);
+      return true;
+    } catch (e) {
+      LOG("drag-and-drop failed", e);
+      return false;
+    }
+  }
+
   async function pastePdfIntoComposer(el, job) {
-    const file = base64ToFile(job.fileBase64, job.fileName, job.mimeType || "application/pdf");
+    const file = base64ToFile(job.fileBase64, job.fileName, job.mimeType || "image/png");
     if (!file) return false;
-    el.scrollIntoView({
-      block: "center"
-    });
+
+    clearComposerAttachments();
+    await sleep(150);
+
+    el.scrollIntoView({ block: "center" });
     el.click();
     el.focus();
     await sleep(200);
+
+    // 1. Try HTML5 native Drag & Drop directly on composer (works without clipboard permissions)
+    await tryDropFile(el, file);
+    await sleep(500);
+    if (await waitForAttachment(job.fileName, 2500)) return true;
+
+    // 2. Try native hidden file input assignment
+    const viaInput = await tryFileInputAssign(file);
+    if (viaInput) {
+      await sleep(600);
+      if (await waitForAttachment(job.fileName, 3000)) return true;
+    }
+
+    // 3. Try clipboard write + paste ONLY IF wroteClip succeeded with the NEW file
     let wroteClip = false;
-    const fileMime = file.type || "application/pdf";
+    const fileMime = file.type || "image/png";
     try {
-      await navigator.clipboard.write([ new ClipboardItem({
-        [fileMime]: file
-      }) ]);
+      window.focus();
+      await navigator.clipboard.write([ new ClipboardItem({ [fileMime]: file }) ]);
       wroteClip = true;
-      LOG("clipboard write ok");
+      LOG("clipboard write ok with fresh image");
     } catch (e) {
       try {
-        await navigator.clipboard.write([ new ClipboardItem({
-          [fileMime]: Promise.resolve(file)
-        }) ]);
+        await navigator.clipboard.write([ new ClipboardItem({ [fileMime]: Promise.resolve(file) }) ]);
         wroteClip = true;
       } catch (e2) {
         LOG("clipboard write failed", e2);
       }
     }
-    if (wroteClip || job.pdfOnClipboard) {
+    if (wroteClip) {
       await focusAndPaste(el);
-      await sleep(400);
+      await sleep(600);
+      if (await waitForAttachment(job.fileName, 3000)) return true;
     }
-    try {
-      const dt = new DataTransfer;
-      dt.items.add(file);
-      const pasteEv = new ClipboardEvent("paste", {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: dt
-      });
-      Object.defineProperty(pasteEv, "clipboardData", {
-        value: dt
-      });
-      el.dispatchEvent(pasteEv);
-      document.dispatchEvent(pasteEv);
-      LOG("synthetic file paste dispatched");
-    } catch (e) {
-      LOG("synthetic paste failed", e);
-    }
-    const viaInput = await tryFileInputAssign(file);
-    return wroteClip || viaInput || true;
+
+    return true;
   }
+
   async function focusAndPaste(el) {
     el.focus();
     await sleep(100);
@@ -395,6 +443,7 @@
       }));
     }
   }
+
   async function tryFileInputAssign(file) {
     const proto = HTMLInputElement.prototype;
     const orig = proto.click;
@@ -411,14 +460,13 @@
         await sleep(350);
       }
       const inputs = deepQueryAll('input[type="file"]');
-      const input = inputs.find(i => /pdf|\*|file/i.test(i.accept || i.name || "")) || inputs[0];
+      const input = inputs.find(i => /image|png|jpg|pdf|\*|file/i.test(i.accept || i.name || "")) || inputs[0];
       if (!input) return false;
       const dt = new DataTransfer;
       dt.items.add(file);
       input.files = dt.files;
-      input.dispatchEvent(new Event("change", {
-        bubbles: true
-      }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
       return true;
     } catch {
       return false;
@@ -426,15 +474,19 @@
       proto.click = orig;
     }
   }
+
   async function waitForAttachment(fileName, timeoutMs) {
     const start = Date.now();
-    const needle = (fileName || "").replace(/\.[^.]+$/, "").slice(0, 18).toLowerCase();
+    const composer = findComposer();
+    const container = composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, main') || document;
+
     while (Date.now() - start < (timeoutMs || 8e3)) {
-      const chips = deepQueryAll('[data-test-id*="file"], [class*="attachment"], [class*="upload"], img, [class*="image"], [class*="thumbnail"], [class*="preview"], button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="clear" i]');
+      // Look strictly inside or adjacent to composer container for active attachments
+      const chips = deepQueryAll(
+        'uploader-file-card, [data-test-id*="file"], [class*="attachment-preview"], [class*="file-preview"], button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="clear" i]',
+        container
+      );
       if (chips.length > 0) return true;
-      const body = (document.body?.innerText || "").toLowerCase();
-      if (needle && body.includes(needle)) return true;
-      if (/\.pdf|\.png|\.jpe?g\b/i.test(body)) return true;
       await sleep(300);
     }
     return false;

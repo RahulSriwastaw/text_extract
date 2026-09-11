@@ -876,6 +876,28 @@
         type: job.mimeType || "image/png",
       });
 
+      // Clear existing composer attachments if any
+      try {
+        const composer = findComposer();
+        const container = composer?.closest('form, [class*="composer"], main') || document;
+        const removeBtns = deepQueryAll('button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="close" i]', container);
+        for (const btn of removeBtns) btn.click();
+      } catch {}
+
+      // 1. Try HTML5 native Drag & Drop directly on composer
+      const el = findComposer();
+      if (el) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const evInit = { bubbles: true, cancelable: true, dataTransfer: dt };
+          el.dispatchEvent(new DragEvent("dragenter", evInit));
+          el.dispatchEvent(new DragEvent("dragover", evInit));
+          el.dispatchEvent(new DragEvent("drop", evInit));
+        } catch {}
+      }
+
+      // 2. Try file input assign
       let inputs = deepQueryAll('input[type="file"]');
       if (!inputs.length) {
         const attachBtns = deepQueryAll('button, [role="button"]').filter((b) => {
@@ -907,14 +929,16 @@
         return true;
       }
 
-      const el = findComposer();
-      if (el) {
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        el.dispatchEvent(
-          new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt }),
-        );
-      }
+      // 3. Try clipboard write if window is active
+      try {
+        window.focus();
+        await navigator.clipboard.write([ new ClipboardItem({ [file.type]: file }) ]);
+        if (el) {
+          el.focus();
+          document.execCommand("paste");
+        }
+      } catch {}
+
       return true;
     } catch (e) {
       LOG("pdf paste failed", e);
@@ -929,6 +953,23 @@
     if (!job?.prompt) throw new Error("Job missing — restart extract from admin.");
     const stopHb = startHeartbeat(requestId, adminTabId);
     try {
+      if (!job.continueChat) {
+        try {
+          const turns = getAssistantTurnNodes();
+          if (turns.length > 0) {
+            const newChatBtn = deepQueryAll('button, a, [role="button"]').find(b => {
+              const label = ((b.getAttribute("aria-label") || "") + " " + (b.title || "") + " " + (b.textContent || "")).toLowerCase();
+              return label.includes("new chat") || label.includes("start new") || label.includes("new conversation");
+            });
+            if (newChatBtn) {
+              LOG("Clicking New chat to isolate page extraction");
+              newChatBtn.click();
+              await sleep(600);
+            }
+          }
+        } catch {}
+      }
+
       progress(requestId, "composer", "Waiting for chat input…", adminTabId);
       await waitForComposer(90000);
       const el = findComposer();

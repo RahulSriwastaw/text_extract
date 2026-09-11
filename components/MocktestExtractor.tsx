@@ -251,7 +251,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           mimeType: 'image/png',
           prompt,
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
-          continueChat: pageIndex > 0,
+          continueChat: false, // Each exam page extracts independently with its own image
           onProgress: (step, detail) => {
             const msg = detail || `${step.toUpperCase()}...`;
             setLiveStatusText(`Page ${page.pageNumber}: ${msg}`);
@@ -371,7 +371,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     setIsPaused(false);
 
     try {
-      const effectiveBatchSize = Math.max(1, batchSize);
+      // In bridge mode, drive the AI tab sequentially (1 page at a time) to prevent tab/prompt collisions
+      const effectiveBatchSize = (aiEngine === 'bridge' && bridgeStatus.connected) ? 1 : Math.max(1, batchSize);
 
       for (let i = 0; i < selectedPages.length; i += effectiveBatchSize) {
         if (pauseRef.current) {

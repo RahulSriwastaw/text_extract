@@ -183,6 +183,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         session.batch = continueChat ? session.batch + 1 : 1;
         await persistSession();
         await waitTabComplete(bridgeTab.id, 9e4);
+        try {
+          await chrome.tabs.update(bridgeTab.id, { active: true });
+        } catch {}
         await delay(continueChat ? 800 : 1600);
         await kickBridge(bridgeTab.id, requestId, "STUDY_AI_RUN", adminTabId, {
           provider: providerId
@@ -359,15 +362,7 @@ async function saveJob(job) {
   try {
     const data = await chrome.storage.session.get(JOBS_KEY);
     const all = data[JOBS_KEY] || {};
-    const stub = {
-      ...job,
-      fileBase64: job.fileBase64 ? "[omitted]" : null
-    };
-    if (job.fileBase64 && job.fileBase64.length > 500) {
-      stub.fileBase64 = null;
-      stub.hasFileInMemory = true;
-    }
-    all[job.requestId] = stub;
+    all[job.requestId] = job;
     const cutoff = Date.now() - 30 * 60 * 1e3;
     for (const [k, v] of Object.entries(all)) {
       if (!v?.createdAt || v.createdAt < cutoff) delete all[k];
@@ -375,21 +370,36 @@ async function saveJob(job) {
     await chrome.storage.session.set({
       [JOBS_KEY]: all
     });
-  } catch {}
+  } catch (e) {
+    try {
+      if (job.fileBase64) {
+        await chrome.storage.local.set({ [`img_${job.requestId}`]: job.fileBase64 });
+      }
+    } catch {}
+  }
 }
 
 async function getJob(requestId) {
   if (!requestId) return null;
-  if (jobs.has(requestId)) return jobs.get(requestId);
+  if (jobs.has(requestId)) {
+    const mem = jobs.get(requestId);
+    if (mem?.fileBase64) return mem;
+  }
   try {
     const data = await chrome.storage.session.get(JOBS_KEY);
-    const job = data[JOBS_KEY]?.[requestId];
+    let job = data[JOBS_KEY]?.[requestId] || jobs.get(requestId) || null;
     if (job) {
+      if (!job.fileBase64) {
+        const localData = await chrome.storage.local.get(`img_${requestId}`);
+        if (localData[`img_${requestId}`]) {
+          job.fileBase64 = localData[`img_${requestId}`];
+        }
+      }
       jobs.set(requestId, job);
       return job;
     }
   } catch {}
-  return null;
+  return jobs.get(requestId) || null;
 }
 
 async function deleteJob(requestId) {
@@ -401,6 +411,7 @@ async function deleteJob(requestId) {
     await chrome.storage.session.set({
       [JOBS_KEY]: all
     });
+    await chrome.storage.local.remove(`img_${requestId}`);
   } catch {}
 }
 
@@ -455,7 +466,7 @@ async function kickBridge(tabId, requestId, type, adminTabId, extra = {}) {
       fullChat: job.fullChat,
       provider: providerId,
       adminTabId: adminTabId,
-      fileBase64: jobs.get(requestId)?.fileBase64 || null
+      fileBase64: jobs.get(requestId)?.fileBase64 || job?.fileBase64 || null
     } : {
       adminTabId: adminTabId,
       fullChat: !!extra.fullChat,

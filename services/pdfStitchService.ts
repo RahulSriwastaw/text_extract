@@ -398,7 +398,7 @@ export const exportStitchedPagesToPdf = async (
   }
 
   const pdfBytes = await pdfDoc.save();
-  return new Blob([pdfBytes], { type: 'application/pdf' });
+  return new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
 };
 
 /**
@@ -681,6 +681,6 @@ export const exportMergedCardsToPdf = async (
   }
 
   const pdfBytes = await pdfDoc.save();
-  return new Blob([pdfBytes], { type: 'application/pdf' });
+  return new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
 };
 

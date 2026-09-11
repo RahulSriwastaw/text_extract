@@ -1529,7 +1529,9 @@ CRITICAL RULES:
    - NEVER enclose normal numbers, counts, percentages, or money in dollar signs! (Write 5, NOT 5$; write 60%, NOT $60%; write ₹2550, NOT $= ₹2550$ or $₹2550$).
    - Double escape all LaTeX backslashes in JSON (\\\\frac, \\\\times, \\\\sqrt).
 6. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED).
-7. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.`;
+7. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.
+8. At the very end after the JSON code block, on a new line, output:
+---STUDY_AI_COMPLETE---`;
 }
 
 /**

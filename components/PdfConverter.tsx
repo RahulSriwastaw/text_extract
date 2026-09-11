@@ -18,6 +18,8 @@ import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { saveExtractedDocument } from '../services/aiDbService';
 import { 
   extractWithStudyAiBridge, 
+  captureFromStudyAiBridge,
+  parseExtensionOutputToElements,
   buildBridgePrompt, 
   pingStudyAiExtension, 
   subscribeToExtensionStatus, 
@@ -699,6 +701,38 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
       setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: displayError } : p));
       setErrorMsg(displayError);
+    }
+  };
+
+  const handleRecapturePage = async (id: string) => {
+    const page = pages.find(p => p.id === id);
+    if (!page) return;
+
+    setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: 'Reading complete response from AI tab...' } : p));
+
+    try {
+      const provider = getStoredAiProvider() || bridgeStatus.provider || 'gemini';
+      const rawText = await captureFromStudyAiBridge(provider, false);
+      if (!rawText || !rawText.trim()) {
+        throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');
+      }
+
+      const elements = parseExtensionOutputToElements(rawText);
+      const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
+      const pageWords = countWords(pageText);
+      setWordsConsumed(prev => prev + pageWords);
+
+      setPages(prev => prev.map(p => p.id === id ? {
+        ...p,
+        status: 'done',
+        elements,
+        errorMessage: undefined,
+        extractedText: elements.map(e => e.type === 'text' ? (e.content || '') : `[Image: ${e.content || ''}]`).join('\n\n')
+      } : p));
+    } catch (err: any) {
+      console.error('Recapture error:', err);
+      const msg = err?.message || String(err);
+      setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: `Recapture failed: ${msg}` } : p));
     }
   };
 
@@ -1564,6 +1598,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                     pages={pages} 
                     onUpdateText={updatePageText} 
                     onRetry={retryPage} 
+                    onRecapture={handleRecapturePage}
                     onToggleSelection={togglePageSelection}
                     includeImages={includeImages}
                     showAnswers={showAnswers}

@@ -281,7 +281,9 @@ Each object must represent a question or section:
     "content": "#1. Question text\\n(a) Option A\\n(b) Option B\\n(c) Option C\\n(d) Option D\\nAnswer: C"
   }
 ]
-Please output ONLY the JSON array inside \`\`\`json ... \`\`\` code block.`;
+Please output ONLY the JSON array inside \`\`\`json ... \`\`\` code block.
+At the very end after the JSON code block, on a new line, output:
+---STUDY_AI_COMPLETE---`;
 }
 
 /**

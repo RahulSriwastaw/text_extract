@@ -3,7 +3,7 @@ import {
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
-  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye
+  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -34,6 +34,8 @@ import {
 } from '../services/mocktestService';
 import { 
   extractWithStudyAiBridge, 
+  captureFromStudyAiBridge,
+  parseExtensionOutputToElements,
   pingStudyAiExtension, 
   subscribeToExtensionStatus,
   getStoredAiProvider,
@@ -421,6 +423,64 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     } finally {
       setIsProcessingAll(false);
       setActivePageIndex(null);
+    }
+  };
+
+  // Manual Recapture from open AI tab (Gemini/ChatGPT/DeepSeek/Claude)
+  const handleRecaptureFromAiTab = async (page: PageQueueItem) => {
+    if (isProcessingAll) return;
+    setLiveStatusText(`Page ${page.pageNumber}: Recapturing complete response from AI tab...`);
+    setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: 'Reading complete response from AI tab...' } : p));
+
+    try {
+      const provider = selectedProvider || getStoredAiProvider() || 'gemini';
+      const rawText = await captureFromStudyAiBridge(provider, false);
+      if (!rawText || !rawText.trim()) {
+        throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');
+      }
+
+      const startIndex = extractedMcqs.filter(it => it.pageId !== page.id).length + 1;
+      let formattedItems = parseAiOutputToMockTestItems(rawText, setName, startIndex);
+      if (formattedItems.length === 0) {
+        const elements = parseExtensionOutputToElements(rawText);
+        if (elements && elements.length > 0) {
+          formattedItems = convertElementsToMockTestItems(elements, setName);
+        }
+      }
+
+      if (formattedItems.length === 0) {
+        throw new Error('AI tab content captured, but could not extract structured MCQs.');
+      }
+
+      formattedItems = formattedItems.map(item => ({
+        ...item,
+        pageNumber: page.pageNumber,
+        pageId: page.id,
+        set_name: setName,
+        difficulty_level: difficulty
+      }));
+
+      setPages(prev => prev.map(p => p.id === page.id ? {
+        ...p,
+        status: 'ready',
+        mcqCount: formattedItems.length,
+        errorMessage: undefined,
+        items: formattedItems
+      } : p));
+
+      setExtractedMcqs(prev => {
+        const withoutThisPage = prev.filter(it => it.pageId !== page.id);
+        const nextList = [...withoutThisPage, ...formattedItems];
+        return nextList.map((it, idx) => ({ ...it, question_r: idx + 1 }));
+      });
+
+      setLiveStatusText(`✓ Page ${page.pageNumber}: Successfully recaptured ${formattedItems.length} MCQs!`);
+    } catch (err: any) {
+      console.error('Recapture failed:', err);
+      const msg = err.message || 'Recapture failed';
+      setLiveStatusText(`Page ${page.pageNumber}: ${msg}`);
+      setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
+      alert(`Recapture failed: ${msg}`);
     }
   };
 
@@ -1411,17 +1471,30 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                       </div>
 
                       {/* Bottom Controls for Page */}
-                      <div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs">
-                        <button
-                          type="button"
-                          onClick={() => handleRetryPage(page, idx)}
-                          disabled={isProcessingAll}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] hover:bg-amber-500/20 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 rounded-lg font-bold transition-all disabled:opacity-40"
-                          title="Re-extract this page"
-                        >
-                          <RotateCw className="w-3.5 h-3.5" />
-                          <span>Re-Extract Page</span>
-                        </button>
+                      <div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs gap-1.5 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleRetryPage(page, idx)}
+                            disabled={isProcessingAll}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] hover:bg-amber-500/20 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 rounded-lg font-bold transition-all disabled:opacity-40"
+                            title="Re-extract this page with prompt"
+                          >
+                            <RotateCw className="w-3.5 h-3.5" />
+                            <span>Re-Extract</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRecaptureFromAiTab(page)}
+                            disabled={isProcessingAll}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 hover:text-cyan-200 rounded-lg font-bold transition-all disabled:opacity-40"
+                            title="Read complete finished response from AI tab if anything was cut off"
+                          >
+                            <Camera className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>Recapture</span>
+                          </button>
+                        </div>
 
                         <button
                           type="button"

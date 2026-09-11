@@ -886,17 +886,43 @@
     return preferLast ? all.slice(-6e4) : all;
   }
 
+  function isJsonArrayComplete(text) {
+    if (!text) return false;
+    const t = text.trim();
+    const fenceMatch = t.match(/```(?:json)?\s*\[([\s\S]*?)\]\s*```/i);
+    if (fenceMatch) return true;
+    let inStr = false;
+    let esc = false;
+    let depth = 0;
+    let seenOpen = false;
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (!inStr) {
+        if (c === "[") { depth++; seenOpen = true; }
+        else if (c === "]") { depth--; if (depth === 0 && seenOpen) return true; }
+      }
+    }
+    return false;
+  }
+
   function waitForJsonReplyLive(timeoutMs, requestId, baselineFingerprint, adminTabId, initialReplyCount = 0) {
     return new Promise((resolve, reject) => {
-      let lastJson = "";
-      let stable = 0;
-      let lastLen = 0;
-      let idleTicks = 0;
+      let lastBlobText = "";
+      let lastChangeTime = Date.now();
       const started = Date.now();
       let lastProgressAt = 0;
       let sentRetryClick = false;
 
-      const tick = () => {
+      let timer = null;
+      const cleanup = () => {
+        if (timer) clearInterval(timer);
+        try { obs.disconnect(); } catch {}
+      };
+
+      const checkState = () => {
         if (Date.now() - started > timeoutMs) {
           cleanup();
           const blob = scrapeBestReply(true, initialReplyCount);
@@ -928,61 +954,64 @@
         const blob = scrapeBestReply(true, initialReplyCount);
         if (!blob) return;
 
+        // Track text changes and stillness
+        if (blob !== lastBlobText) {
+          lastBlobText = blob;
+          lastChangeTime = Date.now();
+        }
+
+        const stillDurationMs = Date.now() - lastChangeTime;
+
+        // Immediate completion if model output completion marker
         if (hasCompletionMarker(blob) && !generating) {
           const j = extractJsonCandidate(blob) || "[]";
           cleanup();
-          progress(requestId, "done", "Completion marker received", adminTabId);
+          progress(requestId, "done", "Completion marker received — complete response captured", adminTabId);
           return resolve(j + "\n" + COMPLETE_MARKER);
         }
 
-        const json = extractJsonCandidate(blob);
-        if (generating) {
-          idleTicks = 0;
-          stable = 0;
+        // While generating or text still changing in the last 3.5 seconds, keep waiting
+        if (generating || stillDurationMs < 3500) {
           if (Date.now() - lastProgressAt > 2000) {
             lastProgressAt = Date.now();
-            progress(requestId, "stream", `Gemini generating… ${blob.length} chars`, adminTabId);
+            progress(requestId, "stream", `Gemini streaming response… (${blob.length} chars)`, adminTabId);
           }
-        } else if (blob.length === lastLen) {
-          idleTicks += 1;
-        } else {
-          idleTicks = 0;
+          return;
         }
-        lastLen = blob.length;
 
-        if (json) {
-          if (json === lastJson) {
-            stable += 1;
-            if (stable >= 2 && (!generating || idleTicks >= 2)) {
-              cleanup();
-              progress(requestId, "done", `Captured ${json.length} chars JSON`, adminTabId);
-              return resolve(json);
-            }
-          } else {
-            lastJson = json;
-            stable = 1;
-            progress(requestId, "stream", `JSON found (${json.length} chars), verifying…`, adminTabId);
+        // Here: stillDurationMs >= 3500 (at least 3.5 seconds of stillness) AND not generating
+        const isComplete = isJsonArrayComplete(blob);
+        const json = extractJsonCandidate(blob);
+
+        if (isComplete && json && json !== "[]") {
+          cleanup();
+          progress(requestId, "done", `Complete JSON response captured (${json.length} chars)`, adminTabId);
+          return resolve(json);
+        }
+
+        // If 5 full seconds of stillness, resolve with whatever the model completed
+        if (stillDurationMs >= 5000 && blob.length > 50) {
+          cleanup();
+          if (json && json !== "[]") {
+            progress(requestId, "done", `Captured ${json.length} chars JSON (stream finished)`, adminTabId);
+            return resolve(json);
           }
-        } else if (!generating && idleTicks >= 4 && blob.length > 80) {
-          // Idle fallback: Gemini finished generating and response stopped changing
           const qs = extractQuestionsFromText(blob);
           if (qs.length) {
-            cleanup();
-            progress(requestId, "done", `Captured ${qs.length} MCQ objects via idle fallback`, adminTabId);
+            progress(requestId, "done", `Captured ${qs.length} MCQ objects (stream finished)`, adminTabId);
             return resolve(JSON.stringify(qs));
           }
           const objs = extractBalancedObjects(blob);
           if (objs.length) {
-            cleanup();
-            progress(requestId, "done", `Captured ${objs.length} objects via fallback`, adminTabId);
+            progress(requestId, "done", `Captured ${objs.length} objects (stream finished)`, adminTabId);
             return resolve(`[\n${objs.join(",\n")}\n]`);
           }
-          cleanup();
-          progress(requestId, "done", `Captured ${blob.length} chars reply (idle fallback)`, adminTabId);
+          progress(requestId, "done", `Captured ${blob.length} chars reply (stream finished)`, adminTabId);
           return resolve(blob);
         }
       };
-      const obs = new MutationObserver(() => tick());
+
+      const obs = new MutationObserver(() => checkState());
       try {
         obs.observe(document.body, {
           childList: true,
@@ -990,12 +1019,8 @@
           characterData: true
         });
       } catch {}
-      const interval = setInterval(tick, 400);
-      const cleanup = () => {
-        clearInterval(interval);
-        try { obs.disconnect(); } catch {}
-      };
-      setTimeout(tick, 1000);
+
+      timer = setInterval(checkState, 500);
     });
   }
 })();

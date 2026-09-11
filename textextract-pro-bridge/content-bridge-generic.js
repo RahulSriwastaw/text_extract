@@ -742,15 +742,41 @@
     return [...byKey.values()];
   }
 
+  function isJsonArrayComplete(text) {
+    if (!text) return false;
+    const t = text.trim();
+    const fenceMatch = t.match(/```(?:json)?\s*\[([\s\S]*?)\]\s*```/i);
+    if (fenceMatch) return true;
+    let inStr = false;
+    let esc = false;
+    let depth = 0;
+    let seenOpen = false;
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\") { esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (!inStr) {
+        if (c === "[") { depth++; seenOpen = true; }
+        else if (c === "]") { depth--; if (depth === 0 && seenOpen) return true; }
+      }
+    }
+    return false;
+  }
+
   function waitForJsonReplyLive(timeoutMs, requestId, baseline, adminTabId, initialReplyCount = 0) {
     return new Promise((resolve, reject) => {
-      let lastJson = "";
-      let stable = 0;
-      let lastLen = 0;
-      let idleTicks = 0;
+      let lastBlobText = "";
+      let lastChangeTime = Date.now();
       const started = Date.now();
       let lastProgressAt = 0;
       let sentRetryClick = false;
+
+      let interval = null;
+      function cleanup() {
+        if (interval) clearInterval(interval);
+        try { obs.disconnect(); } catch {}
+      }
 
       const tick = () => {
         if (Date.now() - started > timeoutMs) {
@@ -790,7 +816,15 @@
         const blob = scrapeBestReply(initialReplyCount);
         if (!blob) return;
 
-        // Real completion only: empty [] + standalone marker in assistant text (not prompt echo)
+        // Track text changes and stillness
+        if (blob !== lastBlobText) {
+          lastBlobText = blob;
+          lastChangeTime = Date.now();
+        }
+
+        const stillDurationMs = Date.now() - lastChangeTime;
+
+        // Real completion marker: empty [] + standalone marker in assistant text
         if (!generating && hasStandaloneCompletion(blob)) {
           const j = extractJsonCandidate(blob);
           if (!j || j === "[]") {
@@ -800,55 +834,39 @@
           }
         }
 
-        const json = extractJsonCandidate(blob);
-        if (generating) {
-          idleTicks = 0;
-          stable = 0;
+        // Keep waiting while generating or text still actively growing in last 3.5s
+        if (generating || stillDurationMs < 3500) {
           if (Date.now() - lastProgressAt > 2000) {
             lastProgressAt = Date.now();
             progress(requestId, "stream", `Generating… ${blob.length} chars`, adminTabId);
           }
-        } else if (blob.length === lastLen) {
-          idleTicks += 1;
-        } else {
-          idleTicks = 0;
+          return;
         }
-        lastLen = blob.length;
 
-        if (json && json !== "[]") {
-          if (json === lastJson) {
-            stable += 1;
-            if (stable >= 2 && (!generating || idleTicks >= 2)) {
-              cleanup();
-              progress(requestId, "done", `Captured ${json.length} chars JSON`, adminTabId);
-              return resolve(json);
-            }
-          } else {
-            lastJson = json;
-            stable = 1;
-            progress(requestId, "stream", `JSON found (${json.length} chars)…`, adminTabId);
-          }
-        } else if (
-          json === "[]" &&
-          !generating &&
-          idleTicks >= 2 &&
-          hasStandaloneCompletion(blob) &&
-          !/"question(?:_[a-z]+)?"\s*:/i.test(blob)
-        ) {
+        // Here: stillDurationMs >= 3500 AND not generating
+        const isComplete = isJsonArrayComplete(blob);
+        const json = extractJsonCandidate(blob);
+
+        if (isComplete && json && json !== "[]") {
           cleanup();
-          return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
-        } else if (!generating && idleTicks >= 4 && blob.length > 100 && !json) {
-          // Fallback: AI finished generating but JSON wasn't detected via question-field regex.
-          // This happens with MockTest JSON (question_hi/question_en) or other alternate formats.
+          progress(requestId, "done", `Captured complete JSON (${json.length} chars)`, adminTabId);
+          return resolve(json);
+        }
+
+        // If 5 full seconds of stillness, resolve with complete available content
+        if (stillDurationMs >= 5000 && blob.length > 50) {
+          cleanup();
+          if (json && json !== "[]") {
+            progress(requestId, "done", `Captured ${json.length} chars JSON (stream finished)`, adminTabId);
+            return resolve(json);
+          }
           const fallbackObjs = extractBalancedObjects(blob);
           if (fallbackObjs.length > 0) {
-            const sampleParsed = tryParseJsonLoose(fallbackObjs[0]);
-            if (sampleParsed && typeof sampleParsed === "object" && !Array.isArray(sampleParsed)) {
-              cleanup();
-              progress(requestId, "done", `Fallback JSON captured (${blob.length} chars)`, adminTabId);
-              return resolve(blob);
-            }
+            progress(requestId, "done", `Captured ${fallbackObjs.length} objects (stream finished)`, adminTabId);
+            return resolve(`[\n${fallbackObjs.join(",\n")}\n]`);
           }
+          progress(requestId, "done", `Captured text (${blob.length} chars)`, adminTabId);
+          return resolve(blob);
         }
       };
 
@@ -856,11 +874,7 @@
       try {
         obs.observe(document.body, { childList: true, subtree: true, characterData: true });
       } catch {}
-      const interval = setInterval(tick, 500);
-      function cleanup() {
-        try { obs.disconnect(); } catch {}
-        clearInterval(interval);
-      }
+      interval = setInterval(tick, 500);
       setTimeout(tick, 1000);
     });
   }

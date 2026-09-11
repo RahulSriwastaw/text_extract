@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { ScannedPage, NumberingStyle } from '../types';
-import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon, Sparkles } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon, Sparkles, Camera } from 'lucide-react';
 import { formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 import GeminiExplanationPanel from './GeminiExplanationPanel';
 
@@ -12,6 +12,7 @@ interface ProcessingListProps {
   pages: ScannedPage[];
   onUpdateText: (id: string, newText: string) => void;
   onRetry: (id: string) => void;
+  onRecapture?: (id: string) => void;
   onToggleSelection: (id: string) => void;
   includeImages: boolean;
   showAnswers?: boolean;
@@ -79,6 +80,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
   pages, 
   onUpdateText, 
   onRetry, 
+  onRecapture,
   onToggleSelection, 
   includeImages, 
   showAnswers = true,
@@ -223,9 +225,21 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                       {editingId === page.id ? "Live Editor" : "Extracted Document"}
                   </span>
                   {page.extractedText && (
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      ({page.extractedText.split(/\s+/).filter(Boolean).length} words)
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        ({page.extractedText.split(/\s+/).filter(Boolean).length} words)
+                      </span>
+                      {page.extractedText.split(/\s+/).filter(Boolean).length < 20 && onRecapture && (
+                        <button
+                          onClick={() => onRecapture(page.id)}
+                          className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[10px] text-amber-300 font-bold hover:bg-amber-500/30 transition-all flex items-center gap-1"
+                          title="Click to recapture complete response from AI chat tab"
+                        >
+                          <Camera className="w-3 h-3 text-amber-400" />
+                          <span>Short response? Recapture</span>
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
                 
@@ -282,6 +296,17 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                     <Sparkles className="w-3.5 h-3.5" />
                                     <span>Gemini AI</span>
                                 </button>
+                                {onRecapture && (
+                                    <button 
+                                        type="button"
+                                        onClick={() => onRecapture(page.id)}
+                                        className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 text-xs font-bold rounded-lg border border-amber-500/30 transition-all shadow-sm"
+                                        title="Recapture full finished response from AI Chat tab without re-uploading"
+                                    >
+                                        <Camera className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>Recapture</span>
+                                    </button>
+                                )}
                                 <button 
                                     onClick={() => onRetry(page.id)}
                                     className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-400 hover:text-[#FF884D] text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
@@ -295,7 +320,17 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                 )}
                 
                 {page.status === 'error' && (
-                    <div className="flex gap-1.5">
+                    <div className="flex items-center gap-1.5">
+                        {onRecapture && (
+                            <button 
+                                type="button"
+                                onClick={() => onRecapture(page.id)}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold rounded-lg hover:bg-amber-500/30 transition-all"
+                                title="Recapture from AI tab"
+                            >
+                                <Camera className="w-3.5 h-3.5 text-amber-400" /> Recapture
+                            </button>
+                        )}
                         <button 
                             onClick={() => onRetry(page.id)}
                             className="flex items-center gap-1.5 px-3 py-1 bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold rounded-lg hover:bg-rose-500/25 transition-all"

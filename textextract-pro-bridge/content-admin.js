@@ -45,27 +45,47 @@
     }
   }
 
-  connectKeepalive();
+  const isLikelyApp = typeof window !== "undefined" && (
+    location.hostname === "localhost" ||
+    location.hostname === "127.0.0.1" ||
+    location.hostname.includes("text-extract-sigma") ||
+    location.hostname.includes("vercel.app") ||
+    location.hostname.includes("testfactory") ||
+    document.title.toLowerCase().includes("textextract") ||
+    document.title.toLowerCase().includes("mocktest")
+  );
 
-  setInterval(() => {
-    if (!isExtensionValid()) return;
-    if (!port) {
-      connectKeepalive();
-    } else {
-      try {
-        chrome.runtime.sendMessage({
-          type: "STUDY_AI_HEARTBEAT"
-        }, () => {
-          void (chrome.runtime && chrome.runtime.lastError);
-        });
-      } catch {}
-    }
-  }, 2e4);
+  let keepaliveStarted = false;
+  function ensureKeepalive() {
+    if (keepaliveStarted) return;
+    keepaliveStarted = true;
+    connectKeepalive();
+    setInterval(() => {
+      if (!isExtensionValid()) return;
+      if (!port) {
+        connectKeepalive();
+      } else {
+        try {
+          chrome.runtime.sendMessage({
+            type: "STUDY_AI_HEARTBEAT"
+          }, () => {
+            void (chrome.runtime && chrome.runtime.lastError);
+          });
+        } catch {}
+      }
+    }, 20000);
+  }
+
+  if (isLikelyApp) {
+    ensureKeepalive();
+  }
 
   window.addEventListener("message", event => {
     if (event.source !== window) return;
     const data = event.data;
     if (!data || data.source !== PAGE) return;
+
+    ensureKeepalive();
 
     if (!isExtensionValid()) {
       if (data.type === "PING") {

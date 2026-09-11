@@ -19,8 +19,311 @@ export const MOCKTEST_CSV_HEADERS = [
   'solution_en',
   'answer',
   'set_name',
-  'difficulty_level'
+  'difficulty_level',
+  'test_date',
+  'test_time',
+  'subject',
+  'subject_level',
+  'figure_notes',
+  'correction_notes',
+  'source_pdf',
+  'source_pages',
+  'source_question_reference',
+  'latex_check',
+  'html_check',
+  'answer_check',
+  'solution_check',
+  'hash_figure',
+  'manually_review',
+  'duplicate_statistics'
 ] as const;
+
+export const STANDARD_SUBJECTS = [
+  'Current Affairs',
+  'History',
+  'Geography',
+  'Polity',
+  'Economics',
+  'General Science',
+  'Physics',
+  'Chemistry',
+  'Biology',
+  'Mathematics',
+  'Reasoning',
+  'Computer Knowledge',
+  'English',
+  'Hindi',
+  'Environment & Ecology',
+  'Static GK',
+] as const;
+
+export type StandardSubject = typeof STANDARD_SUBJECTS[number];
+
+/**
+ * STRICT RULE: Identifies and stores ONLY the clean academic subject name.
+ * Exam names (like "RRB", "NTPC", "CBT", "Shift", "Level 01", etc.) are strictly stripped/forbidden here.
+ * If raw candidate is missing or invalid, intelligently deduces the exact subject from question & solution text.
+ */
+export function normalizeStrictSubject(
+  rawSubject?: string,
+  questionText?: string,
+  solutionText?: string
+): string {
+  let cleaned = (rawSubject || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/['"]/g, '')
+    .trim();
+
+  // Strip common label prefixes like "Subject:", "Sub:", "विषय:"
+  cleaned = cleaned.replace(/^(?:Subject|Sub|विषय)\s*[:\-]\s*/i, '').trim();
+
+  // Check if cleaned contains obvious exam noise without any subject
+  const isPureExamNoise = /^(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|BPSC|Level[\s\-]*\d+|Stage[\s\-]*[I|V|1|2|3|4|5]|Shift[\s\-]*\d+|\d{1,2}[\/\.\-]\d{1,2}[\/\.\-]\d{2,4})+$/i.test(cleaned);
+  if (isPureExamNoise) {
+    cleaned = '';
+  }
+
+  // Canonical mapping dictionary
+  const subjectMap: Record<string, string> = {
+    // Current Affairs
+    'current affairs': 'Current Affairs',
+    'current affair': 'Current Affairs',
+    'current': 'Current Affairs',
+    'ca': 'Current Affairs',
+    'समसामयिकी': 'Current Affairs',
+    'करेंट अफेयर्स': 'Current Affairs',
+    'करंट अफेयर्स': 'Current Affairs',
+    'करेंट': 'Current Affairs',
+    'समसामयिक': 'Current Affairs',
+    
+    // History
+    'history': 'History',
+    'indian history': 'History',
+    'ancient history': 'History',
+    'medieval history': 'History',
+    'modern history': 'History',
+    'world history': 'History',
+    'इतिहास': 'History',
+    'भारतीय इतिहास': 'History',
+    'प्राचीन इतिहास': 'History',
+    'मध्यकालीन इतिहास': 'History',
+    'आधुनिक इतिहास': 'History',
+
+    // Geography
+    'geography': 'Geography',
+    'indian geography': 'Geography',
+    'world geography': 'Geography',
+    'physical geography': 'Geography',
+    'भूगोल': 'Geography',
+    'भारतीय भूगोल': 'Geography',
+    'विश्व भूगोल': 'Geography',
+
+    // Polity
+    'polity': 'Polity',
+    'indian polity': 'Polity',
+    'constitution': 'Polity',
+    'indian constitution': 'Polity',
+    'civics': 'Polity',
+    'political science': 'Polity',
+    'राजव्यवस्था': 'Polity',
+    'भारतीय राजव्यवस्था': 'Polity',
+    'संविधान': 'Polity',
+    'भारतीय संविधान': 'Polity',
+
+    // Economics
+    'economics': 'Economics',
+    'economy': 'Economics',
+    'indian economy': 'Economics',
+    'अर्थशास्त्र': 'Economics',
+    'भारतीय अर्थव्यवस्था': 'Economics',
+    'अर्थव्यवस्था': 'Economics',
+
+    // Physics
+    'physics': 'Physics',
+    'भौतिक विज्ञान': 'Physics',
+    'भौतिकी': 'Physics',
+    'भौतिक': 'Physics',
+
+    // Chemistry
+    'chemistry': 'Chemistry',
+    'रसायन विज्ञान': 'Chemistry',
+    'रसायनिकी': 'Chemistry',
+    'रसायन': 'Chemistry',
+
+    // Biology
+    'biology': 'Biology',
+    'botany': 'Biology',
+    'zoology': 'Biology',
+    'life science': 'Biology',
+    'जीव विज्ञान': 'Biology',
+    'वनस्पति विज्ञान': 'Biology',
+    'जंतु विज्ञान': 'Biology',
+
+    // General Science
+    'general science': 'General Science',
+    'science': 'General Science',
+    'सामान्य विज्ञान': 'General Science',
+    'विज्ञान': 'General Science',
+
+    // Mathematics
+    'mathematics': 'Mathematics',
+    'math': 'Mathematics',
+    'maths': 'Mathematics',
+    'quantitative aptitude': 'Mathematics',
+    'quants': 'Mathematics',
+    'quant': 'Mathematics',
+    'arithmetic': 'Mathematics',
+    'गणित': 'Mathematics',
+    'अंकगणित': 'Mathematics',
+
+    // Reasoning
+    'reasoning': 'Reasoning',
+    'general intelligence': 'Reasoning',
+    'general intelligence & reasoning': 'Reasoning',
+    'logical reasoning': 'Reasoning',
+    'mental ability': 'Reasoning',
+    'तर्कशक्ति': 'Reasoning',
+    'सामान्य बुद्धिमत्ता': 'Reasoning',
+
+    // Computer
+    'computer': 'Computer Knowledge',
+    'computer knowledge': 'Computer Knowledge',
+    'computer science': 'Computer Knowledge',
+    'it': 'Computer Knowledge',
+    'कंप्यूटर': 'Computer Knowledge',
+    'कंप्यूटर ज्ञान': 'Computer Knowledge',
+
+    // English
+    'english': 'English',
+    'english language': 'English',
+    'english comprehension': 'English',
+    'अंग्रेजी': 'English',
+
+    // Hindi
+    'hindi': 'Hindi',
+    'samanya hindi': 'Hindi',
+    'सामान्य हिंदी': 'Hindi',
+    'हिंदी': 'Hindi',
+
+    // Environment
+    'environment': 'Environment & Ecology',
+    'ecology': 'Environment & Ecology',
+    'environment & ecology': 'Environment & Ecology',
+    'environmental studies': 'Environment & Ecology',
+    'पर्यावरण': 'Environment & Ecology',
+    'पर्यावरण एवं पारिस्थितिकी': 'Environment & Ecology',
+
+    // Static GK
+    'static gk': 'Static GK',
+    'gk': 'Static GK',
+    'general knowledge': 'Static GK',
+    'general awareness': 'Static GK',
+    'ga': 'Static GK',
+    'सामान्य ज्ञान': 'Static GK',
+    'सामान्य जागरूकता': 'Static GK',
+  };
+
+  const lower = cleaned.toLowerCase();
+  for (const [key, val] of Object.entries(subjectMap)) {
+    if (lower === key || lower.startsWith(key + ' ') || lower.endsWith(' ' + key)) {
+      return val;
+    }
+  }
+
+  // If candidate is still not mapped, strictly deduce from question + solution text
+  const combinedText = `${questionText || ''} ${solutionText || ''}`.toLowerCase();
+
+  // 1. Current Affairs
+  if (
+    /(?:महानियंत्रक|cgda|नियुक्त|पदभार|पुरस्कार|शिखर सम्मेलन|बैठक|योजना शुरू|202[4-9]\s*में|202[4-9]\s*के|हाल ही में|ओलंपिक|विश्व कप|appointed|sworn in|assumed charge|summit|medal|championship|g20|cop2[8-9]|padma shri|bharat ratna|nobel prize)/i.test(combinedText)
+  ) {
+    return 'Current Affairs';
+  }
+
+  // 2. Mathematics
+  if (
+    /(?:\\frac|\\sqrt|\\times|\\div|प्रतिशत|औसत|क्रय मूल्य|विक्रय मूल्य|लाभ और हानि|अनुपात|समानुपात|क्षेत्रफल|आयतन|साधारण ब्याज|चक्रवृद्धि ब्याज|ल\.स\.|म\.स\.|त्रिकोणमिति|profit and loss|percentage|ratio and proportion|simple interest|compound interest|radius|hypotenuse|polynomial|quadratic)/i.test(combinedText)
+  ) {
+    return 'Mathematics';
+  }
+
+  // 3. Reasoning
+  if (
+    /(?:कथन और निष्कर्ष|रक्त संबंध|दिशा और दूरी|दर्पण प्रतिबिंब|जल प्रतिबिंब|पासा|कोडिंग-डिकोडिंग|श्रृंखला को पूरा|लुप्त पद|syllogism|blood relation|coding-decoding|mirror image|water image|venn diagram|dice|analogy)/i.test(combinedText)
+  ) {
+    return 'Reasoning';
+  }
+
+  // 4. Polity
+  if (
+    /(?:संविधान|अनुच्छेद\s*\d+|मौलिक अधिकार|नीति निदेशक|राष्ट्रपति|प्रधानमंत्री|लोकसभा|राज्यसभा|संसद|सर्वोच्च न्यायालय|उच्चतम न्यायालय|उच्च न्यायालय|राज्यपाल|संवैधानिक संशोधन|निर्वाचन आयोग|constitution|article\s*\d+|fundamental rights|directive principles|parliament|supreme court|lok sabha|rajya sabha|amendment)/i.test(combinedText)
+  ) {
+    return 'Polity';
+  }
+
+  // 5. History
+  if (
+    /(?:सिंधु घाटी|हड़प्पा|मौर्य वंश|गुप्त काल|दिल्ली सल्तनत|मुगल साम्राज्य|तराइन का युद्ध|पानीपत का युद्ध|प्लासी का युद्ध|बक्सर का युद्ध|1857 की क्रांति|गांधीजी|असहयोग आंदोलन|भारत छोड़ो|अकबर|बाबर|dynasty|battle of|empire|viceroy|governor general|revolt of 1857|quit india)/i.test(combinedText)
+  ) {
+    return 'History';
+  }
+
+  // 6. Geography
+  if (
+    /(?:नदी|पर्वत|पहाड़|महासागर|झील|मरुस्थल|मिट्टी का प्रकार|कर्क रेखा|मकर रेखा|अक्षांश|देशांतर|मानसून|जलवायु|अभयारण्य|जलप्रपात|river|mountain|himalaya|plateau|soil|latitude|longitude|monsoon|climate|peninsula|tributary)/i.test(combinedText)
+  ) {
+    return 'Geography';
+  }
+
+  // 7. Economics
+  if (
+    /(?:जीडीपी|मुद्रास्फीति|आरबीआई|रेपो रेट|रिवर्स रेपो|राजकोषीय घाटा|मौद्रिक नीति|पंचवर्षीय योजना|बजट 202|gdp|inflation|rbi|fiscal deficit|monetary policy|repo rate|foreign exchange|niti aayog)/i.test(combinedText)
+  ) {
+    return 'Economics';
+  }
+
+  // 8. Biology
+  if (
+    /(?:कोशिका|माइटोकॉन्ड्रिया|डीएनए|आरएनए|विटामिन|रक्त समूह|हीमोग्लोबिन|हार्मोन|एंजाइम|जीवाणु|विषाणु|कवक|प्रकाश संश्लेषण|पाचन तंत्र|हृदय|फेफड़े|यकृत|cell|mitochondria|dna|rna|vitamin|hemoglobin|hormone|enzyme|bacteria|virus|photosynthesis|rbc|wbc)/i.test(combinedText)
+  ) {
+    return 'Biology';
+  }
+
+  // 9. Chemistry
+  if (
+    /(?:आवर्त सारणी|परमाणु क्रमांक|इलेक्ट्रॉन|प्रोटॉन|न्यूट्रॉन|अम्ल|क्षार|पीएच मान|रासायनिक अभिक्रिया|संयोजकता|धातु|अधातु|periodic table|atomic number|acid|base|ph value|chemical reaction|valency|isotope|polymer)/i.test(combinedText)
+  ) {
+    return 'Chemistry';
+  }
+
+  // 10. Physics
+  if (
+    /(?:न्यूटन के नियम|गुरुत्वाकर्षण|ध्वनि तरंग|प्रकाश का अपवर्तन|परावर्तन|लेंस की क्षमता|विद्युत धारा|प्रतिरोध|ओम का नियम|कार्य और ऊर्जा|शक्ति का मात्रक|newton's law|gravity|optics|refraction|lens|current|resistance|ohm|frequency|wavelength|pascal)/i.test(combinedText)
+  ) {
+    return 'Physics';
+  }
+
+  // 11. Computer Knowledge
+  if (
+    /(?:कंप्यूटर|सीपीयू|रैम|रोम|हार्डवेयर|सॉफ्टवेयर|ऑपरेटिंग सिस्टम|इंटरनेट|आईपी पता|एमएस वर्ड|एमएस एक्सेल|फुल फॉर्म|cpu|ram|rom|operating system|binary|lan|wan|ip address|malware|http)/i.test(combinedText)
+  ) {
+    return 'Computer Knowledge';
+  }
+
+  // 12. Environment & Ecology
+  if (
+    /(?:ग्रीनहाउस गैस|ग्लोबल वार्मिंग|ओजोन परत|क्योतो प्रोटोकॉल|पेरिस समझौता|जैव विविधता|पारिस्थितिकी तंत्र|greenhouse|global warming|ozone layer|biodiversity|ecosystem|wildlife sanctuary)/i.test(combinedText)
+  ) {
+    return 'Environment & Ecology';
+  }
+
+  // 13. General Science fallback
+  if (/(?:वैज्ञानिक|मात्रक|यंत्र|खोजकर्ता|प्रयोगशाला|scientific|instrument|measurement)/i.test(combinedText)) {
+    return 'General Science';
+  }
+
+  return 'General Studies';
+}
 
 /**
  * Ensures text is wrapped in semantic HTML (<p>...</p>) if not already HTML.
@@ -101,34 +404,101 @@ export function cleanMocktestText(text: string): string {
   // First, strip all extraneous exam tags, shifts, dates, and watermarks
   res = stripExamTagsAndJunk(res);
 
-  // 1. Rupee sign before or inside $$:
-  // e.g. "₹ $$4,800$$" -> "₹4,800"
+  // 1. Fix corrupted formfeed \x0c and tab \t LaTeX from improper JSON parsing
+  // \x0c + 'rac' or Unicode up-arrow ⇡ + 'rac' or ↑ + 'rac' -> \frac
+  res = res.replace(/[\x0c\u21e1\u2191]rac/g, '\\frac');
+  // 'imes' preceded by tab \x09 or backspace \b or number/variable -> \times
+  res = res.replace(/[\x09\b]imes/g, '\\times');
+  res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
+
+  // 2. Fix broken < br > tags with spaces or escaped entities
+  res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
+  res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
+  // Multiple consecutive <br>
+  res = res.replace(/(?:<br>\s*){3,}/gi, '<br><br>');
+
+  // 3. Fix Stray / Dangling Dollar signs on numbers, rupee, percentage:
+  // e.g. "5$ वाशिंग मशीन" -> "5 वाशिंग मशीन"
+  res = res.replace(/(\d+)\s*\$(?=\s+[\u0900-\u097F]|[^\d\w]|$)/g, '$1');
+  // e.g. "$60%" -> "60%"
+  res = res.replace(/\$\s*(\d+(?:\.\d+)?%)/g, '$1');
+  // e.g. "$= ₹2550$" -> "= ₹2550", "$= 4800" -> "= 4800"
+  res = res.replace(/\$\s*=\s*/g, '= ');
+  res = res.replace(/=\s*\$\s*₹/g, '= ₹');
+  res = res.replace(/\$\s*₹/g, '₹');
+  res = res.replace(/₹\s*\$/g, '₹');
+  // e.g. "₹2550$" or "₹300$" at end of sentence
+  res = res.replace(/(₹\s*\d+(?:,\d+)*(?:\.\d+)?)\$/g, '$1');
+  // Rupee sign before or inside $$: e.g. "₹ $$4,800$$" -> "₹4,800"
   res = res.replace(/₹\s*\$\$\s*([^\$]+?)\s*\$\$/g, (_m, val) => `₹${val.trim()}`);
   res = res.replace(/₹\s*\$\s*([^\$]+?)\s*\$/g, (_m, val) => `₹${val.trim()}`);
   // e.g. "$$₹5$$" -> "₹5"
   res = res.replace(/\$\$\s*₹\s*([^\$]+?)\s*\$\$/g, (_m, val) => `₹${val.trim()}`);
   res = res.replace(/\$\s*₹\s*([^\$]+?)\s*\$/g, (_m, val) => `₹${val.trim()}`);
 
-  // 2. Percentages inside $$ or $:
-  // e.g. "$$40\%$$", "$$40%$$", "$$6.5\%$$", "$$6.8\%$$" -> "40%", "6.5%", "6.8%"
-  res = res.replace(/\$\$\s*([+-]?\d+(?:[,\.]\d+)?)\s*(?:\\%|%)\s*\$\$/g, '$1%');
-  res = res.replace(/\$\s*([+-]?\d+(?:[,\.]\d+)?)\s*(?:\\%|%)\s*\$/g, '$1%');
+  // 4. Fix Reasoning Puzzle Names / Single Letters wrapped in $:
+  // e.g. "$P, Q, R, S, T, U, V$" -> "P, Q, R, S, T, U, V"
+  // e.g. "$W, Q$" -> "W, Q", "$U, S$" -> "U, S", "$T, P$" -> "T, P"
+  res = res.replace(/\$([A-Z](?:,\s*[A-Z])+)\$/g, '$1');
 
-  // 3. Plain numbers (with optional commas/decimals) inside $$ or $:
-  // e.g. "$$4,800$$" -> "4,800", "$$300$$" -> "300", "$$18$$" -> "18"
-  res = res.replace(/\$\$\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*\$\$/g, '$1');
-  res = res.replace(/\$\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*\$/g, '$1');
+  // Single letters like "$W$", "$V$", "$P$", "$Q$" in Hindi reasoning context:
+  // If adjacent to Hindi characters or words like और, के, तथा, से, में, पर, है, दाएँ, बाएँ:
+  res = res.replace(/(?<=[\u0900-\u097F]\s*)\$([A-Z])\$(?=\s*[\u0900-\u097F]|\s*और|\s*तथा|\s*के|\s*का|\s*की|\s*को|\s*से|\s*में|\s*पर|\s*है|\s*था|$)/g, '$1');
+  res = res.replace(/(?<=\b(?:और|तथा|एवं|यदि|तो|माना|कि|स्थान|व्यक्ति|मित्र|छात्र|पंक्ति)\s*)\$([A-Z])\$/g, '$1');
+  res = res.replace(/\$([A-Z])\$(?=\s*(?:पंक्ति|के|का|की|को|से|में|पर|है|था|बाएं|दाएं|बाएँ|दाएँ))/g, '$1');
 
-  // 4. Escaped percent signs outside LaTeX:
+  // 5. Percentages & Plain numbers inside $ or $$:
+  // e.g. "$$40\%$$", "$$40%$$", "$6.5%$" -> "40%", "6.5%"
+  res = res.replace(/\$\$?\s*([+-]?\d+(?:[,\.]\d+)?)\s*(?:\\%|%)\s*\$\$?/g, '$1%');
+  // e.g. "$$4,800$$" -> "4,800", "$$300$$" -> "300", "$18$" -> "18"
+  res = res.replace(/\$\$?\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*\$\$?/g, '$1');
+
+  // 6. Escaped percent signs outside LaTeX:
   // e.g. "6.5\%" -> "6.5%"
   res = res.replace(/(\d+(?:\.\d+)?)\\\%/g, '$1%');
 
-  // 5. Convert any remaining inline $$math$$ to single $math$ for mocktest portals:
-  // In HTML or inline text, mocktest apps use $...$ for inline KaTeX, whereas $$...$$ breaks or displays raw.
+  // 7. Convert any remaining inline $$math$$ to single $math$ for mocktest portals:
   res = res.replace(/\$\$([^\$\n]+?)\$\$/g, '$$$1$$');
 
-  // 6. Clean stray trailing slashes or colons often copied from paper scan:
-  // e.g. "350 /" -> "350"
+  // 8. If <br> is caught inside an inline $ ... <br> ... $, close and reopen math mode
+  // Because MathJax / KaTeX cannot render <br> inside $...$ and prints "< br >" literally!
+  const parts = res.split('<br>');
+  if (parts.length > 1) {
+    res = parts.map(part => {
+      const dollarCount = (part.match(/(?<!\\)\$/g) || []).length;
+      if (dollarCount % 2 !== 0) {
+        return part + '$';
+      }
+      return part;
+    }).join('<br>');
+  }
+
+  // 9. Ensure bare LaTeX like \frac{...}{...} or \times that is OUTSIDE $ is wrapped in $:
+  // e.g. "x \times \frac{134}{100}" -> "$x \times \frac{134}{100}$"
+  const lines = res.split(/(<br\s*\/?>|\n)/gi);
+  const processedLines = lines.map(line => {
+    if (line.startsWith('<br') || line === '\n') return line;
+    if ((line.includes('\\frac') || line.includes('\\times') || line.includes('\\sqrt')) && !line.includes('$')) {
+      return line.replace(/([a-zA-Z0-9\(\)]+\s*(?:[=+\-*\/]\s*[a-zA-Z0-9\(\)]+)*\s*(?:\\[a-zA-Z]+|\^|_|\{|\})\s*[^\n<]*)/g, (match) => {
+        const m = match.trim();
+        if (m.startsWith('$') && m.endsWith('$')) return match;
+        return `$${m}$`;
+      });
+    }
+    return line;
+  });
+  res = processedLines.join('');
+
+  // 10. Balance any remaining odd number of $:
+  const totalDollars = (res.match(/(?<!\\)\$/g) || []).length;
+  if (totalDollars % 2 !== 0) {
+    const lastIdx = res.lastIndexOf('$');
+    if (lastIdx >= 0) {
+      res = res.slice(0, lastIdx) + res.slice(lastIdx + 1);
+    }
+  }
+
+  // 11. Clean stray trailing slashes or colons:
   res = res.replace(/\s*[\/\\]\s*$/g, '');
 
   return res.trim();
@@ -136,24 +506,48 @@ export function cleanMocktestText(text: string): string {
 
 /**
  * Deep cleans an entire MockTestMcqItem to ensure clean KaTeX and HTML compatibility in mocktest portals.
+ * Strictly verifies and normalizes the academic subject field.
  */
 export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
+  const qHi = cleanMocktestText(item.question_hi);
+  const qEn = cleanMocktestText(item.question_en);
+  const solHi = cleanMocktestText(item.solution_hi);
+  const solEn = cleanMocktestText(item.solution_en);
+
+  const cleanSubject = normalizeStrictSubject(item.subject, `${qHi} ${qEn}`, `${solHi} ${solEn}`);
+
   return {
     ...item,
-    question_hi: cleanMocktestText(item.question_hi),
+    question_hi: qHi,
     option1_hi: cleanMocktestText(item.option1_hi),
     option2_hi: cleanMocktestText(item.option2_hi),
     option3_hi: cleanMocktestText(item.option3_hi),
     option4_hi: cleanMocktestText(item.option4_hi),
     option5_hi: cleanMocktestText(item.option5_hi),
-    solution_hi: cleanMocktestText(item.solution_hi),
-    question_en: cleanMocktestText(item.question_en),
+    solution_hi: solHi,
+    question_en: qEn,
     option1_en: cleanMocktestText(item.option1_en),
     option2_en: cleanMocktestText(item.option2_en),
     option3_en: cleanMocktestText(item.option3_en),
     option4_en: cleanMocktestText(item.option4_en),
     option5_en: cleanMocktestText(item.option5_en),
-    solution_en: cleanMocktestText(item.solution_en),
+    solution_en: solEn,
+    subject: cleanSubject,
+    subject_level: item.subject_level || '',
+    test_date: item.test_date || '',
+    test_time: item.test_time || '',
+    figure_notes: item.figure_notes || '',
+    correction_notes: item.correction_notes || '',
+    source_pdf: item.source_pdf || '',
+    source_pages: item.source_pages || '',
+    source_question_reference: item.source_question_reference || (item.question_r ? `Q.${item.question_r}` : ''),
+    latex_check: item.latex_check || 'checked',
+    html_check: item.html_check || 'checked',
+    answer_check: item.answer_check || 'checked',
+    solution_check: item.solution_check || 'checked',
+    hash_figure: item.hash_figure || '',
+    manually_review: item.manually_review || 'checked',
+    duplicate_statistics: item.duplicate_statistics || 'Unique within this shift; duplicate check completed.'
   };
 }
 
@@ -199,6 +593,7 @@ export function normalizeAnswerFormat(
 
 /**
  * Serializes MockTestMcqItem array into a clean, RFC 4180 CSV string with UTF-8 BOM.
+ * Formats all 34 fields in the exact specified order.
  */
 export function serializeMockTestToCsv(
   items: MockTestMcqItem[],
@@ -227,8 +622,24 @@ export function serializeMockTestToCsv(
       escapeCsvField(item.option5_en || ''),
       escapeCsvField(item.solution_en || ''),
       escapeCsvField(ans),
-      escapeCsvField(item.set_name || 'Mock Test'),
-      escapeCsvField(item.difficulty_level || 'medium')
+      escapeCsvField(item.set_name || 'PYPs Shift-3'),
+      escapeCsvField(item.difficulty_level || 'Easy'),
+      escapeCsvField(item.test_date || ''),
+      escapeCsvField(item.test_time || ''),
+      escapeCsvField(item.subject || ''),
+      escapeCsvField(item.subject_level || ''),
+      escapeCsvField(item.figure_notes || ''),
+      escapeCsvField(item.correction_notes || ''),
+      escapeCsvField(item.source_pdf || ''),
+      escapeCsvField(item.source_pages || ''),
+      escapeCsvField(item.source_question_reference || `Q.${qNum}`),
+      escapeCsvField(item.latex_check || 'checked'),
+      escapeCsvField(item.html_check || 'checked'),
+      escapeCsvField(item.answer_check || 'checked'),
+      escapeCsvField(item.solution_check || 'checked'),
+      escapeCsvField(item.hash_figure || ''),
+      escapeCsvField(item.manually_review || 'checked'),
+      escapeCsvField(item.duplicate_statistics || 'Unique within this shift; duplicate check completed.')
     ];
     return row.join(',');
   });
@@ -347,7 +758,23 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
       solution_en: getCol(row, 'solution_en'),
       answer: ans,
       set_name: getCol(row, 'set_name') || defaultSetName,
-      difficulty_level: (getCol(row, 'difficulty_level').toLowerCase() as DifficultyLevel) || 'medium'
+      difficulty_level: (getCol(row, 'difficulty_level').toLowerCase() as DifficultyLevel) || 'medium',
+      test_date: getCol(row, 'test_date'),
+      test_time: getCol(row, 'test_time'),
+      subject: getCol(row, 'subject'),
+      subject_level: getCol(row, 'subject_level'),
+      figure_notes: getCol(row, 'figure_notes'),
+      correction_notes: getCol(row, 'correction_notes'),
+      source_pdf: getCol(row, 'source_pdf'),
+      source_pages: getCol(row, 'source_pages'),
+      source_question_reference: getCol(row, 'source_question_reference') || `Q.${qNum}`,
+      latex_check: getCol(row, 'latex_check') || 'checked',
+      html_check: getCol(row, 'html_check') || 'checked',
+      answer_check: getCol(row, 'answer_check') || 'checked',
+      solution_check: getCol(row, 'solution_check') || 'checked',
+      hash_figure: getCol(row, 'hash_figure'),
+      manually_review: getCol(row, 'manually_review') || 'checked',
+      duplicate_statistics: getCol(row, 'duplicate_statistics') || 'Unique within this shift; duplicate check completed.'
     });
   }
 
@@ -516,41 +943,64 @@ export function convertElementsToMockTestItems(
 }
 
 /**
- * Generate a specialized AI prompt for directly extracting images into the 18-column MockTest schema.
+ * Generate a specialized AI prompt for directly extracting images into the 34-column MockTest schema.
  */
-export function buildMockTestDirectPrompt(setName = 'Exam Paper'): string {
+export function buildMockTestDirectPrompt(setName = 'PYPs Shift-3'): string {
   return `You are a professional Exam Paper Digitizer and MockTest Content Architect.
 Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.
 
 TARGET SCHEMA:
-Extract into a strict JSON array of objects, where each object has these exact 18 fields:
+Extract into a strict JSON array of objects, where each object has these exact 34 fields:
 1. question_r: Question sequence number (1, 2, 3...)
 2. question_hi: Question text in Hindi wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
-3. option1_hi: Option 1 (A) in Hindi
-4. option2_hi: Option 2 (B) in Hindi
-5. option3_hi: Option 3 (C) in Hindi
-6. option4_hi: Option 4 (D) in Hindi
+3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p>
+4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p>
+5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
+6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: DETAILED, STEP-BY-STEP EXPLANATION in Hindi formatted in HTML (<p><b>हल:</b>...</p>). Include formulas used, intermediate steps, proofs, and the final answer reason.
+8. solution_hi: DETAILED, STEP-BY-STEP EXPLANATION in Hindi formatted in HTML with key points (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>). Include formulas, full workings, and rationale.
 9. question_en: Question text in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
-10. option1_en: Option 1 (A) in English
-11. option2_en: Option 2 (B) in English
-12. option3_en: Option 3 (C) in English
-13. option4_en: Option 4 (D) in English
+10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
+11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
+12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
+13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: DETAILED, STEP-BY-STEP EXPLANATION in English formatted in HTML (<p><b>Solution:</b>...</p>). Include formulas, full working steps, and derivation.
+15. solution_en: DETAILED, STEP-BY-STEP EXPLANATION in English formatted in HTML with key points (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
 16. answer: Correct answer identifier: Single choice MCQ: "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
-17. set_name: "${setName}"
-18. difficulty_level: "easy", "medium", or "hard"
+17. set_name: Exam paper/shift name, e.g. "${setName}"
+18. difficulty_level: "Easy", "Medium", or "Hard"
+19. test_date: Test date in YYYY-MM-DD format if visible, else empty string ""
+20. test_time: Test time (e.g. "4:30 PM - 6:00 PM") if visible, else empty string ""
+21. subject: STRICT ACADEMIC SUBJECT ONLY!
+    STRICT RULE FOR "subject":
+    - You MUST identify and store ONLY the pure academic discipline (e.g. "Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK").
+    - NEVER put exam names, stages, shifts, or dates in "subject" (e.g. DO NOT put "RRB", "NTPC", "Level 01", "Stage I", "Shift-3"). Exam details belong in "subject_level"!
+22. subject_level: Exam level/stage/details (e.g. "RRB Level 01 Stage I 2025" or "SSC CGL Tier 1")
+23. figure_notes: Notes about any diagram/chart in the question, or empty string ""
+24. correction_notes: Notes about any clipping or corrections observed, or empty string ""
+25. source_pdf: Source PDF file name if known, else empty string ""
+26. source_pages: Source page number(s), e.g. "17"
+27. source_question_reference: Question reference in source, e.g. "Q.1"
+28. latex_check: "checked"
+29. html_check: "checked"
+30. answer_check: "checked"
+31. solution_check: "checked"
+32. hash_figure: Figure hash if any, else empty string ""
+33. manually_review: "checked"
+34. duplicate_statistics: "Unique within this shift; duplicate check completed."
 
 FORMATTING RULES:
 - Math expressions: Put ONLY actual algebraic/calculus formulas, fractions, powers, and variables in single dollar ($...$): e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$.
-- CRITICAL: NEVER enclose normal numbers, percentages, or money in math delimiters!
-  - Write 40%, NOT $$40\\%$$ or $40%$
-  - Write ₹5 or ₹4,800, NOT $$₹5$$ or ₹ $$4,800$$
-  - Write 300, NOT $$300$$
+- CRITICAL NEGATIVE RULES FOR DOLLAR SIGNS ($):
+  - NEVER use $ delimiters for reasoning puzzle human names, alphabets, or positions (e.g. write P, Q, R, S, T, U, V and W, Q as plain letters, NEVER $P, Q, R$ or $W, Q$).
+  - NEVER enclose normal numbers, counts, percentages, or money in dollar signs!
+    * Write 40%, NOT $$40\\%$$ or $40%$
+    * Write ₹5 or ₹4,800, NOT $$₹5$$ or ₹ $$4,800$$ or $= ₹4800$
+    * Write 300, NOT $$300$$ or 300$
+    * Write 5 washing machines, NOT 5$ washing machines
+  - Double escape all LaTeX backslashes in JSON (e.g. \\\\frac{a}{b}, \\\\times, \\\\sqrt{x}).
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam tags, shift dates, shift times, paper citations, or book publisher labels in the question text or options!
-  - Examples that MUST BE OMITTED: "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT - I (GL) 17/06/2025 (Afternoon)", "[SSC CGL 14/07/2023 (Shift-1)]", "(Shift-2)", "(Morning)", "Youth Competition Times", "Pinnacle".
+  - Examples that MUST BE OMITTED from question/option text: "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT - I (GL) 17/06/2025 (Afternoon)", "[SSC CGL 14/07/2023 (Shift-1)]", "(Shift-2)", "(Morning)", "Youth Competition Times", "Pinnacle".
   - The question text must be PURELY the question statement!
 - If the original document is only in Hindi or only in English, TRANSLATE and generate the counterpart language so BOTH Hindi and English fields are fully populated!
 - Both solution_hi and solution_en MUST BE DETAILED, pedagogy-grade solutions suitable for student practice.
@@ -599,8 +1049,8 @@ export async function generateDeepSolutionForItem(
 
   const data = await response.json();
   return {
-    solution_hi: data.solution_hi || '',
-    solution_en: data.solution_en || '',
+    solution_hi: cleanMocktestText(data.solution_hi || ''),
+    solution_en: cleanMocktestText(data.solution_en || ''),
     difficulty_level: data.difficulty_level || item.difficulty_level
   };
 }
@@ -628,7 +1078,20 @@ export function parseAiOutputToMockTestItems(
   if (startIdx >= 0 && endIdx > startIdx) {
     const jsonStr = clean.slice(startIdx, endIdx + 1);
     try {
-      const parsed = JSON.parse(jsonStr);
+      // Protect LaTeX commands from colliding JSON escape evaluations (\f -> \frac, \t -> \times, etc.)
+      const safeJsonStr = jsonStr
+        .replace(/(?<!\\)\\frac/g, '\\\\frac')
+        .replace(/(?<!\\)\\times/g, '\\\\times')
+        .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
+        .replace(/(?<!\\)\\text/g, '\\\\text')
+        .replace(/(?<!\\)\\div/g, '\\\\div')
+        .replace(/(?<!\\)\\pm/g, '\\\\pm')
+        .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
+        .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
+        .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
+        .replace(/(?<!\\)\\neq/g, '\\\\neq')
+        .replace(/(?<!\\)\\approx/g, '\\\\approx');
+      const parsed = JSON.parse(safeJsonStr);
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed.map((obj, i) => {
           const qNum = parseInt(obj.question_r, 10) || (startIndex + i);
@@ -739,6 +1202,9 @@ export function parseAiOutputToMockTestItems(
           if (!solHi) solHi = `<p><b>हल:</b> सही उत्तर विकल्प ${rawAns} है।</p>`;
           if (!solEn) solEn = `<p><b>Solution:</b> The correct option is ${rawAns}.</p>`;
 
+          const candidateSubject = obj.subject || obj.subject_name || obj.topic || '';
+          const cleanSubject = normalizeStrictSubject(candidateSubject, `${qHi} ${qEn}`, `${solHi} ${solEn}`);
+
           return cleanMockTestItem({
             id: `mt_ai_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
             question_r: qNum,
@@ -759,7 +1225,23 @@ export function parseAiOutputToMockTestItems(
             solution_en: ensureHtmlParagraph(solEn),
             answer: rawAns,
             set_name: obj.set_name || setName,
-            difficulty_level: (obj.difficulty_level || 'medium').toLowerCase() as DifficultyLevel
+            difficulty_level: (obj.difficulty_level || 'Easy').toLowerCase() === 'hard' ? 'hard' : (obj.difficulty_level || 'Easy').toLowerCase() === 'easy' ? 'easy' : 'medium',
+            test_date: obj.test_date || '',
+            test_time: obj.test_time || '',
+            subject: cleanSubject,
+            subject_level: obj.subject_level || '',
+            figure_notes: obj.figure_notes || '',
+            correction_notes: obj.correction_notes || '',
+            source_pdf: obj.source_pdf || '',
+            source_pages: obj.source_pages || '',
+            source_question_reference: obj.source_question_reference || `Q.${qNum}`,
+            latex_check: obj.latex_check || 'checked',
+            html_check: obj.html_check || 'checked',
+            answer_check: obj.answer_check || 'checked',
+            solution_check: obj.solution_check || 'checked',
+            hash_figure: obj.hash_figure || '',
+            manually_review: obj.manually_review || 'checked',
+            duplicate_statistics: obj.duplicate_statistics || 'Unique within this shift; duplicate check completed.'
           });
         });
       }
@@ -779,40 +1261,60 @@ export function parseAiOutputToMockTestItems(
 
 /**
  * Fast & ultra-reliable prompt for AI browser chat (DeepSeek, ChatGPT, Gemini, Claude) via Extension Bridge
- * that guarantees all 18 columns are provided with Hindi, English, options, and step-by-step solutions!
+ * that guarantees all 34 columns are provided with Hindi, English, options, and step-by-step solutions!
  */
-export function buildMockTestBridgePrompt(setName = 'Mock Test Paper'): string {
+export function buildMockTestBridgePrompt(setName = 'PYPs Shift-3'): string {
   return `You are a professional Exam Paper Digitizer and MockTest Content Architect.
 Extract ALL multiple-choice questions (MCQs), MSQs, and numerical questions from this exam page image.
 
-STRICT REQUIREMENT: You MUST fill ALL fields for EVERY question in strict JSON format.
-For every question, output an object in a JSON array with these exact fields:
+STRICT REQUIREMENT: You MUST fill ALL 34 fields for EVERY question in strict JSON format.
+For every question, output an object in a JSON array with these exact 34 fields:
 - "question_r": Sequence number (1, 2, 3...)
 - "question_hi": Question text in Hindi wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$).
-- "option1_hi": Option 1 (A) in Hindi
-- "option2_hi": Option 2 (B) in Hindi
-- "option3_hi": Option 3 (C) in Hindi
-- "option4_hi": Option 4 (D) in Hindi
+- "option1_hi": Option 1 (A) in Hindi wrapped in <p>...</p>
+- "option2_hi": Option 2 (B) in Hindi wrapped in <p>...</p>
+- "option3_hi": Option 3 (C) in Hindi wrapped in <p>...</p>
+- "option4_hi": Option 4 (D) in Hindi wrapped in <p>...</p>
 - "option5_hi": Option 5 (E) in Hindi (or empty string if 4 options)
-- "solution_hi": DETAILED step-by-step pedagogical explanation in Hindi formatted in HTML (<p><b>हल:</b>...</p>).
+- "solution_hi": DETAILED step-by-step pedagogical explanation in Hindi formatted in HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
 - "question_en": Question text in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$).
-- "option1_en": Option 1 (A) in English
-- "option2_en": Option 2 (B) in English
-- "option3_en": Option 3 (C) in English
-- "option4_en": Option 4 (D) in English
+- "option1_en": Option 1 (A) in English wrapped in <p>...</p>
+- "option2_en": Option 2 (B) in English wrapped in <p>...</p>
+- "option3_en": Option 3 (C) in English wrapped in <p>...</p>
+- "option4_en": Option 4 (D) in English wrapped in <p>...</p>
 - "option5_en": Option 5 (E) in English (or empty string if 4 options)
-- "solution_en": DETAILED step-by-step pedagogical explanation in English formatted in HTML (<p><b>Solution:</b>...</p>).
+- "solution_en": DETAILED step-by-step pedagogical explanation in English formatted in HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
 - "answer": Correct answer identifier (e.g. "A", "B", "C", or "D")
 - "set_name": "${setName}"
-- "difficulty_level": "easy", "medium", or "hard"
+- "difficulty_level": "Easy", "Medium", or "Hard"
+- "test_date": Test date in YYYY-MM-DD or empty string ""
+- "test_time": Test time (e.g. "4:30 PM - 6:00 PM") or empty string ""
+- "subject": STRICT ACADEMIC SUBJECT ONLY! (e.g. "Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK"). NEVER put exam name/stage/shift in subject!
+- "subject_level": Exam level/stage (e.g. "RRB Level 01 Stage I 2025")
+- "figure_notes": Diagram notes if any, else empty string ""
+- "correction_notes": Clipping/correction notes if any, else empty string ""
+- "source_pdf": Source PDF name if known, else empty string ""
+- "source_pages": Source page number, e.g. "17"
+- "source_question_reference": e.g. "Q.98"
+- "latex_check": "checked"
+- "html_check": "checked"
+- "answer_check": "checked"
+- "solution_check": "checked"
+- "hash_figure": ""
+- "manually_review": "checked"
+- "duplicate_statistics": "Unique within this shift; duplicate check completed."
 
 CRITICAL RULES:
-1. BOTH Hindi and English fields MUST be fully populated! If the paper is only in Hindi or only in English, TRANSLATE and generate the counterpart language so NO field is left blank.
-2. BOTH solution_hi and solution_en MUST be detailed and pedagogical with steps and formulas.
-3. Put actual math formulas/fractions inside single dollar $...$ (e.g. $x^2 + y = 10$, $\\frac{a}{b}$).
-4. NEVER wrap plain numbers, percentages (40%), or rupee amounts (₹4,800) in dollar signs.
-5. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED).
-6. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.`;
+1. STRICT SUBJECT RULE: The "subject" field MUST ONLY contain the academic subject name (like "Current Affairs", "Mathematics", "Reasoning", "Polity"). NEVER include exam names like "RRB", "NTPC", or "Shift" in "subject". Exam names belong strictly in "subject_level".
+2. BOTH Hindi and English fields MUST be fully populated! If the paper is only in Hindi or only in English, TRANSLATE and generate the counterpart language so NO field is left blank.
+3. BOTH solution_hi and solution_en MUST be detailed and pedagogical with steps and formulas.
+4. Put actual math formulas/fractions inside single dollar $...$ (e.g. $x^2 + y = 10$, $\\frac{a}{b}$).
+5. CRITICAL NEGATIVE RULES FOR DOLLAR SIGNS ($):
+   - NEVER use $ delimiters for reasoning puzzle human names, alphabets, or positions (e.g. write P, Q, R, S, T, U, V and W, Q as plain letters, NEVER $P, Q, R$ or $W, Q$).
+   - NEVER enclose normal numbers, counts, percentages, or money in dollar signs! (Write 5, NOT 5$; write 60%, NOT $60%; write ₹2550, NOT $= ₹2550$ or $₹2550$).
+   - Double escape all LaTeX backslashes in JSON (\\\\frac, \\\\times, \\\\sqrt).
+6. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED).
+7. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.`;
 }
 
 /**

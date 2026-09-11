@@ -31,5 +31,6 @@ firebase-applet-config.json
 # Generated test files
 *.docx
 *.zip
+!public/*.zip
 test_*
 unzipped_*

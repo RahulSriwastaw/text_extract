@@ -48,6 +48,7 @@ const SESSION_KEY = "study_ai_session_v1";
 const jobs = new Map;
 
 const alivePorts = new Set;
+const adminTabIds = new Set;
 
 let session = {
   tabId: null,
@@ -76,7 +77,12 @@ let session = {
 chrome.runtime.onConnect.addListener(port => {
   if (port.name !== "study-ai-keepalive") return;
   alivePorts.add(port);
-  port.onDisconnect.addListener(() => alivePorts.delete(port));
+  if (port.sender && port.sender.tab && port.sender.tab.id) {
+    adminTabIds.add(port.sender.tab.id);
+  }
+  port.onDisconnect.addListener(() => {
+    alivePorts.delete(port);
+  });
   try {
     port.postMessage({
       type: "HELLO",
@@ -85,7 +91,14 @@ chrome.runtime.onConnect.addListener(port => {
   } catch {}
 });
 
+chrome.tabs.onRemoved.addListener(tabId => {
+  adminTabIds.delete(tabId);
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (sender && sender.tab && sender.tab.id) {
+    adminTabIds.add(sender.tab.id);
+  }
   if (!msg || !msg.type) return;
   if (msg.type === "STUDY_AI_PING") {
     sendResponse({
@@ -560,10 +573,25 @@ function relayOnce(adminTabId, msg) {
 
 async function broadcastResultToAdminTabs(msg) {
   try {
-    const tabs = await chrome.tabs.query({
-      url: [ "https://admin.testfactory.co.in/*", "http://localhost/*", "http://localhost:*/*", "http://127.0.0.1/*", "http://127.0.0.1:*/*" ]
+    for (const p of alivePorts) {
+      if (p && p.sender && p.sender.tab && p.sender.tab.id) {
+        await relayOnce(p.sender.tab.id, msg);
+      }
+    }
+    for (const tabId of adminTabIds) {
+      await relayOnce(tabId, msg);
+    }
+    const vercelTabs = await chrome.tabs.query({
+      url: [
+        "https://text-extract-sigma.vercel.app/*",
+        "https://*.vercel.app/*",
+        "http://localhost/*",
+        "http://localhost:*/*",
+        "http://127.0.0.1/*",
+        "http://127.0.0.1:*/*"
+      ]
     });
-    for (const t of tabs) {
+    for (const t of vercelTabs) {
       if (t.id) await relayOnce(t.id, msg);
     }
   } catch {}

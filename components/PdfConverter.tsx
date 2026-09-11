@@ -30,7 +30,12 @@ import {
 // Fallback UUID generator
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-const PdfConverter: React.FC = () => {
+export interface PdfConverterProps {
+  initialImages?: string[];
+  onClearInitialImages?: () => void;
+}
+
+const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearInitialImages }) => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [pages, setPages] = useState<ScannedPage[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -101,6 +106,22 @@ const PdfConverter: React.FC = () => {
       .catch(err => console.error("Config fetch failed:", err));
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (initialImages && initialImages.length > 0) {
+      const newPages: ScannedPage[] = initialImages.map((base64, index) => ({
+        id: generateId(),
+        pageNumber: index + 1,
+        imageUrl: base64,
+        status: 'pending',
+        isSelected: true
+      }));
+      setPages(newPages);
+      setAppState(AppState.IDLE);
+      setFileName("Stitched_QA_Doc");
+      onClearInitialImages?.();
+    }
+  }, [initialImages]);
 
   const checkAuth = async () => {
     const auth = await checkUserGeminiAuth();

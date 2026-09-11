@@ -25,7 +25,9 @@ import {
   convertElementsToMockTestItems,
   generateDeepSolutionForItem,
   proofreadMocktestItems,
-  cleanMockTestItem
+  cleanMockTestItem,
+  STANDARD_SUBJECTS,
+  normalizeStrictSubject
 } from '../services/mocktestService';
 import { 
   extractWithStudyAiBridge, 
@@ -73,7 +75,12 @@ const LatexRenderer: React.FC<{ content: string; className?: string }> = ({ cont
   );
 };
 
-export const MocktestExtractor: React.FC = () => {
+export interface MocktestExtractorProps {
+  initialPages?: string[];
+  onClearInitialPages?: () => void;
+}
+
+export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPages, onClearInitialPages }) => {
   // Page queue state
   const [pages, setPages] = useState<PageQueueItem[]>([]);
   const [isProcessingAll, setIsProcessingAll] = useState(false);
@@ -125,6 +132,21 @@ export const MocktestExtractor: React.FC = () => {
     pingStudyAiExtension().catch(() => {});
     return () => unsub();
   }, [aiEngine]);
+
+  useEffect(() => {
+    if (initialPages && initialPages.length > 0) {
+      const queueItems: PageQueueItem[] = initialPages.map((url, idx) => ({
+        id: `stitch-page-${Date.now()}-${idx}`,
+        pageNumber: idx + 1,
+        imageUrl: url,
+        status: 'pending',
+        mcqCount: 0,
+        isSelected: true,
+      }));
+      setPages(queueItems);
+      onClearInitialPages?.();
+    }
+  }, [initialPages]);
 
   const handleProviderChange = (prov: AiProvider) => {
     setSelectedProvider(prov);
@@ -550,20 +572,38 @@ export const MocktestExtractor: React.FC = () => {
       question_r: nextNum,
       question_type: 'MCQ',
       question_hi: '<p>प्रश्न यहाँ लिखें...</p>',
-      option1_hi: 'विकल्प A',
-      option2_hi: 'विकल्प B',
-      option3_hi: 'विकल्प C',
-      option4_hi: 'विकल्प D',
-      solution_hi: '<p><b>हल:</b> विस्तृत विवरण...</p>',
+      option1_hi: '<p>विकल्प A</p>',
+      option2_hi: '<p>विकल्प B</p>',
+      option3_hi: '<p>विकल्प C</p>',
+      option4_hi: '<p>विकल्प D</p>',
+      option5_hi: '',
+      solution_hi: '<p><strong>Key Point:</strong> सही उत्तर...<br><strong>Detailed Explanation:</strong> विस्तृत हल...</p>',
       question_en: '<p>Enter question text here...</p>',
-      option1_en: 'Option A',
-      option2_en: 'Option B',
-      option3_en: 'Option C',
-      option4_en: 'Option D',
-      solution_en: '<p><b>Solution:</b> Detailed step-by-step proof...</p>',
+      option1_en: '<p>Option A</p>',
+      option2_en: '<p>Option B</p>',
+      option3_en: '<p>Option C</p>',
+      option4_en: '<p>Option D</p>',
+      option5_en: '',
+      solution_en: '<p><strong>Key Point:</strong> Correct answer...<br><strong>Detailed Explanation:</strong> Step-by-step proof...</p>',
       answer: answerFormat === 'letters' ? 'A' : '1',
       set_name: setName,
-      difficulty_level: difficulty
+      difficulty_level: difficulty,
+      test_date: '',
+      test_time: '',
+      subject: 'Current Affairs',
+      subject_level: 'RRB Level 01 Stage I 2025',
+      figure_notes: '',
+      correction_notes: '',
+      source_pdf: '',
+      source_pages: String(page.pageNumber),
+      source_question_reference: `Q.${nextNum}`,
+      latex_check: 'checked',
+      html_check: 'checked',
+      answer_check: 'checked',
+      solution_check: 'checked',
+      hash_figure: '',
+      manually_review: 'checked',
+      duplicate_statistics: 'Unique within this shift; duplicate check completed.'
     };
     setExtractedMcqs(prev => [...prev, newItem]);
     setPages(prev => prev.map(p => p.id === page.id ? {
@@ -587,20 +627,38 @@ export const MocktestExtractor: React.FC = () => {
       question_r: nextNum,
       question_type: 'MCQ',
       question_hi: '<p>प्रश्न यहाँ लिखें...</p>',
-      option1_hi: 'विकल्प A',
-      option2_hi: 'विकल्प B',
-      option3_hi: 'विकल्प C',
-      option4_hi: 'विकल्प D',
-      solution_hi: '<p><b>हल:</b> विस्तृत विवरण...</p>',
+      option1_hi: '<p>विकल्प A</p>',
+      option2_hi: '<p>विकल्प B</p>',
+      option3_hi: '<p>विकल्प C</p>',
+      option4_hi: '<p>विकल्प D</p>',
+      option5_hi: '',
+      solution_hi: '<p><strong>Key Point:</strong> सही उत्तर...<br><strong>Detailed Explanation:</strong> विस्तृत हल...</p>',
       question_en: '<p>Enter question text here...</p>',
-      option1_en: 'Option A',
-      option2_en: 'Option B',
-      option3_en: 'Option C',
-      option4_en: 'Option D',
-      solution_en: '<p><b>Solution:</b> Detailed step-by-step proof...</p>',
+      option1_en: '<p>Option A</p>',
+      option2_en: '<p>Option B</p>',
+      option3_en: '<p>Option C</p>',
+      option4_en: '<p>Option D</p>',
+      option5_en: '',
+      solution_en: '<p><strong>Key Point:</strong> Correct answer...<br><strong>Detailed Explanation:</strong> Step-by-step proof...</p>',
       answer: answerFormat === 'letters' ? 'A' : '1',
       set_name: setName,
-      difficulty_level: difficulty
+      difficulty_level: difficulty,
+      test_date: '',
+      test_time: '',
+      subject: 'Current Affairs',
+      subject_level: 'RRB Level 01 Stage I 2025',
+      figure_notes: '',
+      correction_notes: '',
+      source_pdf: '',
+      source_pages: '1',
+      source_question_reference: `Q.${nextNum}`,
+      latex_check: 'checked',
+      html_check: 'checked',
+      answer_check: 'checked',
+      solution_check: 'checked',
+      hash_figure: '',
+      manually_review: 'checked',
+      duplicate_statistics: 'Unique within this shift; duplicate check completed.'
     };
     setExtractedMcqs(prev => [...prev, newItem]);
     setEditingItemId(newItem.id);
@@ -647,13 +705,13 @@ export const MocktestExtractor: React.FC = () => {
           <div className="space-y-1">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold tracking-wide uppercase">
               <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-              <span>Dedicated MockTest MCQ Extractor • 18-Column Engine</span>
+              <span>Dedicated MockTest MCQ Extractor • 34-Column Engine</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white font-display">
               Bilingual MockTest MCQ Extractor
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
-              Extract bilingual MCQs page-by-page from PDFs & scanned papers. Left side shows pages, Right side displays all extracted questions with LaTeX math and deep step-by-step solutions.
+              Extract bilingual MCQs page-by-page from PDFs & scanned papers into the strict 34-column mocktest standard with exact academic subjects and pedagogical solutions.
             </p>
           </div>
 
@@ -882,7 +940,7 @@ export const MocktestExtractor: React.FC = () => {
                 className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow-md transition-all disabled:opacity-40"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
+                <span>Export 34-Col CSV</span>
               </button>
               <button
                 type="button"
@@ -924,10 +982,10 @@ export const MocktestExtractor: React.FC = () => {
             <div className="flex flex-col">
               <span className="text-xs font-extrabold text-amber-300 flex items-center gap-1.5 group-hover:text-amber-200 transition-colors">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span>One-Shot Auto-Fill All 18 Fields + Deep Solutions (सभी Fields & Solutions एक साथ भरें)</span>
+                <span>One-Shot Auto-Fill All 34 Fields + Deep Solutions (सभी 34 Fields & Solutions एक साथ भरें)</span>
               </span>
               <span className="text-[11px] text-slate-300">
-                Image bhejte hi Question, Options, Answer, aur <strong>Deep Research Step-by-Step Solutions</strong> (Hindi + English with LaTeX & HTML) ek saath fill hokar final store hoga.
+                Image bhejte hi Question, Options, Answer, <strong>Strict Academic Subject</strong>, Exam Level, aur <strong>Deep Research Step-by-Step Solutions</strong> ek saath fill hokar final store hoga.
               </span>
             </div>
           </label>
@@ -937,7 +995,7 @@ export const MocktestExtractor: React.FC = () => {
               ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
               : 'bg-white/[0.05] text-slate-400 border-white/[0.1]'
           }`}>
-            {autoDeepSolveAll ? '✓ All 18 Fields Auto-Fill Active' : 'Extraction Only (Fast)'}
+            {autoDeepSolveAll ? '✓ All 34 Fields Auto-Fill Active' : 'Extraction Only (Fast)'}
           </span>
         </div>
       </div>
@@ -1384,16 +1442,40 @@ export const MocktestExtractor: React.FC = () => {
                                 className="rounded-xl border border-white/[0.08] bg-black/40 p-4 space-y-3 hover:border-white/[0.15] transition-all"
                               >
                                 {/* MCQ Header Bar */}
-                                <div className="flex items-center justify-between gap-3 pb-2 border-b border-white/[0.06]">
-                                  <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/[0.06]">
+                                  <div className="flex flex-wrap items-center gap-2">
                                     <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-xs border border-amber-500/30">
                                       Q#{item.question_r}
                                     </span>
-                                    <span className="text-[11px] font-semibold text-slate-400">
-                                      Type: <strong className="text-white">{item.question_type}</strong>
-                                    </span>
+
+                                    {/* STRICT ACADEMIC SUBJECT SELECTOR */}
+                                    <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs">
+                                      <span className="text-amber-400 font-bold text-[10px] uppercase">Subject:</span>
+                                      <select
+                                        value={item.subject || 'Current Affairs'}
+                                        onChange={(e) => updateItem(item.id, { subject: normalizeStrictSubject(e.target.value) })}
+                                        className="bg-transparent text-amber-300 font-extrabold text-xs focus:outline-none cursor-pointer"
+                                      >
+                                        {STANDARD_SUBJECTS.map((s) => (
+                                          <option key={s} value={s} className="bg-slate-900 text-slate-200">{s}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+
+                                    {/* Subject Level */}
+                                    <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] px-2 py-0.5 rounded-lg text-xs">
+                                      <span className="text-slate-400 font-bold text-[10px] uppercase">Level:</span>
+                                      <input
+                                        type="text"
+                                        value={item.subject_level || ''}
+                                        onChange={(e) => updateItem(item.id, { subject_level: e.target.value })}
+                                        placeholder="e.g. RRB Level 01 Stage I 2025"
+                                        className="bg-transparent text-slate-200 text-xs focus:outline-none w-32 truncate"
+                                      />
+                                    </div>
+
                                     <span className="text-[11px] text-slate-400">
-                                      Difficulty: <strong className="text-white capitalize">{item.difficulty_level}</strong>
+                                      Diff: <strong className="text-white capitalize">{item.difficulty_level}</strong>
                                     </span>
                                   </div>
 
@@ -1448,6 +1530,52 @@ export const MocktestExtractor: React.FC = () => {
                                     </button>
                                   </div>
                                 </div>
+
+                                {/* Extra Metadata Editing when Expanded */}
+                                {isEditing && (
+                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 bg-black/60 rounded-lg border border-white/[0.08] text-xs">
+                                    <div className="flex flex-col gap-0.5">
+                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Test Date:</label>
+                                      <input
+                                        type="text"
+                                        value={item.test_date || ''}
+                                        onChange={(e) => updateItem(item.id, { test_date: e.target.value })}
+                                        placeholder="YYYY-MM-DD"
+                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Test Time:</label>
+                                      <input
+                                        type="text"
+                                        value={item.test_time || ''}
+                                        onChange={(e) => updateItem(item.id, { test_time: e.target.value })}
+                                        placeholder="4:30 PM - 6:00 PM"
+                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Source PDF:</label>
+                                      <input
+                                        type="text"
+                                        value={item.source_pdf || ''}
+                                        onChange={(e) => updateItem(item.id, { source_pdf: e.target.value })}
+                                        placeholder="SHIFT 3.pdf"
+                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Source Ref:</label>
+                                      <input
+                                        type="text"
+                                        value={item.source_question_reference || ''}
+                                        onChange={(e) => updateItem(item.id, { source_question_reference: e.target.value })}
+                                        placeholder={`Q.${item.question_r}`}
+                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
 
                                 {/* Interactive Bilingual Content View */}
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -1615,7 +1743,7 @@ export const MocktestExtractor: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 2: LIVE 18-COLUMN CSV GRID VIEW */}
+          {/* TAB 2: LIVE 34-COLUMN CSV GRID VIEW */}
           {activeTab === 'grid' && (
             <div className="rounded-2xl border border-white/[0.08] bg-black/40 backdrop-blur-xl overflow-hidden shadow-2xl p-4">
               <div className="max-h-[700px] overflow-auto custom-scrollbar">
@@ -1628,37 +1756,73 @@ export const MocktestExtractor: React.FC = () => {
                       <th className="p-2 min-w-[100px]">opt2_hi</th>
                       <th className="p-2 min-w-[100px]">opt3_hi</th>
                       <th className="p-2 min-w-[100px]">opt4_hi</th>
+                      <th className="p-2 min-w-[100px]">opt5_hi</th>
                       <th className="p-2 min-w-[200px]">solution_hi</th>
                       <th className="p-2 min-w-[200px]">question_en</th>
                       <th className="p-2 min-w-[100px]">opt1_en</th>
                       <th className="p-2 min-w-[100px]">opt2_en</th>
                       <th className="p-2 min-w-[100px]">opt3_en</th>
                       <th className="p-2 min-w-[100px]">opt4_en</th>
+                      <th className="p-2 min-w-[100px]">opt5_en</th>
                       <th className="p-2 min-w-[200px]">solution_en</th>
                       <th className="p-2 min-w-[70px]">answer</th>
                       <th className="p-2 min-w-[120px]">set_name</th>
                       <th className="p-2 min-w-[80px]">difficulty</th>
+                      <th className="p-2 min-w-[100px]">test_date</th>
+                      <th className="p-2 min-w-[110px]">test_time</th>
+                      <th className="p-2 min-w-[130px] bg-amber-500/10 text-amber-300">subject (STRICT)</th>
+                      <th className="p-2 min-w-[140px]">subject_level</th>
+                      <th className="p-2 min-w-[100px]">figure_notes</th>
+                      <th className="p-2 min-w-[120px]">correction_notes</th>
+                      <th className="p-2 min-w-[100px]">source_pdf</th>
+                      <th className="p-2 min-w-[70px]">source_pages</th>
+                      <th className="p-2 min-w-[80px]">source_ref</th>
+                      <th className="p-2 min-w-[70px]">latex_chk</th>
+                      <th className="p-2 min-w-[70px]">html_chk</th>
+                      <th className="p-2 min-w-[70px]">ans_chk</th>
+                      <th className="p-2 min-w-[70px]">sol_chk</th>
+                      <th className="p-2 min-w-[80px]">hash_fig</th>
+                      <th className="p-2 min-w-[70px]">manual_rev</th>
+                      <th className="p-2 min-w-[160px]">duplicate_stats</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/[0.05] text-slate-300">
+                  <tbody className="divide-y divide-white/[0.05] text-slate-300 whitespace-nowrap">
                     {extractedMcqs.map((row) => (
                       <tr key={row.id} className="hover:bg-white/[0.02]">
                         <td className="p-2 font-bold text-amber-400">{row.question_r}</td>
-                        <td className="p-2 truncate max-w-[220px]" title={row.question_hi}>{row.question_hi}</td>
+                        <td className="p-2 truncate max-w-[200px]" title={row.question_hi}>{row.question_hi}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option1_hi}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option2_hi}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option3_hi}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option4_hi}</td>
-                        <td className="p-2 truncate max-w-[220px]" title={row.solution_hi}>{row.solution_hi}</td>
-                        <td className="p-2 truncate max-w-[220px]" title={row.question_en}>{row.question_en}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option5_hi || '—'}</td>
+                        <td className="p-2 truncate max-w-[200px]" title={row.solution_hi}>{row.solution_hi}</td>
+                        <td className="p-2 truncate max-w-[200px]" title={row.question_en}>{row.question_en}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option1_en}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option2_en}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option3_en}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option4_en}</td>
-                        <td className="p-2 truncate max-w-[220px]" title={row.solution_en}>{row.solution_en}</td>
+                        <td className="p-2 truncate max-w-[100px]">{row.option5_en || '—'}</td>
+                        <td className="p-2 truncate max-w-[200px]" title={row.solution_en}>{row.solution_en}</td>
                         <td className="p-2 font-bold text-emerald-400">{row.answer}</td>
                         <td className="p-2 truncate max-w-[120px]">{row.set_name}</td>
                         <td className="p-2 capitalize">{row.difficulty_level}</td>
+                        <td className="p-2">{row.test_date || '—'}</td>
+                        <td className="p-2">{row.test_time || '—'}</td>
+                        <td className="p-2 font-extrabold text-amber-300 bg-amber-500/5">{row.subject || '—'}</td>
+                        <td className="p-2">{row.subject_level || '—'}</td>
+                        <td className="p-2">{row.figure_notes || '—'}</td>
+                        <td className="p-2 truncate max-w-[140px]" title={row.correction_notes}>{row.correction_notes || '—'}</td>
+                        <td className="p-2">{row.source_pdf || '—'}</td>
+                        <td className="p-2">{row.source_pages || '—'}</td>
+                        <td className="p-2">{row.source_question_reference || `Q.${row.question_r}`}</td>
+                        <td className="p-2 text-slate-400">{row.latex_check || 'checked'}</td>
+                        <td className="p-2 text-slate-400">{row.html_check || 'checked'}</td>
+                        <td className="p-2 text-slate-400">{row.answer_check || 'checked'}</td>
+                        <td className="p-2 text-slate-400">{row.solution_check || 'checked'}</td>
+                        <td className="p-2 text-slate-500">{row.hash_figure || '—'}</td>
+                        <td className="p-2 text-slate-400">{row.manually_review || 'checked'}</td>
+                        <td className="p-2 truncate max-w-[160px]" title={row.duplicate_statistics}>{row.duplicate_statistics || 'Unique'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1703,7 +1867,7 @@ export const MocktestExtractor: React.FC = () => {
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Download 18-Column CSV</span>
+                <span>Download 34-Column CSV</span>
               </button>
             </div>
           </div>

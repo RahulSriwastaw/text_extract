@@ -11,7 +11,9 @@ import {
   serializeMockTestToCsv, 
   parseCsvToMockTestItems, 
   generateDeepSolutionForItem,
-  ensureHtmlParagraph 
+  ensureHtmlParagraph,
+  STANDARD_SUBJECTS,
+  normalizeStrictSubject
 } from '../services/mocktestService';
 
 interface MocktestStudioModalProps {
@@ -53,20 +55,38 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
       question_r: nextNum,
       question_type: 'MCQ',
       question_hi: '<p>नया प्रश्न यहाँ लिखें...</p>',
-      option1_hi: 'विकल्प A',
-      option2_hi: 'विकल्प B',
-      option3_hi: 'विकल्प C',
-      option4_hi: 'विकल्प D',
-      solution_hi: '<p><b>हल:</b> विस्तृत विवरण...</p>',
+      option1_hi: '<p>विकल्प A</p>',
+      option2_hi: '<p>विकल्प B</p>',
+      option3_hi: '<p>विकल्प C</p>',
+      option4_hi: '<p>विकल्प D</p>',
+      option5_hi: '',
+      solution_hi: '<p><strong>Key Point:</strong> सही उत्तर...<br><strong>Detailed Explanation:</strong> विस्तृत विवरण...</p>',
       question_en: '<p>Enter new question here...</p>',
-      option1_en: 'Option A',
-      option2_en: 'Option B',
-      option3_en: 'Option C',
-      option4_en: 'Option D',
-      solution_en: '<p><b>Solution:</b> Step-by-step proof...</p>',
+      option1_en: '<p>Option A</p>',
+      option2_en: '<p>Option B</p>',
+      option3_en: '<p>Option C</p>',
+      option4_en: '<p>Option D</p>',
+      option5_en: '',
+      solution_en: '<p><strong>Key Point:</strong> Correct answer...<br><strong>Detailed Explanation:</strong> Step-by-step proof...</p>',
       answer: answerFormat === 'letters' ? 'A' : '1',
       set_name: setName,
-      difficulty_level: selectedDifficulty
+      difficulty_level: selectedDifficulty,
+      test_date: '',
+      test_time: '',
+      subject: 'Current Affairs',
+      subject_level: 'RRB Level 01 Stage I 2025',
+      figure_notes: '',
+      correction_notes: '',
+      source_pdf: '',
+      source_pages: '1',
+      source_question_reference: `Q.${nextNum}`,
+      latex_check: 'checked',
+      html_check: 'checked',
+      answer_check: 'checked',
+      solution_check: 'checked',
+      hash_figure: '',
+      manually_review: 'checked',
+      duplicate_statistics: 'Unique within this shift; duplicate check completed.'
     };
     setItems(prev => [...prev, newItem]);
   };
@@ -363,6 +383,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                   <thead>
                     <tr className="bg-white/[0.04] border-b border-white/[0.08] text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                       <th className="p-2.5">Q#</th>
+                      <th className="p-2.5">Subject (Strict)</th>
+                      <th className="p-2.5">Level</th>
                       <th className="p-2.5">question_hi</th>
                       <th className="p-2.5">options_hi (1-4)</th>
                       <th className="p-2.5">solution_hi</th>
@@ -378,6 +400,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                     {items.map((item, idx) => (
                       <tr key={item.id} className="hover:bg-white/[0.02] transition-colors">
                         <td className="p-2.5 font-bold font-mono text-[#FF884D]">{item.question_r || idx + 1}</td>
+                        <td className="p-2.5 font-bold text-amber-300 bg-amber-500/5">{item.subject || 'Current Affairs'}</td>
+                        <td className="p-2.5 text-slate-300">{item.subject_level || '—'}</td>
                         <td className="p-2.5 max-w-xs truncate" title={item.question_hi}>{item.question_hi}</td>
                         <td className="p-2.5 max-w-xs truncate">{item.option1_hi} | {item.option2_hi} | {item.option3_hi} | {item.option4_hi}</td>
                         <td className="p-2.5 max-w-xs truncate text-emerald-300" title={item.solution_hi}>{item.solution_hi || '—'}</td>
@@ -406,9 +430,35 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                   >
                     {/* Top Row: Q Number, Type, Answer, Difficulty, AI Solve, Delete */}
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-2.5">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <div className="w-7 h-7 rounded-lg bg-[#FF6B2B]/20 border border-[#FF6B2B]/40 text-[#FF884D] flex items-center justify-center text-xs font-bold font-mono">
                           Q{item.question_r || idx + 1}
+                        </div>
+
+                        {/* STRICT ACADEMIC SUBJECT SELECTOR */}
+                        <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs">
+                          <span className="text-amber-400 font-bold text-[10px] uppercase">Subject:</span>
+                          <select
+                            value={item.subject || 'Current Affairs'}
+                            onChange={(e) => handleUpdateItem(item.id, { subject: normalizeStrictSubject(e.target.value) })}
+                            className="bg-transparent text-amber-300 font-extrabold text-xs focus:outline-none cursor-pointer"
+                          >
+                            {STANDARD_SUBJECTS.map((s) => (
+                              <option key={s} value={s} className="bg-slate-900 text-slate-200">{s}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Subject Level */}
+                        <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] px-2 py-0.5 rounded-lg text-xs">
+                          <span className="text-slate-400 font-bold text-[10px] uppercase">Level:</span>
+                          <input
+                            type="text"
+                            value={item.subject_level || ''}
+                            onChange={(e) => handleUpdateItem(item.id, { subject_level: e.target.value })}
+                            placeholder="e.g. RRB Level 01 Stage I 2025"
+                            className="bg-transparent text-slate-200 text-xs focus:outline-none w-32 truncate"
+                          />
                         </div>
 
                         {/* Question Type: MCQ / MSQ / NAT */}

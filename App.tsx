@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import PdfConverter from './components/PdfConverter';
 import MocktestExtractor from './components/MocktestExtractor';
+import QaPageStitcher from './components/QaPageStitcher';
 import ErrorBoundary from './components/ErrorBoundary';
 import LandingPage from './components/LandingPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
 import { motion, AnimatePresence } from 'motion/react';
 
-export type ActiveTool = 'landing' | 'text-converter' | 'mcq-extractor';
+export type ActiveTool = 'landing' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
 
 function App() {
   const [activeTool, setActiveTool] = useState<ActiveTool>('landing');
   const [isAdmin, setIsAdmin] = useState(false);
+  const [preloadedPages, setPreloadedPages] = useState<string[]>([]);
 
   useEffect(() => {
     // Check for admin path or param
@@ -49,6 +51,7 @@ function App() {
               <LandingPage 
                 onStartTextConverter={() => setActiveTool('text-converter')}
                 onStartMcqExtractor={() => setActiveTool('mcq-extractor')}
+                onStartQaStitcher={() => setActiveTool('qa-stitcher')}
               />
             </motion.div>
           )}
@@ -61,7 +64,10 @@ function App() {
               exit={{ opacity: 0, y: 20 }}
               className="pt-16"
             >
-              <PdfConverter />
+              <PdfConverter 
+                initialImages={preloadedPages}
+                onClearInitialImages={() => setPreloadedPages([])}
+              />
             </motion.div>
           )}
 
@@ -73,7 +79,31 @@ function App() {
               exit={{ opacity: 0, y: 20 }}
               className="pt-16"
             >
-              <MocktestExtractor />
+              <MocktestExtractor 
+                initialPages={preloadedPages}
+                onClearInitialPages={() => setPreloadedPages([])}
+              />
+            </motion.div>
+          )}
+
+          {activeTool === 'qa-stitcher' && (
+            <motion.div
+              key="qa-stitcher"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="pt-14"
+            >
+              <QaPageStitcher 
+                onSendToMcqExtractor={(images) => {
+                  setPreloadedPages(images);
+                  setActiveTool('mcq-extractor');
+                }}
+                onSendToDocxConverter={(images) => {
+                  setPreloadedPages(images);
+                  setActiveTool('text-converter');
+                }}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -83,4 +113,5 @@ function App() {
 }
 
 export default App;
+
 

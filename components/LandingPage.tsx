@@ -10,17 +10,20 @@ import {
   Calculator, 
   Table as TableIcon,
   Languages,
-  CheckCircle2
+  CheckCircle2,
+  Split
 } from 'lucide-react';
 
 interface LandingPageProps {
   onStartTextConverter: () => void;
   onStartMcqExtractor: () => void;
+  onStartQaStitcher: () => void;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ 
   onStartTextConverter, 
-  onStartMcqExtractor 
+  onStartMcqExtractor,
+  onStartQaStitcher 
 }) => {
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -119,10 +122,10 @@ const LandingPage: React.FC<LandingPageProps> = ({
             Extract multiple-choice questions, complex math equations, full tables, and bilingual exam papers into perfectly formatted <strong className="text-white">.docx</strong> files in seconds.
           </motion.p>
 
-          {/* Two Dedicated Tool Launchers */}
+          {/* Three Dedicated Tool Launchers */}
           <motion.div 
             variants={itemVariants}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto mb-16"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto mb-16"
           >
             {/* Tool 1: Document to Word */}
             <button
@@ -178,6 +181,35 @@ const LandingPage: React.FC<LandingPageProps> = ({
 
               <div className="flex items-center gap-2 text-xs font-extrabold text-amber-400 group-hover:translate-x-1 transition-transform">
                 <span>Launch MCQ Tool</span>
+                <ArrowRight className="w-4 h-4" />
+              </div>
+            </button>
+
+            {/* Tool 3: Q&A Page Stitcher */}
+            <button
+              type="button"
+              onClick={onStartQaStitcher}
+              className="p-5 rounded-2xl bg-gradient-to-br from-blue-600/[0.08] to-indigo-600/[0.04] hover:from-blue-600/[0.15] hover:to-indigo-600/[0.08] border border-blue-500/30 hover:border-blue-400 transition-all text-left group flex flex-col justify-between shadow-xl relative overflow-hidden"
+            >
+              <div className="space-y-2 mb-4">
+                <div className="flex items-center justify-between">
+                  <div className="p-2.5 rounded-xl bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                    <Split className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    1-Page Merge
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white group-hover:text-blue-300 transition-colors">
+                  Q&A Page Stitcher
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Crop & freely arrange separate Question & Solution pages onto 1 single unified page with drag-and-drop.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs font-extrabold text-blue-400 group-hover:translate-x-1 transition-transform">
+                <span>Launch Stitcher Studio</span>
                 <ArrowRight className="w-4 h-4" />
               </div>
             </button>

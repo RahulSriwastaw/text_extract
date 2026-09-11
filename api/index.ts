@@ -1401,25 +1401,43 @@ app.post('/api/mocktest-extract', async (req, res) => {
     const promptText = `You are a professional Exam Paper Digitizer and MockTest Content Architect.
 Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.
 
-Extract into a strict JSON array of objects with these exact 18 fields:
+Extract into a strict JSON array of objects with these exact 34 fields:
 1. question_r: Sequence number (1, 2, 3...)
 2. question_hi: Question in Hindi wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
-3. option1_hi: Option 1 (A) in Hindi
-4. option2_hi: Option 2 (B) in Hindi
-5. option3_hi: Option 3 (C) in Hindi
-6. option4_hi: Option 4 (D) in Hindi
+3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p>
+4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p>
+5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
+6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: Detailed step-by-step solution in Hindi wrapped in HTML (<p><b>हल:</b>...</p>) with formulas.
+8. solution_hi: Detailed step-by-step pedagogical solution in Hindi (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
 9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
-10. option1_en: Option 1 (A) in English
-11. option2_en: Option 2 (B) in English
-12. option3_en: Option 3 (C) in English
-13. option4_en: Option 4 (D) in English
+10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
+11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
+12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
+13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: Detailed step-by-step solution in English wrapped in HTML (<p><b>Solution:</b>...</p>) with formulas.
+15. solution_en: Detailed step-by-step pedagogical explanation in English (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
 16. answer: Correct answer: Single choice "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
 17. set_name: "${setName}"
-18. difficulty_level: "easy", "medium", or "hard"
+18. difficulty_level: "Easy", "Medium", or "Hard"
+19. test_date: Test date in YYYY-MM-DD if present, else empty string ""
+20. test_time: Test time (e.g. "4:30 PM - 6:00 PM") if present, else empty string ""
+21. subject: STRICT ACADEMIC SUBJECT ONLY!
+    STRICT RULE: Only store pure academic subject (e.g. "Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK").
+    NEVER include exam names/shifts like "RRB", "NTPC", "Level 01", "Stage I", "Shift-3" in subject!
+22. subject_level: Exam level/stage (e.g. "RRB Level 01 Stage I 2025")
+23. figure_notes: Figure notes or empty string ""
+24. correction_notes: Clipping or correction notes or empty string ""
+25. source_pdf: Source PDF file name if known, else empty string ""
+26. source_pages: Source page number(s), e.g. "17"
+27. source_question_reference: Question reference in paper, e.g. "Q.98"
+28. latex_check: "checked"
+29. html_check: "checked"
+30. answer_check: "checked"
+31. solution_check: "checked"
+32. hash_figure: ""
+33. manually_review: "checked"
+34. duplicate_statistics: "Unique within this shift; duplicate check completed."
 
 RULES:
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam shift citations, tags, dates, or publisher labels in question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED). The question text must be purely the question statement itself!

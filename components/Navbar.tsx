@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Layers, History, Settings, CheckCircle2, Shield, Bot, Zap, FileSpreadsheet, FileText } from 'lucide-react';
+import { Sparkles, Layers, History, Settings, CheckCircle2, Shield, Bot, Zap, FileSpreadsheet, FileText, Split } from 'lucide-react';
 import { motion } from 'motion/react';
 import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { subscribeToExtensionStatus, pingStudyAiExtension, BridgeStatus } from '../services/studyAiBridgeService';
@@ -10,8 +10,8 @@ import MocktestStudioModal from './MocktestStudioModal';
 
 interface NavbarProps {
   totalKeys?: number;
-  activeTool?: 'landing' | 'text-converter' | 'mcq-extractor';
-  onSelectTool?: (tool: 'landing' | 'text-converter' | 'mcq-extractor') => void;
+  activeTool?: 'landing' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
+  onSelectTool?: (tool: 'landing' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher') => void;
 }
 
 const Navbar: React.FC<NavbarProps> = ({ 
@@ -95,6 +95,19 @@ const Navbar: React.FC<NavbarProps> = ({
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>MockTest MCQ Extract (18-Col CSV)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onSelectTool?.('qa-stitcher')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeTool === 'qa-stitcher'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/20 font-extrabold'
+                    : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                }`}
+              >
+                <Split className="w-3.5 h-3.5 text-blue-300" />
+                <span>Q&A Page Stitcher</span>
               </button>
             </div>
 

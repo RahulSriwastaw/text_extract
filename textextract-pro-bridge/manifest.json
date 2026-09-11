@@ -6,16 +6,14 @@
   "author": "TextExtract",
   "permissions": ["tabs", "scripting", "clipboardRead", "clipboardWrite", "storage"],
   "host_permissions": [
+    "https://text-extract-sigma.vercel.app/*",
+    "https://*.vercel.app/*",
     "https://gemini.google.com/*",
     "https://chat.deepseek.com/*",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://claude.ai/*",
-    "https://admin.testfactory.co.in/*",
-    "http://localhost/*",
-    "http://localhost:*/*",
-    "http://127.0.0.1/*",
-    "http://127.0.0.1:*/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -23,11 +21,16 @@
   "content_scripts": [
     {
       "matches": [
-        "https://admin.testfactory.co.in/*",
-        "http://localhost/*",
-        "http://localhost:*/*",
-        "http://127.0.0.1/*",
-        "http://127.0.0.1:*/*"
+        "https://text-extract-sigma.vercel.app/*",
+        "https://*.vercel.app/*",
+        "<all_urls>"
+      ],
+      "exclude_matches": [
+        "https://gemini.google.com/*",
+        "https://chat.deepseek.com/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*"
       ],
       "js": ["content-admin.js"],
       "run_at": "document_start"

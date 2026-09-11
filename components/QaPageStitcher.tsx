@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, Download, Sparkles, RefreshCw, FileSpreadsheet, 
   FileText, Trash2, ArrowDownUp, Check, AlertCircle, 
-  ChevronRight, Scissors, Eye, Undo2, ArrowLeftRight, 
+  ChevronRight, ChevronLeft, Scissors, Eye, Undo2, ArrowLeftRight, 
   Layers, Plus, CheckCircle2, Split, ZoomIn, ZoomOut,
   Maximize2, RotateCw, CheckSquare, Square, Copy, RefreshCcw
 } from 'lucide-react';
@@ -32,6 +32,9 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState<{ current: number; total: number } | null>(null);
   
+  // All Raw PDF Pages for quick switching in Crop Modal
+  const [allPdfPages, setAllPdfPages] = useState<{ pageNum: number; image: string }[]>([]);
+
   // Drag & Drop State
   const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
   const [dragOverTargetId, setDragOverTargetId] = useState<string | null>(null);
@@ -124,6 +127,9 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       const images = await convertPdfToImages(file, (current, total) => {
         setLoadingProgress({ current, total });
       });
+
+      const rawPages = images.map((img, idx) => ({ pageNum: idx + 1, image: img }));
+      setAllPdfPages(rawPages);
 
       const initialCards: PageCard[] = images.map((img, idx) => ({
         id: `card-${Date.now()}-${idx}`,
@@ -327,45 +333,132 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     setActiveCropBox({ x: xPct, y: yPct, width: 0, height: 0 });
   };
 
-  const handleApplyCrop = async () => {
-    if (!cropTarget || !currentCroppingCard) return;
+  // Helper to build list of all croppable page targets across cards in order
+  const getFlatTargets = (cardList: PageCard[]) => {
+    return cardList.flatMap(card => {
+      const list: { cardId: string; type: 'question' | 'solution'; label: string; pageNum: number }[] = [
+        {
+          cardId: card.id,
+          type: 'question',
+          label: `Question (P.${card.originalPageNum})`,
+          pageNum: card.originalPageNum
+        }
+      ];
+      if (card.isMerged) {
+        list.push({
+          cardId: card.id,
+          type: 'solution',
+          label: `Solution (P.${card.solutionPageNum || (card.originalPageNum + 1)})`,
+          pageNum: card.solutionPageNum || (card.originalPageNum + 1)
+        });
+      }
+      return list;
+    });
+  };
+
+  const saveCropForTarget = async (
+    target: { cardId: string; type: 'question' | 'solution' },
+    box: CropBox,
+    scale: number
+  ) => {
+    const card = cards.find(c => c.id === target.cardId);
+    if (!card) return;
 
     try {
-      const isFull = activeCropBox.width >= 99.5 && activeCropBox.height >= 99.5 && activeCropBox.x <= 0.5 && activeCropBox.y <= 0.5;
-      const imageSrc = cropTarget.type === 'question' 
-        ? currentCroppingCard.questionImage 
-        : (currentCroppingCard.solutionImage || currentCroppingCard.questionImage);
+      const isFull = box.width >= 99.5 && box.height >= 99.5 && box.x <= 0.5 && box.y <= 0.5;
+      const imageSrc = target.type === 'question' 
+        ? card.questionImage 
+        : (card.solutionImage || card.questionImage);
 
       let croppedBase64: string | undefined = undefined;
-      if (!isFull && activeCropBox.width > 2 && activeCropBox.height > 2) {
-        croppedBase64 = await cropImageByPercentage(imageSrc, activeCropBox);
+      if (!isFull && box.width > 2 && box.height > 2) {
+        croppedBase64 = await cropImageByPercentage(imageSrc, box);
       }
 
       setCards(prev => prev.map(c => {
-        if (c.id === cropTarget.cardId) {
-          if (cropTarget.type === 'question') {
+        if (c.id === target.cardId) {
+          if (target.type === 'question') {
             return {
               ...c,
               croppedQuestionImage: croppedBase64,
-              qCrop: isFull ? undefined : activeCropBox,
-              qScale: activeScale,
+              qCrop: isFull ? undefined : box,
+              qScale: scale,
             };
           } else {
             return {
               ...c,
               croppedSolutionImage: croppedBase64,
-              solCrop: isFull ? undefined : activeCropBox,
-              solScale: activeScale,
+              solCrop: isFull ? undefined : box,
+              solScale: scale,
             };
           }
         }
         return c;
       }));
-
-      setCropTarget(null);
     } catch (err: any) {
-      alert('Failed to crop: ' + err.message);
+      console.warn('Failed to crop:', err);
     }
+  };
+
+  const handleApplyCrop = async () => {
+    if (!cropTarget || !currentCroppingCard) return;
+    await saveCropForTarget(cropTarget, activeCropBox, activeScale);
+    setCropTarget(null);
+  };
+
+  const handleNavigateCrop = async (direction: 'prev' | 'next') => {
+    if (!cropTarget) return;
+
+    // Auto-save the current crop on this page before moving
+    await saveCropForTarget(cropTarget, activeCropBox, activeScale);
+
+    const targets = getFlatTargets(cards);
+    const targetIndex = targets.findIndex(
+      t => t.cardId === cropTarget.cardId && t.type === cropTarget.type
+    );
+    if (targetIndex === -1) return;
+
+    const nextIndex = direction === 'next' ? targetIndex + 1 : targetIndex - 1;
+    if (nextIndex >= 0 && nextIndex < targets.length) {
+      const nextT = targets[nextIndex];
+      setCropTarget({ cardId: nextT.cardId, type: nextT.type });
+    }
+  };
+
+  const handleChangeSourcePage = (newPageNum: number) => {
+    if (!cropTarget || !currentCroppingCard || allPdfPages.length === 0) return;
+    if (newPageNum < 1 || newPageNum > allPdfPages.length) return;
+
+    const targetPage = allPdfPages[newPageNum - 1];
+    if (!targetPage) return;
+
+    setCards(prev => prev.map(c => {
+      if (c.id === cropTarget.cardId) {
+        if (cropTarget.type === 'question') {
+          return {
+            ...c,
+            originalPageNum: newPageNum,
+            questionImage: targetPage.image,
+            croppedQuestionImage: undefined,
+            qCrop: undefined,
+            qScale: 1.0,
+          };
+        } else {
+          return {
+            ...c,
+            solutionPageNum: newPageNum,
+            solutionImage: targetPage.image,
+            croppedSolutionImage: undefined,
+            solCrop: undefined,
+            solScale: 1.0,
+          };
+        }
+      }
+      return c;
+    }));
+
+    setActiveCropBox({ x: 0, y: 0, width: 100, height: 100 });
+    setActiveScale(1.0);
   };
 
   const handleResetCropOnCard = (cardId: string, type: 'question' | 'solution') => {
@@ -497,10 +590,48 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   const selectedCards = cards.filter(c => c.isSelected !== false);
   const selectedCount = selectedCards.length;
   const allSelected = cards.length > 0 && selectedCount === cards.length;
+
+  const flatTargets = getFlatTargets(cards);
+  const currentTargetIndex = cropTarget
+    ? flatTargets.findIndex(t => t.cardId === cropTarget.cardId && t.type === cropTarget.type)
+    : -1;
+  const hasPrevPage = currentTargetIndex > 0;
+  const hasNextPage = currentTargetIndex >= 0 && currentTargetIndex < flatTargets.length - 1;
+  const prevTarget = hasPrevPage ? flatTargets[currentTargetIndex - 1] : null;
+  const nextTarget = hasNextPage ? flatTargets[currentTargetIndex + 1] : null;
+
   const currentCroppingCard = cropTarget ? cards.find(c => c.id === cropTarget.cardId) : null;
+  const currentDisplayedPageNum = currentCroppingCard 
+    ? (cropTarget?.type === 'question' 
+        ? currentCroppingCard.originalPageNum 
+        : (currentCroppingCard.solutionPageNum || currentCroppingCard.originalPageNum + 1))
+    : 1;
+
   const currentCroppingImageSrc = currentCroppingCard 
     ? (cropTarget?.type === 'question' ? currentCroppingCard.questionImage : currentCroppingCard.solutionImage || currentCroppingCard.questionImage) 
     : '';
+
+  // Keyboard arrow keys for crop navigation
+  useEffect(() => {
+    if (!cropTarget) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+
+      if (e.key === 'ArrowLeft' && hasPrevPage) {
+        e.preventDefault();
+        handleNavigateCrop('prev');
+      } else if (e.key === 'ArrowRight' && hasNextPage) {
+        e.preventDefault();
+        handleNavigateCrop('next');
+      } else if (e.key === 'Escape') {
+        setCropTarget(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cropTarget, currentTargetIndex, flatTargets, hasPrevPage, hasNextPage, activeCropBox, activeScale]);
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-[#0B0D13] text-slate-100 flex flex-col select-none">
@@ -962,64 +1093,169 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       {/* 3. INTERACTIVE VISUAL CROP & SCALE MODAL */}
       <AnimatePresence>
         {cropTarget && currentCroppingCard && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-4xl bg-[#141824] border border-white/[0.1] rounded-2xl flex flex-col max-h-[92vh] shadow-2xl overflow-hidden"
+              className="w-full max-w-5xl bg-[#141824] border border-white/[0.1] rounded-2xl flex flex-col max-h-[94vh] shadow-2xl overflow-hidden"
             >
               {/* Modal Header */}
-              <div className="p-4 border-b border-white/[0.08] flex items-center justify-between bg-[#0E111A]">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-orange-500/20 text-orange-400">
+              <div className="p-3 sm:p-4 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3 bg-[#0E111A]">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2 rounded-xl bg-orange-500/20 text-orange-400 shrink-0">
                     <Scissors className="w-5 h-5" />
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">
-                      Crop {cropTarget.type === 'question' ? 'Question' : 'Solution'} (Page {cropTarget.type === 'question' ? currentCroppingCard.originalPageNum : currentCroppingCard.solutionPageNum})
-                    </h3>
-                    <p className="text-xs text-slate-400">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-bold text-white">
+                        Crop {cropTarget.type === 'question' ? 'Question' : 'Solution'} (Page {currentDisplayedPageNum})
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#FF6B2B]/15 text-[#FF884D] border border-[#FF6B2B]/30 uppercase tracking-wider">
+                        {cropTarget.type === 'question' ? 'Question' : 'Solution'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 truncate">
                       Click & drag your mouse over the page to select the exact question or solution area.
                     </p>
                   </div>
                 </div>
 
-                {/* Switch Q / Sol tabs if merged */}
-                {currentCroppingCard.isMerged && (
-                  <div className="flex items-center gap-1 bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.08]">
+                {/* Center / Action Navigation: Prev / Next Page & Tabs */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Next / Previous Page Navigation Pill */}
+                  <div className="flex items-center gap-1 bg-black/50 border border-white/[0.1] p-1 rounded-xl shadow-inner">
                     <button
                       type="button"
-                      onClick={() => setCropTarget({ cardId: currentCroppingCard.id, type: 'question' })}
-                      className={`px-3 py-1 rounded text-xs font-bold transition-all ${
-                        cropTarget.type === 'question' ? 'bg-[#FF6B2B] text-white shadow' : 'text-slate-400 hover:text-white'
-                      }`}
+                      onClick={() => handleNavigateCrop('prev')}
+                      disabled={!hasPrevPage}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-white/[0.08] active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
+                      title={prevTarget ? `Previous: ${prevTarget.label} (Arrow Left)` : 'No previous page'}
                     >
-                      Question (P.{currentCroppingCard.originalPageNum})
+                      <ChevronLeft className="w-4 h-4 text-orange-400" />
+                      <span>Prev Page</span>
                     </button>
+
+                    <div className="px-2.5 py-1 text-xs font-mono font-extrabold text-amber-400 bg-white/[0.05] rounded-md border border-white/[0.06] flex items-center gap-1">
+                      <span>{currentTargetIndex >= 0 ? `${currentTargetIndex + 1}/${flatTargets.length}` : ''}</span>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => setCropTarget({ cardId: currentCroppingCard.id, type: 'solution' })}
-                      className={`px-3 py-1 rounded text-xs font-bold transition-all ${
-                        cropTarget.type === 'solution' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                      }`}
+                      onClick={() => handleNavigateCrop('next')}
+                      disabled={!hasNextPage}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white hover:bg-white/[0.08] active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
+                      title={nextTarget ? `Next: ${nextTarget.label} (Arrow Right)` : 'No next page'}
                     >
-                      Solution (P.{currentCroppingCard.solutionPageNum})
+                      <span>Next Page</span>
+                      <ChevronRight className="w-4 h-4 text-orange-400" />
                     </button>
                   </div>
-                )}
 
-                <button
-                  type="button"
-                  onClick={() => setCropTarget(null)}
-                  className="text-slate-400 hover:text-white p-1"
-                >
-                  ✕
-                </button>
+                  {/* Switch Q / Sol tabs if merged */}
+                  {currentCroppingCard.isMerged && (
+                    <div className="flex items-center gap-1 bg-white/[0.04] p-0.5 rounded-lg border border-white/[0.08]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          saveCropForTarget(cropTarget, activeCropBox, activeScale);
+                          setCropTarget({ cardId: currentCroppingCard.id, type: 'question' });
+                        }}
+                        className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${
+                          cropTarget.type === 'question' ? 'bg-[#FF6B2B] text-white shadow' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Question (P.{currentCroppingCard.originalPageNum})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          saveCropForTarget(cropTarget, activeCropBox, activeScale);
+                          setCropTarget({ cardId: currentCroppingCard.id, type: 'solution' });
+                        }}
+                        className={`px-3 py-1.5 rounded text-xs font-bold transition-all ${
+                          cropTarget.type === 'solution' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Solution (P.{currentCroppingCard.solutionPageNum || currentCroppingCard.originalPageNum + 1})
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Source PDF Page Selector */}
+                  {allPdfPages.length > 1 && (
+                    <div className="hidden lg:flex items-center gap-1 text-xs bg-white/[0.04] border border-white/[0.08] px-2 py-1 rounded-xl">
+                      <span className="text-slate-400 text-[11px] font-medium">PDF:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleChangeSourcePage(currentDisplayedPageNum - 1)}
+                        disabled={currentDisplayedPageNum <= 1}
+                        className="p-1 rounded hover:bg-white/[0.1] text-slate-300 disabled:opacity-30 transition-all"
+                        title="Previous PDF Page"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <select
+                        value={currentDisplayedPageNum}
+                        onChange={(e) => handleChangeSourcePage(Number(e.target.value))}
+                        className="bg-transparent text-white font-bold text-xs border-none outline-none cursor-pointer py-0.5"
+                        title="Change source PDF page for this crop"
+                      >
+                        {allPdfPages.map((p) => (
+                          <option key={p.pageNum} value={p.pageNum} className="bg-[#141824] text-white">
+                            Page {p.pageNum}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => handleChangeSourcePage(currentDisplayedPageNum + 1)}
+                        disabled={currentDisplayedPageNum >= allPdfPages.length}
+                        className="p-1 rounded hover:bg-white/[0.1] text-slate-300 disabled:opacity-30 transition-all"
+                        title="Next PDF Page"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setCropTarget(null)}
+                    className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/[0.08] transition-all ml-1"
+                    title="Close (Esc)"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
-              {/* Crop Canvas Body */}
-              <div className="flex-1 overflow-auto p-4 bg-[#07090E] flex items-center justify-center min-h-[420px]">
+              {/* Crop Canvas Body with Floating Side Arrows */}
+              <div className="flex-1 overflow-auto p-4 bg-[#07090E] flex items-center justify-center min-h-[420px] relative group">
+                {/* Floating Left Navigation Arrow */}
+                {hasPrevPage && (
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateCrop('prev')}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/80 hover:bg-[#FF6B2B] text-white/80 hover:text-white border border-white/10 hover:border-transparent shadow-2xl backdrop-blur-md transition-all active:scale-90"
+                    title={prevTarget ? `Previous: ${prevTarget.label} (Arrow Left)` : 'Previous'}
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                )}
+
+                {/* Floating Right Navigation Arrow */}
+                {hasNextPage && (
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateCrop('next')}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/80 hover:bg-[#FF6B2B] text-white/80 hover:text-white border border-white/10 hover:border-transparent shadow-2xl backdrop-blur-md transition-all active:scale-90"
+                    title={nextTarget ? `Next: ${nextTarget.label} (Arrow Right)` : 'Next'}
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                )}
+
                 <div 
                   className="relative cursor-crosshair border border-white/[0.1] rounded shadow-2xl overflow-hidden max-w-full"
                   onMouseDown={handleCropMouseDown}
@@ -1051,12 +1287,12 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
               </div>
 
               {/* Modal Footer Controls */}
-              <div className="p-4 border-t border-white/[0.08] bg-[#0E111A] flex flex-wrap items-center justify-between gap-4">
+              <div className="p-3 sm:p-4 border-t border-white/[0.08] bg-[#0E111A] flex flex-wrap items-center justify-between gap-3">
                 {/* Scale / Zoom Slider */}
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2 text-xs text-slate-300">
                     <ZoomIn className="w-4 h-4 text-orange-400" />
-                    <span>Zoom / Scale:</span>
+                    <span>Zoom:</span>
                     <input
                       type="range"
                       min={0.8}
@@ -1064,9 +1300,9 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                       step={0.05}
                       value={activeScale}
                       onChange={(e) => setActiveScale(Number(e.target.value))}
-                      className="w-32 accent-[#FF6B2B]"
+                      className="w-28 sm:w-32 accent-[#FF6B2B]"
                     />
-                    <span className="font-mono text-white font-bold w-12 text-right">
+                    <span className="font-mono text-white font-bold w-10 text-right">
                       {Math.round(activeScale * 100)}%
                     </span>
                   </div>
@@ -1077,25 +1313,48 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                       setActiveCropBox({ x: 0, y: 0, width: 100, height: 100 });
                       setActiveScale(1.0);
                     }}
-                    className="px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-xs text-slate-300"
+                    className="px-2.5 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-xs text-slate-300 transition-all"
                   >
                     Reset Full Page
                   </button>
                 </div>
 
-                {/* Apply / Cancel */}
-                <div className="flex items-center gap-2">
+                {/* Footer Navigation & Apply / Cancel */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateCrop('prev')}
+                    disabled={!hasPrevPage}
+                    className="flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-xl border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
+                    title={prevTarget ? `Previous: ${prevTarget.label}` : 'No previous page'}
+                  >
+                    <ChevronLeft className="w-4 h-4 text-orange-400" />
+                    <span>Prev Page</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateCrop('next')}
+                    disabled={!hasNextPage}
+                    className="flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-xl border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] text-slate-300 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
+                    title={nextTarget ? `Next: ${nextTarget.label}` : 'No next page'}
+                  >
+                    <span>Next Page</span>
+                    <ChevronRight className="w-4 h-4 text-orange-400" />
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setCropTarget(null)}
-                    className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white"
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-400 hover:text-white transition-all"
                   >
                     Cancel
                   </button>
+
                   <button
                     type="button"
                     onClick={handleApplyCrop}
-                    className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#FF6B2B]/25"
+                    className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#FF6B2B]/25 hover:shadow-[#FF6B2B]/40 active:scale-95 transition-all"
                   >
                     <Check className="w-4 h-4" />
                     <span>Apply & Save Crop</span>

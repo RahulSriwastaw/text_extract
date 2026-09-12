@@ -337,18 +337,23 @@ export function normalizeStrictSubject(
 }
 
 /**
- * Ensures text is wrapped in semantic HTML (<p>...</p>) if not already HTML.
+ * Ensures text is wrapped in semantic HTML (<p>...</p>) if not already strictly enclosed in <p>.
  */
 export function ensureHtmlParagraph(text: string): string {
   if (!text) return '';
   const trimmed = text.trim();
-  if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+  if (!trimmed) return '';
+
+  // Check if ALREADY strictly wrapped in <p>...</p>
+  if (/^<p(?:\s+[^>]*)?>/i.test(trimmed) && /<\/p>$/i.test(trimmed)) {
     return trimmed;
   }
-  // If multiline, wrap each line or paragraph in <p>
-  const paras = trimmed.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+
+  // Strip broken partial outer tags if any
+  const uncorrupted = trimmed.replace(/^<p(?:\s+[^>]*)?>/i, '').replace(/<\/p>$/i, '').trim();
+  const paras = uncorrupted.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
   if (paras.length <= 1) {
-    return `<p>${trimmed.replace(/\n/g, '<br>')}</p>`;
+    return `<p>${uncorrupted.replace(/\n/g, '<br>')}</p>`;
   }
   return paras.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
 }
@@ -935,28 +940,28 @@ export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
   // First, auto-recover trailing options from stem if options are blank:
   const recovered = autoRecoverItemOptionsFromStem(item);
 
-  const qHi = cleanMocktestText(recovered.question_hi);
-  const qEn = cleanMocktestText(recovered.question_en);
-  const solHi = cleanMocktestText(recovered.solution_hi);
-  const solEn = cleanMocktestText(recovered.solution_en);
+  const qHi = ensureHtmlParagraph(cleanMocktestText(recovered.question_hi));
+  const qEn = ensureHtmlParagraph(cleanMocktestText(recovered.question_en));
+  const solHi = ensureHtmlParagraph(cleanMocktestText(recovered.solution_hi));
+  const solEn = ensureHtmlParagraph(cleanMocktestText(recovered.solution_en));
 
   const cleanSubject = normalizeStrictSubject(recovered.subject, `${qHi} ${qEn}`, `${solHi} ${solEn}`);
 
   return {
     ...recovered,
     question_hi: qHi,
-    option1_hi: cleanMocktestText(recovered.option1_hi),
-    option2_hi: cleanMocktestText(recovered.option2_hi),
-    option3_hi: cleanMocktestText(recovered.option3_hi),
-    option4_hi: cleanMocktestText(recovered.option4_hi),
-    option5_hi: cleanMocktestText(recovered.option5_hi),
+    option1_hi: ensureHtmlParagraph(cleanMocktestText(recovered.option1_hi)),
+    option2_hi: ensureHtmlParagraph(cleanMocktestText(recovered.option2_hi)),
+    option3_hi: ensureHtmlParagraph(cleanMocktestText(recovered.option3_hi)),
+    option4_hi: ensureHtmlParagraph(cleanMocktestText(recovered.option4_hi)),
+    option5_hi: ensureHtmlParagraph(cleanMocktestText(recovered.option5_hi)),
     solution_hi: solHi,
     question_en: qEn,
-    option1_en: cleanMocktestText(recovered.option1_en),
-    option2_en: cleanMocktestText(recovered.option2_en),
-    option3_en: cleanMocktestText(recovered.option3_en),
-    option4_en: cleanMocktestText(recovered.option4_en),
-    option5_en: cleanMocktestText(recovered.option5_en),
+    option1_en: ensureHtmlParagraph(cleanMocktestText(recovered.option1_en)),
+    option2_en: ensureHtmlParagraph(cleanMocktestText(recovered.option2_en)),
+    option3_en: ensureHtmlParagraph(cleanMocktestText(recovered.option3_en)),
+    option4_en: ensureHtmlParagraph(cleanMocktestText(recovered.option4_en)),
+    option5_en: ensureHtmlParagraph(cleanMocktestText(recovered.option5_en)),
     solution_en: solEn,
     subject: cleanSubject,
     subject_level: recovered.subject_level || '',
@@ -977,6 +982,135 @@ export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
   };
 }
 
+/**
+ * Standardizes mathematical formulas into clean MathJax \(...\) inline syntax,
+ * converting HTML <sup>/<sub> and Unicode operators/roots (e.g. y<sup>3</sup> -> \(y^3\), ∛0.008 -> \(\sqrt[3]{0.008}\))
+ * while strictly preserving HTML <p> wrappers.
+ */
+export function convertToMathJaxSyntax(text: string): string {
+  if (!text) return '';
+  let res = text.trim();
+
+  // 1. Trig functions with powers: sin² θ -> \sin^2 \theta, cos² θ -> \cos^2 \theta, etc.
+  res = res.replace(/\b(sin|cos|tan|sec|csc|cot|cosec)\s*[²2]\s*θ/gi, (_m, fn) => `\\(\\${fn.toLowerCase()}^2 \\theta\\)`);
+  res = res.replace(/\b(sin|cos|tan|sec|csc|cot|cosec)\s*[³3]\s*θ/gi, (_m, fn) => `\\(\\${fn.toLowerCase()}^3 \\theta\\)`);
+  res = res.replace(/\b(sin|cos|tan|sec|csc|cot|cosec)\s*θ/gi, (_m, fn) => `\\(\\${fn.toLowerCase()} \\theta\\)`);
+
+  // 2. Convert HTML exponents & subscripts to LaTeX within MathJax:
+  // e.g. y<sup>3</sup> -> \(y^3\), y<sup>{n-1}</sup> -> \(y^{n-1}\)
+  res = res.replace(/([a-zA-Z0-9\)]+)\s*<sup>([^{}<>]+)<\/sup>/gi, (_m, base, exp) => {
+    const cleanExp = exp.trim();
+    const expStr = cleanExp.length === 1 ? cleanExp : `{${cleanExp}}`;
+    return `\\(${base}^${expStr}\\)`;
+  });
+
+  res = res.replace(/([a-zA-Z0-9\)]+)\s*<sub>([^{}<>]+)<\/sub>/gi, (_m, base, sub) => {
+    const cleanSub = sub.trim();
+    const subStr = cleanSub.length === 1 ? cleanSub : `{${cleanSub}}`;
+    return `\\(${base}_${subStr}\\)`;
+  });
+
+  res = res.replace(/<sup>([^{}<>]+)<\/sup>/gi, (_m, exp) => `\\(^{${exp.trim()}}\\)`);
+  res = res.replace(/<sub>([^{}<>]+)<\/sub>/gi, (_m, sub) => `\\(_{${sub.trim()}}\\)`);
+
+  // 3. Convert Unicode superscripts: e.g. 4², x³, y²
+  res = res.replace(/([a-zA-Z0-9\)]+)[\s]*²(?!\w)/g, `\\($1^2\\)`);
+  res = res.replace(/([a-zA-Z0-9\)]+)[\s]*³(?!\w)/g, `\\($1^3\\)`);
+
+  // 4. Convert Unicode cube roots & square roots:
+  // ∛0.008 or ∛(0.008) -> \(\sqrt[3]{0.008}\)
+  res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, (_m, inside) => `\\(\\sqrt[3]{${inside.trim()}}\\)`);
+  res = res.replace(/√\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, (_m, inside) => `\\(\\sqrt{${inside.trim()}}\\)`);
+
+  // 5. Degrees: 90° -> \(90^\circ\)
+  res = res.replace(/(\d+)\s*°/g, `\\($1^\\circ\\)`);
+
+  // 6. Greek letters: θ, α, β, π
+  res = res.replace(/\bθ\b|(?<=[0-9a-zA-Z\^\s])θ/g, `\\(\\theta\\)`);
+  res = res.replace(/\bα\b/g, `\\(\\alpha\\)`);
+  res = res.replace(/\bβ\b/g, `\\(\\beta\\)`);
+  res = res.replace(/\bπ\b/g, `\\(\\pi\\)`);
+
+  // 7. Fractions written as (a) / (b):
+  res = res.replace(/\(\s*([0-9a-zA-Z\^\_\+\-\*\s\\]+)\s*\)\s*\/\s*\(\s*([0-9a-zA-Z\^\_\+\-\*\s\\]+)\s*\)/g, (_m, num, den) => {
+    return `\\(\\frac{${num.trim()}}{${den.trim()}}\\)`;
+  });
+
+  // Numeric fractions: e.g. 13/12, 5/13, (13/12)
+  res = res.replace(/(?<=\s|^|\(|>|:|;)(\d+)\s*\/\s*(\d+)(?=\s|$|\)|<|\.|\,)/g, (_m, num, den) => {
+    return `\\(\\frac{${num}}{${den}}\\)`;
+  });
+
+  // Simple variable fractions: a / b
+  res = res.replace(/(?<=\s|^|\(|>)([a-zA-Z])\s*\/\s*([a-zA-Z])(?=\s|$|\)|<|\.|\,)/g, (_m, num, den) => {
+    return `\\(\\frac{${num}}{${den}}\\)`;
+  });
+
+  // Multiplication / division operators between terms
+  res = res.replace(/(\d+|[a-zA-Z])\s*×\s*(\d+|[a-zA-Z])/g, `\\($1 \\times $2\\)`);
+  res = res.replace(/(\d+|[a-zA-Z])\s*÷\s*(\d+|[a-zA-Z])/g, `\\($1 \\div $2\\)`);
+
+  // 8. Consolidate adjacent MathJax blocks and inline operators:
+  for (let k = 0; k < 4; k++) {
+    res = res.replace(/\\\(([^()]+)\\\)\s*\\\(([^()]+)\\\)/g, `\\($1 $2\\)`);
+    res = res.replace(/\\\(([^()]+)\\\)\s*([+\-*=×÷<≤>≥≠])\s*\\\(([^()]+)\\\)/g, (_m, a, op, b) => {
+      const texOp = op === '×' ? '\\times' : (op === '÷' ? '\\div' : (op === '≤' ? '\\le' : (op === '≥' ? '\\ge' : (op === '≠' ? '\\ne' : op))));
+      return `\\(${a.trim()} ${texOp} ${b.trim()}\\)`;
+    });
+    res = res.replace(/\\\(([^()]+)\\\)\s*([+\-*=×÷])\s*(\d+|[a-zA-Z])/g, (_m, a, op, b) => {
+      const texOp = op === '×' ? '\\times' : (op === '÷' ? '\\div' : op);
+      return `\\(${a.trim()} ${texOp} ${b}\\)`;
+    });
+    res = res.replace(/(\d+|[a-zA-Z])\s*([+\-*=×÷])\s*\\\(([^()]+)\\\)/g, (_m, a, op, b) => {
+      const texOp = op === '×' ? '\\times' : (op === '÷' ? '\\div' : op);
+      return `\\(${a} ${texOp} ${b.trim()}\\)`;
+    });
+  }
+
+  // Clean double delimiters or redundant wrappers
+  res = res.replace(/\\\(\s*\\\(([^()]+)\\\)\s*\\\)/g, `\\($1\\)`);
+  res = res.replace(/\\\(\s+/g, `\\(`).replace(/\s+\\\)/g, `\\)`);
+
+  return res;
+}
+
+/**
+ * Normalizes all text fields of a MockTestMcqItem to ensure:
+ * 1. 100% consistent <p>...</p> HTML wrapping on all fields (no bare text).
+ * 2. Standard MathJax \(...\) notation for exponents (y^3), roots (\sqrt[3]{...}), and math symbols.
+ */
+export function standardizeItemHtmlAndMathJax(item: MockTestMcqItem, useMathJax: boolean = true): MockTestMcqItem {
+  const cleaned = cleanMockTestItem(item);
+  if (!useMathJax) {
+    return cleaned;
+  }
+
+  const applyMathJax = (field?: string) => {
+    if (!field || !field.trim()) return '';
+    const withMathJax = convertToMathJaxSyntax(field);
+    return ensureHtmlParagraph(withMathJax);
+  };
+
+  return {
+    ...cleaned,
+    question_hi: applyMathJax(cleaned.question_hi),
+    option1_hi: applyMathJax(cleaned.option1_hi),
+    option2_hi: applyMathJax(cleaned.option2_hi),
+    option3_hi: applyMathJax(cleaned.option3_hi),
+    option4_hi: applyMathJax(cleaned.option4_hi),
+    option5_hi: applyMathJax(cleaned.option5_hi),
+    solution_hi: applyMathJax(cleaned.solution_hi),
+    question_en: applyMathJax(cleaned.question_en),
+    option1_en: applyMathJax(cleaned.option1_en),
+    option2_en: applyMathJax(cleaned.option2_en),
+    option3_en: applyMathJax(cleaned.option3_en),
+    option4_en: applyMathJax(cleaned.option4_en),
+    option5_en: applyMathJax(cleaned.option5_en),
+    solution_en: applyMathJax(cleaned.solution_en),
+    latex_check: 'checked',
+    html_check: 'checked'
+  };
+}
 
 /**
  * Escapes an individual field for RFC 4180 compliant CSV.
@@ -1019,15 +1153,16 @@ export function normalizeAnswerFormat(
 
 /**
  * Serializes MockTestMcqItem array into a clean, RFC 4180 CSV string with UTF-8 BOM.
- * Formats all 34 fields in the exact specified order.
+ * Formats all 34 fields in the exact specified order with 100% consistent <p> tags and MathJax.
  */
 export function serializeMockTestToCsv(
   items: MockTestMcqItem[],
-  answerFormat: 'letters' | 'numbers' = 'letters'
+  answerFormat: 'letters' | 'numbers' = 'letters',
+  mathFormat: 'mathjax' | 'unicode' = 'mathjax'
 ): string {
   const headerLine = MOCKTEST_CSV_HEADERS.join(',');
   const lines = items.map((rawItem, index) => {
-    const item = cleanMockTestItem(rawItem);
+    const item = standardizeItemHtmlAndMathJax(rawItem, mathFormat === 'mathjax');
     const qNum = item.question_r || index + 1;
     const ans = normalizeAnswerFormat(item.answer, answerFormat);
 
@@ -1080,9 +1215,10 @@ export function serializeMockTestToCsv(
 export function downloadMockTestCsv(
   items: MockTestMcqItem[],
   fileName: string = 'mocktest_mcqs.csv',
-  answerFormat: 'letters' | 'numbers' = 'letters'
+  answerFormat: 'letters' | 'numbers' = 'letters',
+  mathFormat: 'mathjax' | 'unicode' = 'mathjax'
 ): void {
-  const csvContent = serializeMockTestToCsv(items, answerFormat);
+  const csvContent = serializeMockTestToCsv(items, answerFormat, mathFormat);
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

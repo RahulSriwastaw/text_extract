@@ -26,6 +26,7 @@ import {
   generateDeepSolutionForItem,
   proofreadMocktestItems,
   cleanMockTestItem,
+  standardizeItemHtmlAndMathJax,
   STANDARD_SUBJECTS,
   normalizeStrictSubject,
   detectItemFieldIssues,
@@ -109,6 +110,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [setName, setSetName] = useState<string>('RRB NTPC 2024 CBT-1');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('medium');
   const [answerFormat, setAnswerFormat] = useState<'letters' | 'numbers'>('letters');
+  const [mathFormat, setMathFormat] = useState<'mathjax' | 'unicode'>('mathjax');
   const [autoDeepSolveAll, setAutoDeepSolveAll] = useState<boolean>(true);
 
   // Extracted MCQs state
@@ -810,13 +812,13 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       return;
     }
     const safeName = setName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
-    downloadMockTestCsv(extractedMcqs, `${safeName}_mocktest.csv`, answerFormat);
+    downloadMockTestCsv(extractedMcqs, `${safeName}_mocktest.csv`, answerFormat, mathFormat);
   };
 
   // Copy CSV to clipboard
   const handleCopyCsv = () => {
     if (extractedMcqs.length === 0) return;
-    const csv = serializeMockTestToCsv(extractedMcqs, answerFormat);
+    const csv = serializeMockTestToCsv(extractedMcqs, answerFormat, mathFormat);
     navigator.clipboard.writeText(csv);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -832,14 +834,32 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       if (text) {
         const parsed = parseCsvToMockTestItems(text, setName);
         if (parsed.length > 0) {
-          setExtractedMcqs(parsed);
-          alert(`Successfully imported ${parsed.length} MCQs!`);
+          // Standardize imported items: enforce strict <p>...</p> wrapping and MathJax format
+          const standardized = parsed.map(it => standardizeItemHtmlAndMathJax(it, mathFormat === 'mathjax'));
+          setExtractedMcqs(standardized);
+          alert(`✨ Successfully imported and standardized ${standardized.length} MCQs!\n\nAll bare text fields (e.g. Q.21-25, 46-50, 76) have been wrapped in <p>...</p> and formatted consistently.`);
         } else {
           alert('Could not parse any MCQs from this CSV file. Verify headers.');
         }
       }
     };
     reader.readAsText(file, 'utf-8');
+  };
+
+  // Standardize 100% consistent <p>...</p> wrappers & standard MathJax \(...\) syntax across all loaded questions
+  const handleStandardizeMathJaxAndHtml = () => {
+    if (extractedMcqs.length === 0) {
+      alert('No questions loaded to standardize.');
+      return;
+    }
+    const standardized = extractedMcqs.map(it => standardizeItemHtmlAndMathJax(it, true));
+    setExtractedMcqs(standardized);
+    setPages(prev => prev.map(p => ({
+      ...p,
+      items: (p.items || []).map(it => standardizeItemHtmlAndMathJax(it, true))
+    })));
+    setLiveStatusText(`✨ Standardized MathJax \\(...\\) & <p>...</p> on all ${standardized.length} MCQs!`);
+    alert(`✨ Format Standardization Complete!\n\nAll ${standardized.length} questions now have:\n1. 100% consistent <p>...</p> HTML wrapping across all 14 text fields (0 bare text).\n2. Standard MathJax \\(...\\) notation for exponents (y³ → \\(y^3\\)), roots (∛ → \\(\\sqrt[3]{...}\\)), and fractions.`);
   };
 
   // Deep AI Proofreading
@@ -1267,7 +1287,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         </div>
 
         {/* Global Configuration Fields */}
-        <div className="mt-3 pt-3 border-t border-white/[0.08] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="mt-3 pt-3 border-t border-white/[0.08] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               Set / Paper Name (set_name)
@@ -1310,6 +1330,38 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                 }`}
               >
                 Numbers (1, 2, 3, 4)
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              Math Notation (LaTeX/HTML)
+            </label>
+            <div className="flex items-center gap-1 p-0.5 bg-black/40 border border-white/[0.1] rounded-lg">
+              <button
+                type="button"
+                onClick={() => setMathFormat('mathjax')}
+                title="MathJax \(...\) for exponents, roots, and fractions"
+                className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
+                  mathFormat === 'mathjax'
+                    ? 'bg-amber-500 text-black shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                MathJax \(...\)
+              </button>
+              <button
+                type="button"
+                onClick={() => setMathFormat('unicode')}
+                title="Plain Unicode and HTML <sup>/<sub> tags"
+                className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
+                  mathFormat === 'unicode'
+                    ? 'bg-amber-500 text-black shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Unicode / HTML
               </button>
             </div>
           </div>
@@ -1617,6 +1669,18 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                 >
                   {isProofreading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-cyan-300" />}
                   <span>✨ AI Proofread (Clean Tags)</span>
+                </button>
+
+                {/* Standardize MathJax & <p> */}
+                <button
+                  type="button"
+                  onClick={handleStandardizeMathJaxAndHtml}
+                  disabled={extractedMcqs.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
+                  title="Enforce 100% consistent <p> wrapping on all 14 fields (no bare text) and apply standard MathJax \(...\) notation"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>📐 Fix & Standardize MathJax + &lt;p&gt;</span>
                 </button>
 
                 {/* Clean Tags & Math */}

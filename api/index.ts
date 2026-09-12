@@ -1310,6 +1310,97 @@ app.post('/api/proofread', async (req, res) => {
   }
 });
 
+// Server-side cleaner for math, LaTeX, stray $, and template scaffolding
+function cleanServerMocktestText(text: string): string {
+  if (!text) return '';
+  let res = text;
+  // Strip AI coach filler
+  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Important Exam Point\s*:\s*(?:<\/strong>|<\/b>)?[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
+  // Strip scaffolding headers
+  res = res.replace(/(?:<strong>|<b>)?\s*Key Point\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
+  res = res.replace(/(?:<strong>|<b>)?\s*Detailed Explanation\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
+  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Additional Information\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '<br>');
+  // Corrupted escapes
+  res = res.replace(/[\x0c\u21e1\u2191]rac/g, '\\frac');
+  res = res.replace(/[\x09\b]imes/g, '\\times');
+  res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
+  res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
+  res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
+  // Degree symbol in prose
+  res = res.replace(/(\d+(?:\.\d+)?)\s*\^\\circ/g, '$1°');
+  // Stray $ on variables
+  res = res.replace(/\$([A-Za-z])\s*([=+\-*\/])\s*(\d+)\$?/g, '$1 $2 $3');
+  res = res.replace(/(?<=[\u0900-\u097F]\s*)\$([A-Za-z])\b/g, '$1');
+  res = res.replace(/\$([A-Za-z])\b(?=\s*[\u0900-\u097F]|\s*[,\.\(\)])/g, '$1');
+  res = res.replace(/\$([A-Za-z])\$(?=\s*[\u0900-\u097F]|\s*[,\.\(\)])/g, '$1');
+  // Stray $ on numbers/counts/rupees
+  res = res.replace(/(?<!\$[^$]*)\b(\d+)\s*\$(?=\s+[\u0900-\u097F]|[^\d\w]|$)/g, '$1');
+  res = res.replace(/\$\s*(\d+(?:\.\d+)?%)/g, '$1');
+  res = res.replace(/\$\s*=\s*/g, '= ');
+  res = res.replace(/=\s*\$\s*₹/g, '= ₹');
+  res = res.replace(/\$\s*₹/g, '₹');
+  res = res.replace(/₹\s*\$/g, '₹');
+  res = res.replace(/(₹\s*\d+(?:,\d+)*(?:\.\d+)?)\$/g, '$1');
+  res = res.replace(/₹\s*\$\$\s*([^\$]+?)\s*\$\$/g, (_m, val) => `₹${val.trim()}`);
+  res = res.replace(/₹\s*\$\s*([^\$]+?)\s*\$/g, (_m, val) => `₹${val.trim()}`);
+  res = res.replace(/\$\$\s*₹\s*([^\$]+?)\s*\$\$/g, (_m, val) => `₹${val.trim()}`);
+  res = res.replace(/\$\s*₹\s*([^\$]+?)\s*\$/g, (_m, val) => `₹${val.trim()}`);
+  res = res.replace(/\$([A-Z](?:,\s*[A-Z])+)\$/g, '$1');
+  res = res.replace(/(?<=[\u0900-\u097F]\s*)\$([A-Z])\$(?=\s*[\u0900-\u097F]|\s*और|\s*तथा|\s*के|\s*का|\s*की|\s*को|\s*से|\s*में|\s*पर|\s*है|\s*था|$)/g, '$1');
+  res = res.replace(/(?<=\b(?:और|तथा|एवं|यदि|तो|माना|कि|स्थान|व्यक्ति|मित्र|छात्र|पंक्ति)\s*)\$([A-Z])\$/g, '$1');
+  res = res.replace(/\$([A-Z])\$(?=\s*(?:पंक्ति|के|का|की|को|से|में|पर|है|था|बाएं|दाएं|बाएँ|दाएँ))/g, '$1');
+  res = res.replace(/\$\$?\s*([+-]?\d+(?:[,\.]\d+)?)\s*(?:\\%|%)\s*\$\$?/g, '$1%');
+  res = res.replace(/\$\$?\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*\$\$?/g, '$1');
+  res = res.replace(/(\d+(?:\.\d+)?)\\\%/g, '$1%');
+  res = res.replace(/\$\$([^\$\n]+?)\$\$/g, '$$$1$$');
+  const parts = res.split('<br>');
+  if (parts.length > 1) {
+    res = parts.map(part => {
+      const dollarCount = (part.match(/(?<!\\)\$/g) || []).length;
+      if (dollarCount % 2 !== 0) return part + '$';
+      return part;
+    }).join('<br>');
+  }
+  const lines = res.split(/(<br\s*\/?>|\n)/gi);
+  const processedLines = lines.map(line => {
+    if (line.startsWith('<br') || line === '\n') return line;
+    if ((line.includes('\\frac') || line.includes('\\times')) && !line.includes('$')) {
+      return line.replace(/(?:(कोण|सूत्र|मान|उत्तर)\s*[:=]\s*)?(\\frac[^\n<]+|[^=\n<]*\\times[^\n<]+)/g, (match, label, eq) => {
+        const prefix = label ? `${label} = ` : '';
+        return `${prefix}$${eq.trim()}$`;
+      });
+    }
+    return line;
+  });
+  res = processedLines.join('');
+  const totalDollars = (res.match(/(?<!\\)\$/g) || []).length;
+  if (totalDollars % 2 !== 0) {
+    const lastIdx = res.lastIndexOf('$');
+    if (lastIdx >= 0) res = res.slice(0, lastIdx) + res.slice(lastIdx + 1);
+  }
+  res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
+  res = res.replace(/<p>\s*<br\s*\/?>/gi, '<p>');
+  res = res.replace(/\s*[\/\\]\s*$/g, '');
+  return res.trim();
+}
+
+function safeParseAiJson(rawJson: string): any {
+  const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+  const safeJsonStr = cleaned
+    .replace(/(?<!\\)\\frac/g, '\\\\frac')
+    .replace(/(?<!\\)\\times/g, '\\\\times')
+    .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
+    .replace(/(?<!\\)\\text/g, '\\\\text')
+    .replace(/(?<!\\)\\div/g, '\\\\div')
+    .replace(/(?<!\\)\\pm/g, '\\\\pm')
+    .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
+    .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
+    .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
+    .replace(/(?<!\\)\\neq/g, '\\\\neq')
+    .replace(/(?<!\\)\\approx/g, '\\\\approx');
+  return JSON.parse(safeJsonStr);
+}
+
 app.post('/api/mocktest-solve', async (req, res) => {
   try {
     const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option1_en, option2_en, option3_en, option4_en, answer, question_type } = req.body;
@@ -1337,19 +1428,25 @@ Question: ${question_en || ''}
 (D) ${option4_en || ''}
 
 DEEP RESEARCH & SOLUTION REQUIREMENTS:
-1. 'solution_hi': Detailed, pedagogical explanation in Hindi wrapped in semantic HTML (<p><b>हल:</b>...</p>).
+1. 'solution_hi': Detailed, pedagogical explanation in Hindi wrapped in clean semantic HTML (<p><b>हल:</b>...</p>).
    - Must include:
      a) दिया गया डेटा (Given Data) & मुख्य अवधारणा (Core Concept/Theorem).
-     b) आवश्यक सूत्र (Formula in LaTeX $...$ or $$...$$).
+     b) आवश्यक सूत्र (Formula in LaTeX $...$).
      c) चरण-दर-चरण विस्तृत गणना (Step-by-step calculation).
      d) निष्कर्ष एवं सही विकल्प (Final answer conclusion stating why Option ${answer} is correct).
-2. 'solution_en': Detailed, rigorous solution in English wrapped in semantic HTML (<p><b>Solution:</b>...</p>).
+   - DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+2. 'solution_en': Detailed, rigorous solution in English wrapped in clean semantic HTML (<p><b>Solution:</b>...</p>).
    - Must include:
      a) Key concept & underlying principle.
      b) Standard formula / theorem in LaTeX $...$.
      c) Intermediate algebraic/numerical steps with proofs.
      d) Final deduction matching option ${answer}.
-3. LaTeX Math: Every variable, fraction, power, square root, equation MUST use LaTeX: e.g. $x$, $\\frac{a}{b}$, $x^2 + y^2 = 25$, $\\sqrt{z}$, $\\times$.
+   - DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+3. LaTeX Math & Negative Rules:
+   - Put actual algebraic/calculus formulas, fractions, powers, and roots in LaTeX $...$: e.g. $\\frac{a}{b}$, $\\times$, $x^2 + y = 10$, $\\sqrt{z}$.
+   - NEVER write variables as "$H = 9$" or "$M = 30$" with stray dollar signs in explanatory sentences. Write them as "H = 9 (घंटा) और M = 30 (मिनट)".
+   - NEVER enclose normal numbers, counts, percentages, or money in dollar signs (write 5, NOT 5$; write 60%, NOT $60%; write ₹2550, NOT $= ₹2550$ or $₹2550$).
+   - Double escape all LaTeX backslashes in JSON (\\\\frac, \\\\times, \\\\sqrt).
 4. Determine 'difficulty_level': 'easy' | 'medium' | 'hard'.
 5. Output ONLY valid JSON:
 {
@@ -1394,11 +1491,10 @@ DEEP RESEARCH & SOLUTION REQUIREMENTS:
 
     const rawJson = await runAIAction(executeSolve, userKey);
 
-    const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = safeParseAiJson(rawJson);
     res.json({
-      solution_hi: parsed.solution_hi || '',
-      solution_en: parsed.solution_en || '',
+      solution_hi: cleanServerMocktestText(parsed.solution_hi || ''),
+      solution_en: cleanServerMocktestText(parsed.solution_en || ''),
       difficulty_level: parsed.difficulty_level || 'medium'
     });
   } catch (error: any) {
@@ -1449,8 +1545,8 @@ MANDATORY TASKS TO EXECUTE:
    - Select ONLY from: ["Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK"].
    - CRITICAL: Letter puzzles, word arrangements, alphabetical order questions (e.g. words like ION, EBB, PET, GET or letter counting between letters) MUST BE "Reasoning", NEVER "Chemistry" or other subjects!
 5. COMPREHENSIVE STEP-BY-STEP SOLUTION:
-   - 'solution_hi': Detailed explanation in Hindi in semantic HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
-   - 'solution_en': Rigorous explanation in English in semantic HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+   - 'solution_hi': Detailed explanation in Hindi in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+   - 'solution_en': Rigorous explanation in English in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
    - Both must clearly prove why option is correct with calculations and proofs.
 6. DIFFICULTY LEVEL:
    - 'easy' | 'medium' | 'hard'.
@@ -1509,8 +1605,21 @@ Respond ONLY with a valid JSON object:
 
     const rawJson = await runAIAction(executeRepair, userKey);
 
-    const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = safeParseAiJson(rawJson);
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.question_hi) parsed.question_hi = cleanServerMocktestText(parsed.question_hi);
+      if (parsed.question_en) parsed.question_en = cleanServerMocktestText(parsed.question_en);
+      if (parsed.solution_hi) parsed.solution_hi = cleanServerMocktestText(parsed.solution_hi);
+      if (parsed.solution_en) parsed.solution_en = cleanServerMocktestText(parsed.solution_en);
+      if (parsed.option1_hi) parsed.option1_hi = cleanServerMocktestText(parsed.option1_hi);
+      if (parsed.option2_hi) parsed.option2_hi = cleanServerMocktestText(parsed.option2_hi);
+      if (parsed.option3_hi) parsed.option3_hi = cleanServerMocktestText(parsed.option3_hi);
+      if (parsed.option4_hi) parsed.option4_hi = cleanServerMocktestText(parsed.option4_hi);
+      if (parsed.option1_en) parsed.option1_en = cleanServerMocktestText(parsed.option1_en);
+      if (parsed.option2_en) parsed.option2_en = cleanServerMocktestText(parsed.option2_en);
+      if (parsed.option3_en) parsed.option3_en = cleanServerMocktestText(parsed.option3_en);
+      if (parsed.option4_en) parsed.option4_en = cleanServerMocktestText(parsed.option4_en);
+    }
     res.json(parsed);
   } catch (error: any) {
     console.warn("MockTest repair failed:", error?.message || error);
@@ -1539,14 +1648,14 @@ Extract into a strict JSON array of objects with these exact 34 fields:
 5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
 6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: Detailed step-by-step pedagogical solution in Hindi (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+8. solution_hi: Detailed step-by-step pedagogical solution in Hindi in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
 10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
 11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
 12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
 13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: Detailed step-by-step pedagogical explanation in English (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+15. solution_en: Detailed step-by-step pedagogical explanation in English in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 16. answer: Correct answer: Single choice "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
 17. set_name: "${setName}"
 18. difficulty_level: "Easy", "Medium", or "Hard"
@@ -1573,6 +1682,7 @@ RULES:
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam shift citations, tags, dates, or publisher labels in question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED). The question text must be purely the question statement itself!
 - If question is in one language only, translate and generate counterpart fields so BOTH Hindi and English are populated.
 - Enclose actual algebraic/calculus formulas in LaTeX ($...$). NEVER enclose plain numbers, percentages (40%), or rupee amounts (₹4,800) in dollar signs.
+- NEVER use artificial labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 - Solutions MUST be thorough, complete, and pedagogical.
 - Respond ONLY with the JSON array.`;
 
@@ -1602,9 +1712,24 @@ RULES:
 
     const rawJson = await runAIAction(executeExtract, userKey);
 
-    const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-    const parsed = JSON.parse(cleaned);
-    res.json({ items: Array.isArray(parsed) ? parsed : [] });
+    const parsed = safeParseAiJson(rawJson);
+    const rawItems = Array.isArray(parsed) ? parsed : [];
+    const items = rawItems.map((item: any) => ({
+      ...item,
+      question_hi: cleanServerMocktestText(item.question_hi),
+      question_en: cleanServerMocktestText(item.question_en),
+      solution_hi: cleanServerMocktestText(item.solution_hi),
+      solution_en: cleanServerMocktestText(item.solution_en),
+      option1_hi: cleanServerMocktestText(item.option1_hi),
+      option2_hi: cleanServerMocktestText(item.option2_hi),
+      option3_hi: cleanServerMocktestText(item.option3_hi),
+      option4_hi: cleanServerMocktestText(item.option4_hi),
+      option1_en: cleanServerMocktestText(item.option1_en),
+      option2_en: cleanServerMocktestText(item.option2_en),
+      option3_en: cleanServerMocktestText(item.option3_en),
+      option4_en: cleanServerMocktestText(item.option4_en),
+    }));
+    res.json({ items });
   } catch (error: any) {
     console.warn("MockTest extract failed:", error?.message || error);
     res.status(500).json({ error: error.message || "Extraction failed" });

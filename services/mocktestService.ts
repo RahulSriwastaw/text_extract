@@ -413,22 +413,40 @@ export function cleanMocktestText(text: string): string {
   // First, strip all extraneous exam tags, shifts, dates, and watermarks
   res = stripExamTagsAndJunk(res);
 
-  // 1. Fix corrupted formfeed \x0c and tab \t LaTeX from improper JSON parsing
+  // 1. Strip the filler "Important Exam Point: ..." entirely (AI exam coach filler)
+  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Important Exam Point\s*:\s*(?:<\/strong>|<\/b>)?[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
+
+  // 2. Strip English scaffolding labels: "Key Point:", "Detailed Explanation:", "Additional Information:"
+  res = res.replace(/(?:<strong>|<b>)?\s*Key Point\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
+  res = res.replace(/(?:<strong>|<b>)?\s*Detailed Explanation\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
+  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Additional Information\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '<br>');
+
+  // 3. Fix corrupted formfeed \x0c and tab \t LaTeX from improper JSON parsing
   // \x0c + 'rac' or Unicode up-arrow ⇡ + 'rac' or ↑ + 'rac' -> \frac
   res = res.replace(/[\x0c\u21e1\u2191]rac/g, '\\frac');
   // 'imes' preceded by tab \x09 or backspace \b or number/variable -> \times
   res = res.replace(/[\x09\b]imes/g, '\\times');
   res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
 
-  // 2. Fix broken < br > tags with spaces or escaped entities
+  // 4. Fix broken < br > tags with spaces or escaped entities
   res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
   res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
-  // Multiple consecutive <br>
-  res = res.replace(/(?:<br>\s*){3,}/gi, '<br><br>');
 
-  // 3. Fix Stray / Dangling Dollar signs on numbers, rupee, percentage:
-  // e.g. "5$ वाशिंग मशीन" -> "5 वाशिंग मशीन"
-  res = res.replace(/(\d+)\s*\$(?=\s+[\u0900-\u097F]|[^\d\w]|$)/g, '$1');
+  // 5. Degree symbol in prose / sentences: convert ^\circ preceded by digits to °
+  // E.g. "105^\circ" -> "105°", "180^\circ" -> "180°" so Hindi sentences don't get wrapped in $
+  res = res.replace(/(\d+(?:\.\d+)?)\s*\^\\circ/g, '$1°');
+
+  // 6. Fix "$H = 9" and "$M = 30" or stray $ on variables:
+  // e.g. "$H = 9" -> "H = 9", "$M = 30" -> "M = 30", "$x = 5" -> "x = 5"
+  res = res.replace(/\$([A-Za-z])\s*([=+\-*\/])\s*(\d+)\$?/g, '$1 $2 $3');
+  // Stray single $ on variables in sentences: e.g. "$H (घंटा)" -> "H (घंटा)", "$M" -> "M"
+  res = res.replace(/(?<=[\u0900-\u097F]\s*)\$([A-Za-z])\b/g, '$1');
+  res = res.replace(/\$([A-Za-z])\b(?=\s*[\u0900-\u097F]|\s*[,\.\(\)])/g, '$1');
+  res = res.replace(/\$([A-Za-z])\$(?=\s*[\u0900-\u097F]|\s*[,\.\(\)])/g, '$1');
+
+  // 7. Fix Stray / Dangling Dollar signs on numbers, counts, rupee, percentage:
+  // ONLY replace standalone count $ like "5$ वाशिंग मशीन" when NOT part of an opening math block
+  res = res.replace(/(?<!\$[^$]*)\b(\d+)\s*\$(?=\s+[\u0900-\u097F]|[^\d\w]|$)/g, '$1');
   // e.g. "$60%" -> "60%"
   res = res.replace(/\$\s*(\d+(?:\.\d+)?%)/g, '$1');
   // e.g. "$= ₹2550$" -> "= ₹2550", "$= 4800" -> "= 4800"
@@ -445,31 +463,30 @@ export function cleanMocktestText(text: string): string {
   res = res.replace(/\$\$\s*₹\s*([^\$]+?)\s*\$\$/g, (_m, val) => `₹${val.trim()}`);
   res = res.replace(/\$\s*₹\s*([^\$]+?)\s*\$/g, (_m, val) => `₹${val.trim()}`);
 
-  // 4. Fix Reasoning Puzzle Names / Single Letters wrapped in $:
+  // 8. Fix Reasoning Puzzle Names / Single Letters wrapped in $:
   // e.g. "$P, Q, R, S, T, U, V$" -> "P, Q, R, S, T, U, V"
   // e.g. "$W, Q$" -> "W, Q", "$U, S$" -> "U, S", "$T, P$" -> "T, P"
   res = res.replace(/\$([A-Z](?:,\s*[A-Z])+)\$/g, '$1');
 
   // Single letters like "$W$", "$V$", "$P$", "$Q$" in Hindi reasoning context:
-  // If adjacent to Hindi characters or words like और, के, तथा, से, में, पर, है, दाएँ, बाएँ:
   res = res.replace(/(?<=[\u0900-\u097F]\s*)\$([A-Z])\$(?=\s*[\u0900-\u097F]|\s*और|\s*तथा|\s*के|\s*का|\s*की|\s*को|\s*से|\s*में|\s*पर|\s*है|\s*था|$)/g, '$1');
   res = res.replace(/(?<=\b(?:और|तथा|एवं|यदि|तो|माना|कि|स्थान|व्यक्ति|मित्र|छात्र|पंक्ति)\s*)\$([A-Z])\$/g, '$1');
   res = res.replace(/\$([A-Z])\$(?=\s*(?:पंक्ति|के|का|की|को|से|में|पर|है|था|बाएं|दाएं|बाएँ|दाएँ))/g, '$1');
 
-  // 5. Percentages & Plain numbers inside $ or $$:
+  // 9. Percentages & Plain numbers inside $ or $$:
   // e.g. "$$40\%$$", "$$40%$$", "$6.5%$" -> "40%", "6.5%"
   res = res.replace(/\$\$?\s*([+-]?\d+(?:[,\.]\d+)?)\s*(?:\\%|%)\s*\$\$?/g, '$1%');
   // e.g. "$$4,800$$" -> "4,800", "$$300$$" -> "300", "$18$" -> "18"
   res = res.replace(/\$\$?\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*\$\$?/g, '$1');
 
-  // 6. Escaped percent signs outside LaTeX:
+  // 10. Escaped percent signs outside LaTeX:
   // e.g. "6.5\%" -> "6.5%"
   res = res.replace(/(\d+(?:\.\d+)?)\\\%/g, '$1%');
 
-  // 7. Convert any remaining inline $$math$$ to single $math$ for mocktest portals:
+  // 11. Convert any remaining inline $$math$$ to single $math$ for mocktest portals:
   res = res.replace(/\$\$([^\$\n]+?)\$\$/g, '$$$1$$');
 
-  // 8. If <br> is caught inside an inline $ ... <br> ... $, close and reopen math mode
+  // 12. If <br> is caught inside an inline $ ... <br> ... $, close and reopen math mode
   // Because MathJax / KaTeX cannot render <br> inside $...$ and prints "< br >" literally!
   const parts = res.split('<br>');
   if (parts.length > 1) {
@@ -482,23 +499,22 @@ export function cleanMocktestText(text: string): string {
     }).join('<br>');
   }
 
-  // 9. Ensure bare LaTeX like \frac{...}{...} or \times that is OUTSIDE $ is wrapped in $:
-  // e.g. "x \times \frac{134}{100}" -> "$x \times \frac{134}{100}$"
+  // 13. Ensure bare mathematical equations with \frac or \times outside $ are wrapped in $:
   const lines = res.split(/(<br\s*\/?>|\n)/gi);
   const processedLines = lines.map(line => {
     if (line.startsWith('<br') || line === '\n') return line;
-    if ((line.includes('\\frac') || line.includes('\\times') || line.includes('\\sqrt')) && !line.includes('$')) {
-      return line.replace(/([a-zA-Z0-9\(\)]+\s*(?:[=+\-*\/]\s*[a-zA-Z0-9\(\)]+)*\s*(?:\\[a-zA-Z]+|\^|_|\{|\})\s*[^\n<]*)/g, (match) => {
-        const m = match.trim();
-        if (m.startsWith('$') && m.endsWith('$')) return match;
-        return `$${m}$`;
+    // Only wrap the mathematical equation portion
+    if ((line.includes('\\frac') || line.includes('\\times')) && !line.includes('$')) {
+      return line.replace(/(?:(कोण|सूत्र|मान|उत्तर)\s*[:=]\s*)?(\\frac[^\n<]+|[^=\n<]*\\times[^\n<]+)/g, (match, label, eq) => {
+        const prefix = label ? `${label} = ` : '';
+        return `${prefix}$${eq.trim()}$`;
       });
     }
     return line;
   });
   res = processedLines.join('');
 
-  // 10. Balance any remaining odd number of $:
+  // 14. Balance any remaining odd number of $:
   const totalDollars = (res.match(/(?<!\\)\$/g) || []).length;
   if (totalDollars % 2 !== 0) {
     const lastIdx = res.lastIndexOf('$');
@@ -507,7 +523,9 @@ export function cleanMocktestText(text: string): string {
     }
   }
 
-  // 11. Clean stray trailing slashes or colons:
+  // 15. Multiple consecutive <br> and cleanup
+  res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
+  res = res.replace(/<p>\s*<br\s*\/?>/gi, '<p>');
   res = res.replace(/\s*[\/\\]\s*$/g, '');
 
   return res.trim();
@@ -1120,14 +1138,14 @@ Extract into a strict JSON array of objects, where each object has these exact 3
 5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
 6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: DETAILED, STEP-BY-STEP EXPLANATION in Hindi formatted in HTML with key points (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>). Include formulas, full workings, and rationale.
+8. solution_hi: DETAILED, STEP-BY-STEP EXPLANATION in Hindi formatted in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). Include formulas, full workings, and rationale. DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
 9. question_en: Question text in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
 10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
 11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
 12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
 13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: DETAILED, STEP-BY-STEP EXPLANATION in English formatted in HTML with key points (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+15. solution_en: DETAILED, STEP-BY-STEP EXPLANATION in English formatted in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
 16. answer: Correct answer identifier: Single choice MCQ: "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
 17. set_name: Exam paper/shift name, e.g. "${setName}"
 18. difficulty_level: "Easy", "Medium", or "Hard"
@@ -1160,7 +1178,9 @@ FORMATTING RULES:
     * Write ₹5 or ₹4,800, NOT $$₹5$$ or ₹ $$4,800$$ or $= ₹4800$
     * Write 300, NOT $$300$$ or 300$
     * Write 5 washing machines, NOT 5$ washing machines
+  - NEVER write variables as "$H = 9$" or "$M = 30$" with stray dollar signs in sentences. Write them as "H = 9 (घंटा) और M = 30 (मिनट)".
   - Double escape all LaTeX backslashes in JSON (e.g. \\\\frac{a}{b}, \\\\times, \\\\sqrt{x}).
+- NO FILLER LABELS: NEVER use artificial filler headers like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:". Solutions must be natural, step-by-step proofs starting directly with <p><b>हल:</b> ...</p> or <p><b>Solution:</b> ...</p>.
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam tags, shift dates, shift times, paper citations, or book publisher labels in the question text or options!
   - Examples that MUST BE OMITTED from question/option text: "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT - I (GL) 17/06/2025 (Afternoon)", "[SSC CGL 14/07/2023 (Shift-1)]", "(Shift-2)", "(Morning)", "Youth Competition Times", "Pinnacle".
   - The question text must be PURELY the question statement!
@@ -1491,14 +1511,14 @@ For every question, output an object in a JSON array with these exact 34 fields:
 - "option3_hi": Option 3 (C) in Hindi wrapped in <p>...</p>
 - "option4_hi": Option 4 (D) in Hindi wrapped in <p>...</p>
 - "option5_hi": Option 5 (E) in Hindi (or empty string if 4 options)
-- "solution_hi": DETAILED step-by-step pedagogical explanation in Hindi formatted in HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+- "solution_hi": DETAILED step-by-step pedagogical explanation in Hindi formatted in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 - "question_en": Question text in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$).
 - "option1_en": Option 1 (A) in English wrapped in <p>...</p>
 - "option2_en": Option 2 (B) in English wrapped in <p>...</p>
 - "option3_en": Option 3 (C) in English wrapped in <p>...</p>
 - "option4_en": Option 4 (D) in English wrapped in <p>...</p>
 - "option5_en": Option 5 (E) in English (or empty string if 4 options)
-- "solution_en": DETAILED step-by-step pedagogical explanation in English formatted in HTML (<p><strong>Key Point:</strong>...<br><strong>Detailed Explanation:</strong>...<br><strong>Additional Information:</strong>...<br><strong>Important Exam Point:</strong>...</p>).
+- "solution_en": DETAILED step-by-step pedagogical explanation in English formatted in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 - "answer": Correct answer identifier (e.g. "A", "B", "C", or "D")
 - "set_name": "${setName}"
 - "difficulty_level": "Easy", "Medium", or "Hard"
@@ -1522,11 +1542,12 @@ For every question, output an object in a JSON array with these exact 34 fields:
 CRITICAL RULES:
 1. STRICT SUBJECT RULE: The "subject" field MUST ONLY contain the academic subject name (like "Current Affairs", "Mathematics", "Reasoning", "Polity"). NEVER include exam names like "RRB", "NTPC", or "Shift" in "subject". Exam names belong strictly in "subject_level".
 2. BOTH Hindi and English fields MUST be fully populated! If the paper is only in Hindi or only in English, TRANSLATE and generate the counterpart language so NO field is left blank.
-3. BOTH solution_hi and solution_en MUST be detailed and pedagogical with steps and formulas.
+3. BOTH solution_hi and solution_en MUST be detailed, pedagogical proofs. Start directly with <p><b>हल:</b> ...</p> and <p><b>Solution:</b> ...</p>. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 4. Put actual math formulas/fractions inside single dollar $...$ (e.g. $x^2 + y = 10$, $\\frac{a}{b}$).
 5. CRITICAL NEGATIVE RULES FOR DOLLAR SIGNS ($):
    - NEVER use $ delimiters for reasoning puzzle human names, alphabets, or positions (e.g. write P, Q, R, S, T, U, V and W, Q as plain letters, NEVER $P, Q, R$ or $W, Q$).
    - NEVER enclose normal numbers, counts, percentages, or money in dollar signs! (Write 5, NOT 5$; write 60%, NOT $60%; write ₹2550, NOT $= ₹2550$ or $₹2550$).
+   - NEVER write variables as "$H = 9$" or "$M = 30$" with stray dollar signs in explanatory text. Write them as "H = 9 (घंटा) और M = 30 (मिनट)".
    - Double escape all LaTeX backslashes in JSON (\\\\frac, \\\\times, \\\\sqrt).
 6. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED).
 7. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.

@@ -70,44 +70,47 @@ const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Middle Mode Switcher Tabs (Segmented Control) */}
-            <div className="hidden md:flex items-center p-1 bg-black/60 border border-white/[0.08] rounded-xl gap-0.5 shadow-inner">
+            <div className="flex items-center p-1 bg-black/60 border border-white/[0.08] rounded-xl gap-0.5 shadow-inner">
               <button
                 type="button"
                 onClick={() => onSelectTool?.('text-converter')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
                   activeTool === 'text-converter'
                     ? 'bg-[#FF6B2B] text-white shadow-md shadow-[#FF6B2B]/20 font-bold'
                     : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
                 }`}
               >
-                <FileText className="w-3.5 h-3.5" />
-                <span>Text / Docx</span>
+                <FileText className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Text / Docx</span>
+                <span className="sm:hidden">Text</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => onSelectTool?.('mcq-extractor')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
                   activeTool === 'mcq-extractor'
                     ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-black shadow-md shadow-amber-500/20 font-extrabold'
                     : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
                 }`}
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>MockTest 34-Col</span>
+                <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">MCQs Extractor</span>
+                <span className="sm:hidden">MCQs</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => onSelectTool?.('qa-stitcher')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
                   activeTool === 'qa-stitcher'
                     ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/20 font-bold'
                     : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
                 }`}
               >
-                <Split className="w-3.5 h-3.5" />
-                <span>Page Stitcher</span>
+                <Split className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Page Stitcher</span>
+                <span className="sm:hidden">Stitch</span>
               </button>
             </div>
 
@@ -162,7 +165,7 @@ const Navbar: React.FC<NavbarProps> = ({
                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-white/[0.04] hover:bg-amber-500/15 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shadow-sm"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="hidden lg:inline">CSV Studio</span>
+                <span className="hidden lg:inline">MockTest Studio</span>
               </button>
 
               {/* History Drawer */}

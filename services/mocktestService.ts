@@ -694,14 +694,13 @@ export function separateCompleteAndPendingItems(
     const isStemHangingWithoutOptions = optCount === 0 && (endsWithContinuation || !/[?।\.!]$/.test(stem));
     const isBottomItem = (i === items.length - 1);
 
-    const isTrulyPending = isBottomItem && !isOptionsComplete && (issues.hasMissingOptions || issues.hasEmptyQuestion || isStemHangingWithoutOptions);
+    const hasAnswer = Boolean(it.answer && it.answer.trim().length > 0);
+    const hasDetailedSolution = Boolean((it.solution_hi && it.solution_hi.length > 25) || (it.solution_en && it.solution_en.length > 25));
+    const isTrulyPending = isBottomItem && !isOptionsComplete && !hasAnswer && !hasDetailedSolution && (issues.hasMissingOptions || issues.hasEmptyQuestion || isStemHangingWithoutOptions);
 
     if (isTrulyPending) {
       pending.unshift(it);
       foundCutoff = true;
-    } else if (foundCutoff && !isOptionsComplete && (issues.hasMissingOptions || issues.hasEmptyQuestion)) {
-      // Multiple items at page bottom can be pending if they were both cut off
-      pending.unshift(it);
     } else {
       foundCutoff = false;
       complete.unshift(it);
@@ -762,17 +761,32 @@ export function mergePendingCarryOver(
     const pendingStem = (pendingItem.question_hi || pendingItem.question_en || '').replace(/<[^>]*>/g, '').trim();
 
     // Check if candidate continues pendingItem:
-    // 1. Candidate's source_pages explicitly mentions both pages, OR
-    // 2. Candidate has empty or very short stem (continuation fragment), OR
-    // 3. Candidate stem matches or continues pending stem, OR
-    // 4. Candidate has options C & D filled while pending was missing them
+    // A candidate is a continuation of pendingItem ONLY if:
+    // 1. Candidate's source_pages explicitly mentions both pages (e.g. "23, 24"), OR
+    // 2. Candidate has NO Option 1 / Option 2 and is a fragment (supplying only Option C / D), OR
+    // 3. Candidate stem matches the pending stem, OR
+    // 4. Question reference numbers match exactly.
     const candidateSourcePages = String(candidate.source_pages || '');
     const mentionsBothPages = candidateSourcePages.includes(String(pendingContext.sourcePageNumber));
-    const isFragment = candidateStem.length < 20 || candidateStem.startsWith('(') || candidateStem.startsWith('Option');
-    const stemsMatch = candidateStem.includes(pendingStem.slice(0, 30)) || pendingStem.includes(candidateStem.slice(0, 30));
-    const pendingMissingOpts = detectItemFieldIssues(pendingItem).hasMissingOptions;
+    
+    const candidateHasOpt1or2 = Boolean(
+      (candidate.option1_hi && candidate.option1_hi.trim() && candidate.option1_hi.toLowerCase() !== 'blank') ||
+      (candidate.option1_en && candidate.option1_en.trim() && candidate.option1_en.toLowerCase() !== 'blank')
+    );
+    const isContinuationFragment = !candidateHasOpt1or2 && (candidateStem.length < 25 || /^(?:\([c-eC-E]\)|Option\s*[c-eC-E]|उत्तर|Ans)/i.test(candidateStem));
 
-    const isMatch = mentionsBothPages || isFragment || stemsMatch || (pendingMissingOpts && candidate.option3_hi || candidate.option4_hi);
+    const stemsMatch = pendingStem.length > 20 && candidateStem.length > 20 && (
+      candidateStem.toLowerCase().includes(pendingStem.slice(0, 35).toLowerCase()) ||
+      pendingStem.toLowerCase().includes(candidateStem.slice(0, 35).toLowerCase())
+    );
+
+    const refMatch = Boolean(
+      candidate.source_question_reference &&
+      pendingItem.source_question_reference &&
+      candidate.source_question_reference === pendingItem.source_question_reference
+    );
+
+    const isMatch = mentionsBothPages || isContinuationFragment || stemsMatch || refMatch;
 
     if (isMatch) {
       // Merge candidate into pendingItem!

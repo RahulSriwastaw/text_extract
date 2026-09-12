@@ -307,39 +307,35 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       setLiveStatusText(logMessage);
 
       // If pending items were merged/completed, update them in state
+      // If pending items were merged/completed, update them in state
       if (mergedPendingItems.length > 0 && pendingContext) {
-        setPages(prev => prev.map(p => {
-          if (p.pageNumber === pendingContext.sourcePageNumber || p.id === pendingContext.sourcePageId) {
-            const existingItems = p.items || [];
-            const updatedItems = existingItems.map(existing => {
-              const matchedMerged = mergedPendingItems.find(m => m.id === existing.id || m.question_r === existing.question_r);
-              return matchedMerged || existing;
-            });
-            for (const m of mergedPendingItems) {
-              if (!updatedItems.some(it => it.id === m.id || it.question_r === m.question_r)) {
-                updatedItems.push(m);
+        setPages(prev => {
+          const nextPages = prev.map(p => {
+            if (p.pageNumber === pendingContext.sourcePageNumber || p.id === pendingContext.sourcePageId) {
+              const existingItems = p.items || [];
+              const updatedItems = existingItems.map(existing => {
+                const matchedMerged = mergedPendingItems.find(m => m.id === existing.id);
+                return matchedMerged || existing;
+              });
+              for (const m of mergedPendingItems) {
+                if (!updatedItems.some(it => it.id === m.id)) {
+                  updatedItems.push(m);
+                }
               }
+              return {
+                ...p,
+                items: updatedItems,
+                mcqCount: updatedItems.length,
+                errorMessage: undefined
+              };
             }
-            return {
-              ...p,
-              items: updatedItems,
-              mcqCount: updatedItems.length
-            };
-          }
-          return p;
-        }));
-
-        setExtractedMcqs(prev => {
-          const updated = prev.map(it => {
-            const matched = mergedPendingItems.find(m => m.id === it.id || m.question_r === it.question_r);
-            return matched || it;
+            return p;
           });
-          for (const m of mergedPendingItems) {
-            if (!updated.some(it => it.id === m.id)) {
-              updated.push(m);
-            }
-          }
-          return updated.map((it, idx) => ({ ...it, question_r: idx + 1 }));
+
+          // Derive extractedMcqs cleanly from all pages
+          const allMcqs = nextPages.flatMap(p => p.items || []);
+          setExtractedMcqs(allMcqs.map((it, idx) => ({ ...it, question_r: idx + 1 })));
+          return nextPages;
         });
       }
 
@@ -395,23 +391,21 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       // Even if an item is pending carry-over to the next page, it originated here and must be displayed here.
       const allPageItems = [...finalComplete, ...(isLastPage ? [] : pendingItems)];
 
-      // Update current page state
-      setPages(prev => prev.map(p => p.id === page.id ? {
-        ...p,
-        status: 'ready',
-        mcqCount: allPageItems.length,
-        errorMessage: pendingItems.length > 0 && !isLastPage ? `Question continues on Page ${page.pageNumber + 1}` : undefined,
-        items: allPageItems
-      } : p));
+      // Update current page state & keep extractedMcqs 100% in sync with all pages
+      setPages(prev => {
+        const nextPages: PageQueueItem[] = prev.map(p => p.id === page.id ? {
+          ...p,
+          status: 'ready' as const,
+          mcqCount: allPageItems.length,
+          errorMessage: pendingItems.length > 0 && !isLastPage ? `Question continues on Page ${page.pageNumber + 1}` : undefined,
+          items: allPageItems
+        } : p);
 
-      // Append/Update in global extracted MCQs list
-      if (allPageItems.length > 0) {
-        setExtractedMcqs(prev => {
-          const withoutThisPage = prev.filter(it => it.pageId !== page.id);
-          const nextList = [...withoutThisPage, ...allPageItems];
-          return nextList.map((it, idx) => ({ ...it, question_r: idx + 1 }));
-        });
-      }
+        // Derive extractedMcqs cleanly from all pages combined
+        const allMcqs = nextPages.flatMap(p => p.items || []);
+        setExtractedMcqs(allMcqs.map((it, idx) => ({ ...it, question_r: idx + 1 })));
+        return nextPages;
+      });
 
       const nextPendingContext: PendingMcqContext | null = (pendingItems.length > 0 && !isLastPage)
         ? {
@@ -440,11 +434,35 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   };
 
   // Multi-Page Sequential Extraction Loop with Carry-Over Context
-  const handleStartExtraction = async () => {
-    const selectedPages = pages.filter(p => p.isSelected && p.status !== 'ready');
+  const handleStartExtraction = async (forceAll: boolean = false) => {
+    let selectedPages = pages.filter(p => p.isSelected);
     if (selectedPages.length === 0) {
-      alert('No pending pages selected for extraction.');
+      alert('No pages selected for extraction. Please select at least one page.');
       return;
+    }
+
+    if (!forceAll) {
+      const pendingOrError = selectedPages.filter(p => p.status !== 'ready');
+      if (pendingOrError.length === 0) {
+        const confirmAll = confirm(
+          `All ${selectedPages.length} selected pages have already been extracted.\n\nWould you like to RE-EXTRACT all ${selectedPages.length} selected pages from scratch?`
+        );
+        if (!confirmAll) return;
+        setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
+      } else if (pendingOrError.length < selectedPages.length) {
+        const reExtractAll = confirm(
+          `${pendingOrError.length} page(s) need extraction, and ${selectedPages.length - pendingOrError.length} are already extracted.\n\nClick OK to re-extract ALL ${selectedPages.length} selected pages,\nor Cancel to extract ONLY the ${pendingOrError.length} pending/failed page(s).`
+        );
+        if (reExtractAll) {
+          setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
+        } else {
+          selectedPages = pendingOrError;
+        }
+      } else {
+        selectedPages = pendingOrError;
+      }
+    } else {
+      setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
     }
 
     if (aiEngine === 'bridge' && !bridgeStatus.connected) {
@@ -510,6 +528,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       setIsProcessingAll(false);
       setActivePageIndex(null);
     }
+  };
+
+  // Dedicated full re-extraction from scratch
+  const handleReExtractAll = async () => {
+    if (pages.length === 0) return;
+    const confirmAll = confirm(`Are you sure you want to RE-EXTRACT ALL ${pages.length} pages sequentially from scratch?`);
+    if (!confirmAll) return;
+    setPages(prev => prev.map(p => ({ ...p, isSelected: true, status: 'pending', errorMessage: undefined })));
+    setIsProcessingAll(false);
+    setIsPaused(false);
+    pauseRef.current = false;
+    setTimeout(() => {
+      handleStartExtraction(true);
+    }, 150);
   };
 
   // Re-verify single item with missing fields using actual page images
@@ -1482,14 +1514,25 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                 </div>
 
                 {!isProcessingAll ? (
-                  <button
-                    type="button"
-                    onClick={handleStartExtraction}
-                    className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-black" />
-                    <span>Start MCQ Extraction ({batchSize} Pages Parallel)</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleStartExtraction()}
+                      className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-black" />
+                      <span>Start MCQ Extraction</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleReExtractAll}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.06] hover:bg-amber-500/20 border border-white/[0.1] hover:border-amber-500/40 text-slate-200 hover:text-amber-300 font-bold rounded-xl text-xs transition-all"
+                      title="Re-extract all pages from scratch"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>Re-Extract All ({pages.length} Pages)</span>
+                    </button>
+                  </div>
                 ) : (
                   <button
                     type="button"

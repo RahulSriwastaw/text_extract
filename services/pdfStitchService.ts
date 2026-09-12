@@ -480,9 +480,40 @@ export interface PageCard {
  * Ensures a card has a valid items array, populating from legacy question/solution fields if needed.
  */
 export const ensureCardItems = (card: PageCard): PageCardItem[] => {
-  if (card.items && card.items.length > 0) {
+  // 1. If card already has multi-items array, return it directly
+  if (card.items && card.items.length > 1) {
     return card.items;
   }
+
+  // 2. If card is marked as merged and has solutionImage, ensure BOTH question and solution are present
+  if (card.isMerged && card.solutionImage) {
+    const qItem: PageCardItem = (card.items && card.items[0]) ? card.items[0] : {
+      id: `${card.id}-item-0`,
+      pageNum: card.originalPageNum,
+      image: card.questionImage,
+      croppedImage: card.croppedQuestionImage,
+      crop: card.qCrop,
+      scale: card.qScale || 1.0,
+      label: 'Question',
+    };
+    const solItem: PageCardItem = (card.items && card.items[1]) ? card.items[1] : {
+      id: `${card.id}-item-1`,
+      pageNum: card.solutionPageNum || (card.originalPageNum + 1),
+      image: card.solutionImage,
+      croppedImage: card.croppedSolutionImage,
+      crop: card.solCrop,
+      scale: card.solScale || 1.0,
+      label: 'Solution',
+    };
+    return [qItem, solItem];
+  }
+
+  // 3. If card has 1 item already populated and is not merged
+  if (card.items && card.items.length === 1) {
+    return card.items;
+  }
+
+  // 4. Default single-item fallback
   const items: PageCardItem[] = [
     {
       id: `${card.id}-item-0`,
@@ -491,20 +522,9 @@ export const ensureCardItems = (card: PageCard): PageCardItem[] => {
       croppedImage: card.croppedQuestionImage,
       crop: card.qCrop,
       scale: card.qScale || 1.0,
-      label: card.isMerged ? 'Question' : `Page ${card.originalPageNum}`,
+      label: `Page ${card.originalPageNum}`,
     }
   ];
-  if (card.isMerged && card.solutionImage) {
-    items.push({
-      id: `${card.id}-item-1`,
-      pageNum: card.solutionPageNum || (card.originalPageNum + 1),
-      image: card.solutionImage,
-      croppedImage: card.croppedSolutionImage,
-      crop: card.solCrop,
-      scale: card.solScale || 1.0,
-      label: 'Solution',
-    });
-  }
   return items;
 };
 
@@ -520,10 +540,18 @@ export const cropImageByPercentage = async (
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not create canvas context');
 
-  const sx = Math.max(0, Math.round((box.x / 100) * img.naturalWidth));
-  const sy = Math.max(0, Math.round((box.y / 100) * img.naturalHeight));
-  const sw = Math.min(img.naturalWidth - sx, Math.max(1, Math.round((box.width / 100) * img.naturalWidth)));
-  const sh = Math.min(img.naturalHeight - sy, Math.max(1, Math.round((box.height / 100) * img.naturalHeight)));
+  const naturalW = img.naturalWidth || 1000;
+  const naturalH = img.naturalHeight || 1400;
+
+  const bx = Math.max(0, Math.min(100, isNaN(box.x) ? 0 : box.x));
+  const by = Math.max(0, Math.min(100, isNaN(box.y) ? 0 : box.y));
+  const bw = Math.max(1, Math.min(100 - bx, isNaN(box.width) ? 100 : box.width));
+  const bh = Math.max(1, Math.min(100 - by, isNaN(box.height) ? 100 : box.height));
+
+  const sx = Math.max(0, Math.round((bx / 100) * naturalW));
+  const sy = Math.max(0, Math.round((by / 100) * naturalH));
+  const sw = Math.max(1, Math.min(naturalW - sx, Math.round((bw / 100) * naturalW)));
+  const sh = Math.max(1, Math.min(naturalH - sy, Math.round((bh / 100) * naturalH)));
 
   canvas.width = sw;
   canvas.height = sh;
@@ -563,26 +591,41 @@ export const renderMergedCardToA4 = async (
 
   const items = ensureCardItems(card);
 
-  // Case 1: Standalone Single Item
+  // Case 1: Standalone Single Item (Unmerged)
   if (items.length <= 1) {
-    const item = items[0];
-    const src = item.croppedImage || item.image;
+    const item = items[0] || {
+      id: `${card.id}-0`,
+      pageNum: card.originalPageNum,
+      image: card.questionImage,
+      scale: 1.0
+    };
+    const src = item.croppedImage || item.image || card.questionImage;
+    if (!src) {
+      console.warn('renderMergedCardToA4: Empty image source on card', card.id);
+      return canvas.toDataURL('image/jpeg', 0.94);
+    }
     const img = await loadImage(src);
 
-    const sx = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.x / 100) * img.naturalWidth)) : 0;
-    const sy = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.y / 100) * img.naturalHeight)) : 0;
-    const sw = !item.croppedImage && item.crop ? Math.min(img.naturalWidth - sx, Math.max(1, Math.round((item.crop.width / 100) * img.naturalWidth))) : img.naturalWidth;
-    const sh = !item.croppedImage && item.crop ? Math.min(img.naturalHeight - sy, Math.max(1, Math.round((item.crop.height / 100) * img.naturalHeight))) : img.naturalHeight;
+    const naturalW = img.naturalWidth || 1000;
+    const naturalH = img.naturalHeight || 1400;
+
+    const sx = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.x / 100) * naturalW)) : 0;
+    const sy = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.y / 100) * naturalH)) : 0;
+    const sw = !item.croppedImage && item.crop ? Math.min(naturalW - sx, Math.max(1, Math.round((item.crop.width / 100) * naturalW))) : naturalW;
+    const sh = !item.croppedImage && item.crop ? Math.min(naturalH - sy, Math.max(1, Math.round((item.crop.height / 100) * naturalH))) : naturalH;
 
     const scaleMult = item.scale || 1.0;
-    const fitWidthScale = availableWidth / sw;
-    const fitHeightScale = availableHeight / sh;
+    const fitWidthScale = availableWidth / Math.max(1, sw);
+    const fitHeightScale = availableHeight / Math.max(1, sh);
     const chosenScale = Math.min(fitWidthScale * scaleMult, fitHeightScale);
-    const drawW = Math.round(sw * chosenScale);
-    const drawH = Math.round(sh * chosenScale);
+    const drawW = Math.max(1, Math.round(sw * chosenScale));
+    const drawH = Math.max(1, Math.round(sh * chosenScale));
 
-    const drawX = marginX + (availableWidth - drawW) / 2;
+    const drawX = Math.max(0, marginX + (availableWidth - drawW) / 2);
     const drawY = marginY;
+
+    // CRITICAL FIX: Draw the single image onto the canvas!
+    ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
 
     const result = canvas.toDataURL('image/jpeg', 0.94);
     canvas.width = 0;
@@ -595,17 +638,22 @@ export const renderMergedCardToA4 = async (
     items.map(async (item) => {
       const src = item.croppedImage || item.image;
       const img = await loadImage(src);
-      const sx = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.x / 100) * img.naturalWidth)) : 0;
-      const sy = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.y / 100) * img.naturalHeight)) : 0;
-      const sw = !item.croppedImage && item.crop ? Math.min(img.naturalWidth - sx, Math.max(1, Math.round((item.crop.width / 100) * img.naturalWidth))) : img.naturalWidth;
-      const sh = !item.croppedImage && item.crop ? Math.min(img.naturalHeight - sy, Math.max(1, Math.round((item.crop.height / 100) * img.naturalHeight))) : img.naturalHeight;
+      const naturalW = img.naturalWidth || 1000;
+      const naturalH = img.naturalHeight || 1400;
+
+      const sx = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.x / 100) * naturalW)) : 0;
+      const sy = !item.croppedImage && item.crop ? Math.max(0, Math.round((item.crop.y / 100) * naturalH)) : 0;
+      const sw = !item.croppedImage && item.crop ? Math.min(naturalW - sx, Math.max(1, Math.round((item.crop.width / 100) * naturalW))) : naturalW;
+      const sh = !item.croppedImage && item.crop ? Math.min(naturalH - sy, Math.max(1, Math.round((item.crop.height / 100) * naturalH))) : naturalH;
 
       const scaleMult = item.scale || 1.0;
       const maxW = targetWidth - 20;
+      const safeSw = Math.max(1, sw);
+      const safeSh = Math.max(1, sh);
       let drawW = Math.min(maxW, Math.round(availableWidth * scaleMult));
-      let drawH = Math.round(sh * (drawW / sw));
+      let drawH = Math.round(safeSh * (drawW / safeSw));
 
-      return { img, sx, sy, sw, sh, drawW, drawH };
+      return { img, sx, sy, sw: safeSw, sh: safeSh, drawW, drawH };
     })
   );
 
@@ -627,9 +675,9 @@ export const renderMergedCardToA4 = async (
 
   for (let i = 0; i < loaded.length; i++) {
     const it = loaded[i];
-    const finalDrawH = Math.round(it.drawH * shrinkFactor);
-    const finalDrawW = Math.round(it.sw * (finalDrawH / it.sh));
-    const drawX = marginX + (availableWidth - finalDrawW) / 2;
+    const finalDrawH = Math.max(1, Math.round(it.drawH * shrinkFactor));
+    const finalDrawW = Math.max(1, Math.round(it.sw * (finalDrawH / it.sh)));
+    const drawX = Math.max(0, marginX + (availableWidth - finalDrawW) / 2);
 
     ctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, drawX, currentY, finalDrawW, finalDrawH);
     currentY += finalDrawH + gap;
@@ -638,7 +686,7 @@ export const renderMergedCardToA4 = async (
     if (i < loaded.length - 1 && card.showDivider !== false) {
       ctx.save();
       const lineY = currentY + dividerHeight / 2;
-      ctx.strokeStyle = '#E2E8F0';
+      ctx.strokeStyle = '#CBD5E1';
       ctx.lineWidth = Math.max(1.5, Math.round(1.5 * (targetWidth / CANVAS_A4_WIDTH)));
       ctx.beginPath();
       ctx.moveTo(marginX + 20, lineY);

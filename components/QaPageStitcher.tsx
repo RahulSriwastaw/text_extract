@@ -166,6 +166,15 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
         qScale: 1.0,
         solScale: 1.0,
         showDivider: true,
+        items: [
+          {
+            id: `item-${Date.now()}-${idx}-0`,
+            pageNum: idx + 1,
+            image: img,
+            scale: 1.0,
+            label: `Page ${idx + 1}`
+          }
+        ]
       }));
 
       setCards(initialCards);
@@ -671,16 +680,12 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       const solCard = updatedCards.find(c => c.originalPageNum === solPageNum && !c.isMerged);
 
       if (qCard && solCard && qCard.id !== solCard.id) {
+        const qItems = ensureCardItems(qCard);
+        const solItems = ensureCardItems(solCard);
+        const combined = [...qItems, ...solItems];
         updatedCards = updatedCards.map(c => {
           if (c.id === qCard.id) {
-            return {
-              ...c,
-              solutionImage: solCard.questionImage,
-              croppedSolutionImage: solCard.croppedQuestionImage,
-              solutionPageNum: solCard.originalPageNum,
-              isMerged: true,
-              showDivider: showDividerLine,
-            };
+            return syncCardFromItems({ ...c, showDivider: showDividerLine }, combined);
           }
           return c;
         }).filter(c => c.id !== solCard.id);

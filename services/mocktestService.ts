@@ -552,6 +552,30 @@ export function cleanMocktestText(text: string): string {
   return res.trim();
 }
 
+/**
+ * Strips duplicate and unwanted solution prefixes (e.g. <b>Solution:</b>, <b>हल:</b>, Explanation:, etc.)
+ * so the solution text begins directly with the step-by-step mathematical/conceptual proof.
+ * This prevents double labels in mocktest portals that already provide a native "Solution:" header.
+ */
+export function stripSolutionPrefix(text: string): string {
+  if (!text) return '';
+  let res = text.trim();
+
+  // If first paragraph is ONLY the header, e.g. <p><b>Solution:</b></p> or <p><b>हल:</b></p>
+  res = res.replace(/^<p>\s*(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?<\/p>\s*/i, '');
+
+  // Handle <p> prefix with optional bold/strong tags around Solution/हल/Explanation/उत्तर
+  res = res.replace(/^(<p>\s*)(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '$1');
+
+  // Handle bare text with optional bold/strong tags around Solution/हल/Explanation/उत्तर
+  res = res.replace(/^(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '');
+
+  // Strip leading whitespace inside <p>
+  res = res.replace(/^<p>\s+/, '<p>');
+
+  return res.trim();
+}
+
 export interface PendingMcqContext {
   sourcePageNumber: number;
   sourcePageId?: string;
@@ -942,8 +966,8 @@ export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
 
   const qHi = ensureHtmlParagraph(cleanMocktestText(recovered.question_hi));
   const qEn = ensureHtmlParagraph(cleanMocktestText(recovered.question_en));
-  const solHi = ensureHtmlParagraph(cleanMocktestText(recovered.solution_hi));
-  const solEn = ensureHtmlParagraph(cleanMocktestText(recovered.solution_en));
+  const solHi = ensureHtmlParagraph(stripSolutionPrefix(cleanMocktestText(recovered.solution_hi)));
+  const solEn = ensureHtmlParagraph(stripSolutionPrefix(cleanMocktestText(recovered.solution_en)));
 
   const cleanSubject = normalizeStrictSubject(recovered.subject, `${qHi} ${qEn}`, `${solHi} ${solEn}`);
 
@@ -1474,8 +1498,8 @@ export function convertElementsToMockTestItems(
     const eHi = optE.hi || optE.en;
     const eEn = optE.en || optE.hi;
 
-    const solHi = `<p><b>हल:</b> सही उत्तर विकल्प ${answer} है।</p>`;
-    const solEn = `<p><b>Solution:</b> The correct option is ${answer}.</p>`;
+    const solHi = `<p>सही उत्तर विकल्प ${answer} है।</p>`;
+    const solEn = `<p>The correct option is ${answer}.</p>`;
 
     items.push({
       id: `mt_item_${i + 1}_${Date.now()}`,
@@ -1563,14 +1587,14 @@ Extract into a strict JSON array of objects, where each object has these exact 3
 5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
 6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: DETAILED, STEP-BY-STEP EXPLANATION in Hindi formatted in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). Include formulas, full workings, and rationale. DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
+8. solution_hi: DETAILED, STEP-BY-STEP EXPLANATION in Hindi formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). Include formulas, full workings, and rationale. DO NOT prefix with "हल:", "<b>हल:</b>", or "उत्तर:" because the portal UI already provides the Solution label! DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
 9. question_en: Question text in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
 10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
 11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
 12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
 13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: DETAILED, STEP-BY-STEP EXPLANATION in English formatted in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
+15. solution_en: DETAILED, STEP-BY-STEP EXPLANATION in English formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with "Solution:", "<b>Solution:</b>", or "Explanation:" because the portal UI already provides the Solution label! DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
 16. answer: Correct answer identifier: Single choice MCQ: "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
 17. set_name: Exam paper/shift name, e.g. "${setName}"
 18. difficulty_level: "Easy", "Medium", or "Hard"
@@ -1610,7 +1634,7 @@ FORMATTING RULES (PURE UNICODE & CLEAN HTML - NO LATEX):
   * NEVER use $ delimiters for reasoning puzzle human names, alphabets, or positions (write P, Q, R, S, T, U, V and W, Q as plain letters, NEVER $P, Q, R$ or $W, Q$).
   * NEVER enclose normal numbers, counts, percentages, or money in dollar signs (write 40%, ₹4,800, 300, 5 washing machines, NOT $40%, $₹4800$, 5$).
   * Write variables simply as 'H = 9 (घंटा) और M = 30 (मिनट)'.
-- NO FILLER LABELS: NEVER use artificial filler headers like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:". Solutions must be natural, step-by-step proofs starting directly with <p><b>हल:</b> ...</p> or <p><b>Solution:</b> ...</p>.
+- NO SOLUTION PREFIX LABELS & NO FILLER LABELS: NEVER start solutions with "हल:", "<b>हल:</b>", "Solution:", "<b>Solution:</b>", or "Explanation:". The mocktest application has its own built-in Solution header, so adding a label results in duplicate text. Solutions must start directly with the first sentence or derivation step in <p>...</p>. NEVER use artificial filler headers like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:".
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam tags, shift dates, shift times, paper citations, or book publisher labels in the question text or options!
   - Examples that MUST BE OMITTED from question/option text: "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT - I (GL) 17/06/2025 (Afternoon)", "[SSC CGL 14/07/2023 (Shift-1)]", "(Shift-2)", "(Morning)", "Youth Competition Times", "Pinnacle".
   - The question text must be PURELY the question statement!
@@ -1855,17 +1879,17 @@ export function parseAiOutputToMockTestItems(
           const genericSol = obj.solution || obj.explanation || obj.exp || obj.sol || '';
 
           if (!solHi && genericSol) {
-            solHi = `<p><b>हल:</b> ${genericSol}</p>`;
+            solHi = `<p>${stripSolutionPrefix(genericSol)}</p>`;
           }
           if (!solEn && genericSol) {
-            solEn = `<p><b>Solution:</b> ${genericSol}</p>`;
+            solEn = `<p>${stripSolutionPrefix(genericSol)}</p>`;
           }
 
           if (!solHi && solEn) solHi = solEn;
           if (!solEn && solHi) solEn = solHi;
 
-          if (!solHi) solHi = `<p><b>हल:</b> सही उत्तर विकल्प ${rawAns} है।</p>`;
-          if (!solEn) solEn = `<p><b>Solution:</b> The correct option is ${rawAns}.</p>`;
+          if (!solHi) solHi = `<p>सही उत्तर विकल्प ${rawAns} है।</p>`;
+          if (!solEn) solEn = `<p>The correct option is ${rawAns}.</p>`;
 
           const candidateSubject = obj.subject || obj.subject_name || obj.topic || '';
           const cleanSubject = normalizeStrictSubject(candidateSubject, `${qHi} ${qEn}`, `${solHi} ${solEn}`);
@@ -1984,14 +2008,14 @@ For every question, output an object in a JSON array with these exact 34 fields:
 - "option3_hi": Option 3 (C) in Hindi wrapped in <p>...</p>
 - "option4_hi": Option 4 (D) in Hindi wrapped in <p>...</p>
 - "option5_hi": Option 5 (E) in Hindi (or empty string if 4 options)
-- "solution_hi": DETAILED step-by-step pedagogical explanation in Hindi formatted in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+- "solution_hi": DETAILED step-by-step pedagogical explanation in Hindi formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'हल:', '<b>हल:</b>', or 'उत्तर:' because the test portal already renders this label automatically! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 - "question_en": Question text in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
 - "option1_en": Option 1 (A) in English wrapped in <p>...</p>
 - "option2_en": Option 2 (B) in English wrapped in <p>...</p>
 - "option3_en": Option 3 (C) in English wrapped in <p>...</p>
 - "option4_en": Option 4 (D) in English wrapped in <p>...</p>
 - "option5_en": Option 5 (E) in English (or empty string if 4 options)
-- "solution_en": DETAILED step-by-step pedagogical explanation in English formatted in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+- "solution_en": DETAILED step-by-step pedagogical explanation in English formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'Solution:', '<b>Solution:</b>', or 'Explanation:' because the test portal already renders this label automatically! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 - "answer": Correct answer identifier (e.g. "A", "B", "C", or "D")
 - "set_name": "${setName}"
 - "difficulty_level": "Easy", "Medium", or "Hard"
@@ -2015,7 +2039,7 @@ For every question, output an object in a JSON array with these exact 34 fields:
 CRITICAL RULES:
 1. STRICT SUBJECT RULE: The "subject" field MUST ONLY contain the academic subject name (like "Current Affairs", "Mathematics", "Reasoning", "Polity"). NEVER include exam names like "RRB", "NTPC", or "Shift" in "subject". Exam names belong strictly in "subject_level".
 2. BOTH Hindi and English fields MUST be fully populated! If the paper is only in Hindi or only in English, TRANSLATE and generate the counterpart language so NO field is left blank.
-3. BOTH solution_hi and solution_en MUST be detailed, pedagogical proofs. Start directly with <p><b>हल:</b> ...</p> and <p><b>Solution:</b> ...</p>. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+3. NO SOLUTION PREFIX LABELS: Both solution_hi and solution_en MUST start DIRECTLY with the explanation text or derivation step wrapped in <p>...</p>. DO NOT write '<b>हल:</b>' or '<b>Solution:</b>' at the start because the portal has built-in labels! NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 4. NO LATEX, NO DOLLAR SIGNS: NEVER output LaTeX commands (like \\frac, \\times, \\sqrt, \\div, \\circ) or dollar sign delimiters ($...$ or $$...$$)!
    - Output all mathematical symbols and operators directly in clean Unicode and HTML:
      * Use '×' instead of '\\times'

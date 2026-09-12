@@ -1477,6 +1477,16 @@ function cleanServerMocktestText(text: string): string {
   return res.trim();
 }
 
+function stripServerSolutionPrefix(text: string): string {
+  if (!text) return '';
+  let res = text.trim();
+  res = res.replace(/^<p>\s*(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?<\/p>\s*/i, '');
+  res = res.replace(/^(<p>\s*)(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '$1');
+  res = res.replace(/^(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '');
+  res = res.replace(/^<p>\s+/, '<p>');
+  return res.trim();
+}
+
 function safeParseAiJson(rawJson: string): any {
   const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
   const safeJsonStr = cleaned
@@ -1521,14 +1531,16 @@ Question: ${question_en || ''}
 (D) ${option4_en || ''}
 
 DEEP RESEARCH & SOLUTION REQUIREMENTS:
-1. 'solution_hi': Detailed, pedagogical explanation in Hindi wrapped in clean semantic HTML (<p><b>हल:</b>...</p>).
+1. 'solution_hi': Detailed, pedagogical explanation in Hindi wrapped in clean semantic HTML (<p>[Step-by-step formula and mathematical calculation proof]</p>).
+   - DO NOT prefix with 'हल:', '<b>हल:</b>', or 'उत्तर:' because the test application already renders a Solution header! Start directly with the derivation text.
    - Must include:
      a) दिया गया डेटा (Given Data) & मुख्य अवधारणा (Core Concept/Theorem).
      b) आवश्यक सूत्र (Formula in clean Unicode & text).
      c) चरण-दर-चरण विस्तृत गणना (Step-by-step calculation).
      d) निष्कर्ष एवं सही विकल्प (Final answer conclusion stating why Option ${answer} is correct).
    - DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-2. 'solution_en': Detailed, rigorous solution in English wrapped in clean semantic HTML (<p><b>Solution:</b>...</p>).
+2. 'solution_en': Detailed, rigorous solution in English wrapped in clean semantic HTML (<p>[Step-by-step formula and mathematical calculation proof]</p>).
+   - DO NOT prefix with 'Solution:', '<b>Solution:</b>', or 'Explanation:' because the test application already renders a Solution header! Start directly with the derivation text.
    - Must include:
      a) Key concept & underlying principle.
      b) Standard formula / theorem in clean Unicode & text.
@@ -1544,8 +1556,8 @@ DEEP RESEARCH & SOLUTION REQUIREMENTS:
 4. Determine 'difficulty_level': 'easy' | 'medium' | 'hard'.
 5. Output ONLY valid JSON:
 {
-  "solution_hi": "<p><b>हल:</b>...</p>",
-  "solution_en": "<p><b>Solution:</b>...</p>",
+  "solution_hi": "<p>दिया गया है...</p>",
+  "solution_en": "<p>Given that...</p>",
   "difficulty_level": "medium"
 }`;
 
@@ -1587,8 +1599,8 @@ DEEP RESEARCH & SOLUTION REQUIREMENTS:
 
     const parsed = safeParseAiJson(rawJson);
     res.json({
-      solution_hi: cleanServerMocktestText(parsed.solution_hi || ''),
-      solution_en: cleanServerMocktestText(parsed.solution_en || ''),
+      solution_hi: stripServerSolutionPrefix(cleanServerMocktestText(parsed.solution_hi || '')),
+      solution_en: stripServerSolutionPrefix(cleanServerMocktestText(parsed.solution_en || '')),
       difficulty_level: parsed.difficulty_level || 'medium'
     });
   } catch (error: any) {
@@ -1639,8 +1651,8 @@ MANDATORY TASKS TO EXECUTE:
    - Select ONLY from: ["Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK"].
    - CRITICAL: Letter puzzles, word arrangements, alphabetical order questions (e.g. words like ION, EBB, PET, GET or letter counting between letters) MUST BE "Reasoning", NEVER "Chemistry" or other subjects!
 5. COMPREHENSIVE STEP-BY-STEP SOLUTION:
-   - 'solution_hi': Detailed explanation in Hindi in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-   - 'solution_en': Rigorous explanation in English in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+   - 'solution_hi': Detailed explanation in Hindi in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'हल:' or '<b>हल:</b>' because portal UI provides the label! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+   - 'solution_en': Rigorous explanation in English in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'Solution:' or '<b>Solution:</b>' because portal UI provides the label! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
    - Both must clearly prove why option is correct with calculations and proofs.
 6. DIFFICULTY LEVEL:
    - 'easy' | 'medium' | 'hard'.
@@ -1660,8 +1672,8 @@ Respond ONLY with a valid JSON object:
   "answer": "B",
   "subject": "Reasoning",
   "difficulty_level": "medium",
-  "solution_hi": "<p><b>हल:</b>...</p>",
-  "solution_en": "<p><b>Solution:</b>...</p>"
+  "solution_hi": "<p>दिया गया है...</p>",
+  "solution_en": "<p>Given that...</p>"
 }`;
 
     const executeRepair = async (client: any) => {
@@ -1685,7 +1697,7 @@ Respond ONLY with a valid JSON object:
           model: 'gemini-flash-lite-latest',
           contents: [{ text: repairPrompt }],
           config: {
-            temperature: 0.15,
+            temperature: 0.1,
             responseMimeType: "application/json"
           }
         });
@@ -1703,8 +1715,8 @@ Respond ONLY with a valid JSON object:
     if (parsed && typeof parsed === 'object') {
       if (parsed.question_hi) parsed.question_hi = cleanServerMocktestText(parsed.question_hi);
       if (parsed.question_en) parsed.question_en = cleanServerMocktestText(parsed.question_en);
-      if (parsed.solution_hi) parsed.solution_hi = cleanServerMocktestText(parsed.solution_hi);
-      if (parsed.solution_en) parsed.solution_en = cleanServerMocktestText(parsed.solution_en);
+      if (parsed.solution_hi) parsed.solution_hi = stripServerSolutionPrefix(cleanServerMocktestText(parsed.solution_hi));
+      if (parsed.solution_en) parsed.solution_en = stripServerSolutionPrefix(cleanServerMocktestText(parsed.solution_en));
       if (parsed.option1_hi) parsed.option1_hi = cleanServerMocktestText(parsed.option1_hi);
       if (parsed.option2_hi) parsed.option2_hi = cleanServerMocktestText(parsed.option2_hi);
       if (parsed.option3_hi) parsed.option3_hi = cleanServerMocktestText(parsed.option3_hi);
@@ -1913,14 +1925,14 @@ Extract into a strict JSON array of objects with these exact 34 fields:
 5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
 6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: Detailed step-by-step pedagogical solution in Hindi in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+8. solution_hi: Detailed step-by-step pedagogical solution in Hindi in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'हल:', '<b>हल:</b>', or 'उत्तर:' because the test application already renders a Solution header! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
 10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
 11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
 12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
 13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: Detailed step-by-step pedagogical explanation in English in clean HTML (<p><b>Solution:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+15. solution_en: Detailed step-by-step pedagogical explanation in English in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'Solution:', '<b>Solution:</b>', or 'Explanation:' because the test application already renders a Solution header! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 16. answer: Correct answer: Single choice "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
 17. set_name: "${setName}"
 18. difficulty_level: "Easy", "Medium", or "Hard"
@@ -2012,8 +2024,8 @@ RULES:
       ...item,
       question_hi: cleanServerMocktestText(item.question_hi),
       question_en: cleanServerMocktestText(item.question_en),
-      solution_hi: cleanServerMocktestText(item.solution_hi),
-      solution_en: cleanServerMocktestText(item.solution_en),
+      solution_hi: stripServerSolutionPrefix(cleanServerMocktestText(item.solution_hi)),
+      solution_en: stripServerSolutionPrefix(cleanServerMocktestText(item.solution_en)),
       option1_hi: cleanServerMocktestText(item.option1_hi),
       option2_hi: cleanServerMocktestText(item.option2_hi),
       option3_hi: cleanServerMocktestText(item.option3_hi),
@@ -2064,9 +2076,9 @@ STRICT EDITORIAL GUIDELINES:
    - NO LATEX, NO DOLLAR SIGNS: NEVER introduce or retain LaTeX commands (like \\frac, \\times, \\div, \\sqrt, \\circ) or dollar delimiters ($...$). Convert all math into clean Unicode symbols ('×', '÷', '−', '≤', '≥', '≠', '°', '√') and write fractions as '(a) / (b)' or 'a / b'.
    - Plain numbers, percentages (40%), and currency (₹4,800) MUST NOT be enclosed in dollar signs.
 
-4. SEMANTIC HTML:
+4. SEMANTIC HTML & NO SOLUTION LABELS:
    - Ensure question_hi and question_en are wrapped in <p>...</p>.
-   - Ensure solutions (if present) are structured with <p><b>हल:</b>...</p> and <p><b>Solution:</b>...</p>.
+   - Ensure solutions (if present) are structured with clean step-by-step explanations in <p>...</p> WITHOUT prefix labels like "<b>हल:</b>", "हल:", "<b>Solution:</b>", or "Solution:" as the portal UI displays its own Solution header!
 
 INPUT ITEMS TO PROOFREAD:
 ${JSON.stringify(items, null, 2)}
@@ -2116,8 +2128,8 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
       ...item,
       question_hi: cleanServerMocktestText(item.question_hi),
       question_en: cleanServerMocktestText(item.question_en),
-      solution_hi: cleanServerMocktestText(item.solution_hi),
-      solution_en: cleanServerMocktestText(item.solution_en),
+      solution_hi: stripServerSolutionPrefix(cleanServerMocktestText(item.solution_hi)),
+      solution_en: stripServerSolutionPrefix(cleanServerMocktestText(item.solution_en)),
       option1_hi: cleanServerMocktestText(item.option1_hi),
       option2_hi: cleanServerMocktestText(item.option2_hi),
       option3_hi: cleanServerMocktestText(item.option3_hi),

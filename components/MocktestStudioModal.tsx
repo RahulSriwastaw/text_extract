@@ -65,14 +65,14 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
       option3_hi: '<p>विकल्प C</p>',
       option4_hi: '<p>विकल्प D</p>',
       option5_hi: '',
-      solution_hi: '<p><b>हल:</b> विस्तृत विवरण...</p>',
+      solution_hi: '<p>विस्तृत विवरण...</p>',
       question_en: '<p>Enter new question here...</p>',
       option1_en: '<p>Option A</p>',
       option2_en: '<p>Option B</p>',
       option3_en: '<p>Option C</p>',
       option4_en: '<p>Option D</p>',
       option5_en: '',
-      solution_en: '<p><b>Solution:</b> Detailed explanation and proof...</p>',
+      solution_en: '<p>Detailed explanation and proof...</p>',
       answer: answerFormat === 'letters' ? 'A' : '1',
       set_name: setName,
       difficulty_level: selectedDifficulty,
@@ -685,7 +685,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               rows={3}
                               value={item.solution_hi}
                               onChange={(e) => handleUpdateItem(item.id, { solution_hi: e.target.value })}
-                              placeholder="<p><b>हल:</b> विस्तृत विवरण व गणना...</p>"
+                              placeholder="<p>विस्तृत विवरण व गणना...</p>"
                               className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-emerald-300 focus:outline-none focus:border-emerald-500/60 custom-scrollbar"
                             />
                           </div>
@@ -748,7 +748,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               rows={3}
                               value={item.solution_en}
                               onChange={(e) => handleUpdateItem(item.id, { solution_en: e.target.value })}
-                              placeholder="<p><b>Solution:</b> Step-by-step derivation & formulas...</p>"
+                              placeholder="<p>Step-by-step derivation & formulas...</p>"
                               className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-teal-300 focus:outline-none focus:border-teal-500/60 custom-scrollbar"
                             />
                           </div>

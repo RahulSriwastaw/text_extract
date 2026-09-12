@@ -1,6 +1,8 @@
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
 import { getAiSettings } from './aiDbService';
 
+export type { MockTestMcqItem };
+
 export const MOCKTEST_CSV_HEADERS = [
   'question_r',
   'question_hi',

@@ -215,6 +215,7 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
   });
 
   let selectedKey = '';
+  let waitNeededMs = 0;
 
   if (availableHealthy.length > 0) {
     // True Round-Robin distribution across healthy keys to spread the load evenly across all keys
@@ -229,9 +230,13 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
       return cdA - cdB;
     });
     selectedKey = sorted[0];
+    const earliestCd = keyHealth.get(selectedKey)?.cooldownUntil || 0;
+    if (earliestCd > now) {
+      waitNeededMs = Math.min(earliestCd - now + 100, 4000);
+    }
   }
 
-  return { client: new GoogleGenAI({ apiKey: selectedKey }), key: selectedKey, totalKeys: allKeys.length };
+  return { client: new GoogleGenAI({ apiKey: selectedKey }), key: selectedKey, totalKeys: allKeys.length, waitNeededMs };
 };
 
 const reportKeySuccess = (key: string) => {
@@ -270,19 +275,20 @@ const reportKeyError = (key: string, type: string, isPermanent = false) => {
   health.totalErrors++;
   health.errorType = type;
 
-  // Circuit Breaker: Quota/Rate-limit gets 40s cooldown, Server overload gets 15s, Transient gets 5s
-  let cooldownSec = 15;
+  // Circuit Breaker: Gemini rate limits reset within 4-10 seconds.
+  // Keeping cooldowns short prevents locking out all keys simultaneously.
+  let cooldownSec = 5;
   if (type === 'QUOTA' || type === 'RATE_LIMIT') {
-    cooldownSec = Math.min(30 + health.consecutiveErrors * 10, 90);
+    cooldownSec = Math.min(4 + health.consecutiveErrors * 2, 8);
   } else if (type === 'OVERLOAD') {
-    cooldownSec = 15;
+    cooldownSec = 4;
   } else {
-    cooldownSec = 5;
+    cooldownSec = 2;
   }
 
   health.cooldownUntil = now + (cooldownSec * 1000);
   keyHealth.set(key, health);
-  console.warn(`[API-Key] Key ${key.substring(0, 8)}... error: ${type}. Cooldown set for ${cooldownSec}s.`);
+  console.warn(`[API-Key] Key ${key.substring(0, 8)}... error: ${type}. Transient cooldown set for ${cooldownSec}s.`);
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -304,8 +310,14 @@ async function runAIAction(
       triedKeys.clear();
     }
 
-    const { client, key, totalKeys } = getGeminiClient(triedKeys, userKeyInput);
+    const { client, key, totalKeys, waitNeededMs } = getGeminiClient(triedKeys, userKeyInput);
     triedKeys.add(key);
+
+    // If all keys are currently cooling down, wait for the earliest one to become available
+    if (waitNeededMs > 0) {
+      console.log(`[API-Key] All keys temporarily in rate-limit cooldown. Waiting ${waitNeededMs}ms for key ${key.substring(0, 8)}...`);
+      await delay(waitNeededMs);
+    }
 
     try {
       const result = await action(client);
@@ -333,7 +345,8 @@ async function runAIAction(
 
       if (isInvalidKey) {
         reportKeyError(key, 'INVALID', true);
-        // Immediately try the next key with no delay
+        // Immediately try the next key with minimal delay
+        await delay(50);
         continue; 
       }
 
@@ -349,14 +362,13 @@ async function runAIAction(
 
       if (isRetryable) {
         const errType = isQuotaError ? 'QUOTA' : (isServerOverloaded ? 'OVERLOAD' : 'TRANSIENT');
-        console.warn(`[API-Key] Key ${key.substring(0, 8)}... failed (${errType}: ${error?.message || errorStr}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Fast-rotating to next key in pool (${totalKeys} active keys).`);
+        console.warn(`[API-Key] Key ${key.substring(0, 8)}... failed (${errType}: ${error?.message || errorStr}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Rotating to next key in pool (${totalKeys} active keys).`);
         reportKeyError(key, errType);
         
-        // Fast Instant Rotation:
-        // If there are other available keys in the pool not yet attempted, rotate immediately with only 50ms jitter!
-        // Only if all keys have been exhausted in this request sequence, apply a short backoff.
+        // Intelligent Rotation:
+        // Pacing each rotated attempt with 300ms prevents simultaneous burst limit exhaustion across all keys!
         const remainingUntried = allKeys.filter(k => !triedKeys.has(k)).length;
-        const delayMs = remainingUntried > 0 ? 50 : Math.min(attempt * 250, 1200);
+        const delayMs = remainingUntried > 0 ? 300 : Math.min(attempt * 250, 1500);
         await delay(delayMs); 
         continue;
       }
@@ -1940,8 +1952,37 @@ RULES:
 - Respond ONLY with the JSON array.`;
 
     const executeExtract = async (client: any) => {
+      try {
+        const response = await client.models.generateContent({
+          model: 'gemini-flash-lite-latest',
+          contents: [
+            {
+              inlineData: {
+                mimeType: 'image/png',
+                data: cleanBase64
+              }
+            },
+            { text: promptText }
+          ],
+          config: {
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        if (responseText && responseText.trim()) {
+          return responseText;
+        }
+      } catch (liteErr: any) {
+        console.warn(`[mocktest-extract] gemini-flash-lite-latest failed (${liteErr?.message}). Falling back to gemini-2.5-flash...`);
+      }
+
+      // Fallback model: gemini-2.5-flash
       const response = await client.models.generateContent({
-        model: 'gemini-flash-lite-latest',
+        model: 'gemini-2.5-flash',
         contents: [
           {
             inlineData: {

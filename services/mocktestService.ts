@@ -675,19 +675,31 @@ export function separateCompleteAndPendingItems(
     const it = items[i];
     const issues = detectItemFieldIssues(it);
     
-    // An item is incomplete/pending if it is at the bottom of the page and:
-    // 1. Missing option C or D or both, OR
-    // 2. Missing all options, OR
-    // 3. Question stem does not end in standard punctuation or ends with conjunction (और, तथा, if, when, -)
+    // Check if the item has options A, B, C, D
+    const optCount = [
+      it.option1_hi || it.option1_en,
+      it.option2_hi || it.option2_en,
+      it.option3_hi || it.option3_en,
+      it.option4_hi || it.option4_en
+    ].filter(o => o && o.trim() && o.toLowerCase() !== 'blank').length;
+
+    // A question with 3 or 4 options or a complete answer is NEVER incomplete
+    const isOptionsComplete = optCount >= 3;
+
+    // An item is incomplete/pending ONLY IF:
+    // 1. It is at the bottom of the page and is missing option C or D (only A or A/B present), OR
+    // 2. It has 0 options and its question stem clearly leaves off mid-sentence (cut off at page boundary)
     const stem = (it.question_hi || it.question_en || '').replace(/<[^>]*>/g, '').trim();
-    const endsWithContinuation = /(?:और|तथा|एवं|यदि|तो|या|का|की|के|में|पर|से|है|tha|if|when|where|is|are|the|of|to|and|or|[+\-*\/=,;:\-])$/i.test(stem);
-    const isIncompleteStem = !/[?।\.!]$/.test(stem) || endsWithContinuation;
+    const endsWithContinuation = /(?:और|तथा|एवं|यदि|यथा|अथवा|जब|तो|का|की|के|में|पर|से|if|when|where|and|or|[+\-*\/=,;:\-])$/i.test(stem);
+    const isStemHangingWithoutOptions = optCount === 0 && (endsWithContinuation || !/[?।\.!]$/.test(stem));
     const isBottomItem = (i === items.length - 1);
 
-    if (isBottomItem && (issues.hasMissingOptions || issues.hasEmptyQuestion || isIncompleteStem)) {
+    const isTrulyPending = isBottomItem && !isOptionsComplete && (issues.hasMissingOptions || issues.hasEmptyQuestion || isStemHangingWithoutOptions);
+
+    if (isTrulyPending) {
       pending.unshift(it);
       foundCutoff = true;
-    } else if (foundCutoff && (issues.hasMissingOptions || issues.hasEmptyQuestion)) {
+    } else if (foundCutoff && !isOptionsComplete && (issues.hasMissingOptions || issues.hasEmptyQuestion)) {
       // Multiple items at page bottom can be pending if they were both cut off
       pending.unshift(it);
     } else {
@@ -696,8 +708,8 @@ export function separateCompleteAndPendingItems(
     }
   }
 
-  // If all items were flagged as pending, but there are multiple questions, keep the first ones as complete
-  if (complete.length === 0 && pending.length > 1) {
+  // Safety: If all items were flagged as pending, keep at least one as complete
+  if (complete.length === 0 && pending.length > 0) {
     complete.push(pending.shift()!);
   }
 

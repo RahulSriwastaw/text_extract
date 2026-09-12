@@ -391,20 +391,24 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         finalComplete = [...finalComplete, ...pendingItems];
       }
 
+      // ALL items extracted from this page belong to this page!
+      // Even if an item is pending carry-over to the next page, it originated here and must be displayed here.
+      const allPageItems = [...finalComplete, ...(isLastPage ? [] : pendingItems)];
+
       // Update current page state
       setPages(prev => prev.map(p => p.id === page.id ? {
         ...p,
         status: 'ready',
-        mcqCount: finalComplete.length,
-        errorMessage: pendingItems.length > 0 && !isLastPage ? `Carried forward ${pendingItems.length} incomplete MCQ to next page` : undefined,
-        items: finalComplete
+        mcqCount: allPageItems.length,
+        errorMessage: pendingItems.length > 0 && !isLastPage ? `Question continues on Page ${page.pageNumber + 1}` : undefined,
+        items: allPageItems
       } : p));
 
       // Append/Update in global extracted MCQs list
-      if (finalComplete.length > 0) {
+      if (allPageItems.length > 0) {
         setExtractedMcqs(prev => {
           const withoutThisPage = prev.filter(it => it.pageId !== page.id);
-          const nextList = [...withoutThisPage, ...finalComplete];
+          const nextList = [...withoutThisPage, ...allPageItems];
           return nextList.map((it, idx) => ({ ...it, question_r: idx + 1 }));
         });
       }
@@ -590,14 +594,60 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
   // Single page retry
   const handleRetryPage = async (page: PageQueueItem, idx: number) => {
-    if (isProcessingAll) return;
-    setIsProcessingAll(true);
+    if (isProcessingAll && !isPaused) {
+      const confirmOverride = confirm(
+        `Batch extraction is active. Would you like to pause batch extraction and retry Page ${page.pageNumber} now?`
+      );
+      if (!confirmOverride) return;
+      pauseRef.current = true;
+      setIsPaused(true);
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    setIsProcessingAll(false);
+    pauseRef.current = false;
+    setActivePageIndex(idx);
+
+    // Immediately reflect processing state in the UI
+    setPages(prev => prev.map(p => p.id === page.id ? {
+      ...p,
+      status: 'processing',
+      errorMessage: undefined
+    } : p));
+    setLiveStatusText(`[Page ${page.pageNumber}] Retrying extraction with intelligent key rotation...`);
+
     try {
-      await processPageItem(page, idx, pages.length);
+      // Find if previous page has pending / incomplete items to carry over
+      let retryPendingContext: PendingMcqContext | null = null;
+      if (idx > 0) {
+        const prevPage = pages[idx - 1];
+        if (prevPage && prevPage.items && prevPage.items.length > 0) {
+          const incompleteItems = prevPage.items.filter(it => {
+            const iss = detectItemFieldIssues(it);
+            return iss.hasMissingOptions || iss.hasEmptyQuestion;
+          });
+          if (incompleteItems.length > 0) {
+            retryPendingContext = {
+              sourcePageNumber: prevPage.pageNumber,
+              sourcePageId: prevPage.id,
+              pendingItems: incompleteItems
+            };
+          }
+        }
+      }
+
+      await processPageItemSequential(page, retryPendingContext, idx, pages.length, idx === pages.length - 1);
+      setLiveStatusText(`✓ Page ${page.pageNumber} extracted successfully!`);
     } catch (err: any) {
-      alert(`Page ${page.pageNumber} extraction failed: ${err.message}`);
+      console.error(`Page ${page.pageNumber} retry failed:`, err);
+      const errMsg = err?.message || 'Extraction failed';
+      setPages(prev => prev.map(p => p.id === page.id ? {
+        ...p,
+        status: 'error',
+        errorMessage: errMsg
+      } : p));
+      setLiveStatusText(`Page ${page.pageNumber} extraction failed: ${errMsg}`);
     } finally {
-      setIsProcessingAll(false);
       setActivePageIndex(null);
     }
   };
@@ -1652,18 +1702,18 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                           <button
                             type="button"
                             onClick={() => handleRetryPage(page, idx)}
-                            disabled={isProcessingAll}
+                            disabled={page.status === 'processing'}
                             className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] hover:bg-amber-500/20 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 rounded-lg font-bold transition-all disabled:opacity-40"
                             title="Re-extract this page with prompt"
                           >
-                            <RotateCw className="w-3.5 h-3.5" />
+                            <RotateCw className={`w-3.5 h-3.5 ${page.status === 'processing' ? 'animate-spin' : ''}`} />
                             <span>Re-Extract</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => handleRecaptureFromAiTab(page)}
-                            disabled={isProcessingAll}
+                            disabled={page.status === 'processing'}
                             className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 hover:text-cyan-200 rounded-lg font-bold transition-all disabled:opacity-40"
                             title="Read complete finished response from AI tab if anything was cut off"
                           >
@@ -1675,8 +1725,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                         <button
                           type="button"
                           onClick={() => handleDeletePage(page.id)}
-                          disabled={isProcessingAll}
-                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
+                          disabled={page.status === 'processing'}
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all disabled:opacity-40"
                           title="Delete this page"
                         >
                           <Trash2 className="w-4 h-4" />

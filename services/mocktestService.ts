@@ -545,12 +545,21 @@ export function cleanMocktestText(text: string): string {
   return res.trim();
 }
 
+export interface PendingMcqContext {
+  sourcePageNumber: number;
+  sourcePageId?: string;
+  pendingItems: MockTestMcqItem[];
+  rawFragmentText?: string;
+}
+
 export interface ItemFieldIssues {
   hasMissingOptions: boolean;
   missingOptionsList: string[];
   hasEmptyQuestion: boolean;
+  hasMissingAnswer: boolean;
   hasDummySolution: boolean;
   hasIssues: boolean;
+  missingFieldNames: string[];
   issueSummary: string;
 }
 
@@ -559,28 +568,53 @@ export interface ItemFieldIssues {
  */
 export function detectItemFieldIssues(item: MockTestMcqItem): ItemFieldIssues {
   const missingOptionsList: string[] = [];
+  const missingFieldNames: string[] = [];
   
   const opt1 = (item.option1_hi || item.option1_en || '').replace(/<[^>]*>/g, '').trim();
   const opt2 = (item.option2_hi || item.option2_en || '').replace(/<[^>]*>/g, '').trim();
   const opt3 = (item.option3_hi || item.option3_en || '').replace(/<[^>]*>/g, '').trim();
   const opt4 = (item.option4_hi || item.option4_en || '').replace(/<[^>]*>/g, '').trim();
 
-  if (!opt1 || opt1.toLowerCase() === 'blank') missingOptionsList.push('A');
-  if (!opt2 || opt2.toLowerCase() === 'blank') missingOptionsList.push('B');
-  if (!opt3 || opt3.toLowerCase() === 'blank') missingOptionsList.push('C');
-  if (!opt4 || opt4.toLowerCase() === 'blank') missingOptionsList.push('D');
+  if (!opt1 || opt1.toLowerCase() === 'blank') {
+    missingOptionsList.push('A');
+    missingFieldNames.push('Option A');
+  }
+  if (!opt2 || opt2.toLowerCase() === 'blank') {
+    missingOptionsList.push('B');
+    missingFieldNames.push('Option B');
+  }
+  if (!opt3 || opt3.toLowerCase() === 'blank') {
+    missingOptionsList.push('C');
+    missingFieldNames.push('Option C');
+  }
+  if (!opt4 || opt4.toLowerCase() === 'blank') {
+    missingOptionsList.push('D');
+    missingFieldNames.push('Option D');
+  }
 
   const hasMissingOptions = missingOptionsList.length > 0;
   
   const qHi = (item.question_hi || '').replace(/<[^>]*>/g, '').trim();
   const qEn = (item.question_en || '').replace(/<[^>]*>/g, '').trim();
   const hasEmptyQuestion = !qHi && !qEn;
+  if (hasEmptyQuestion) {
+    missingFieldNames.push('Question Text');
+  }
+
+  const rawAns = (item.answer || '').replace(/['"\[\]\{\}]/g, '').trim();
+  const hasMissingAnswer = !rawAns;
+  if (hasMissingAnswer) {
+    missingFieldNames.push('Answer');
+  }
 
   const solHi = (item.solution_hi || '').replace(/<[^>]*>/g, '').trim();
   const solEn = (item.solution_en || '').replace(/<[^>]*>/g, '').trim();
   const isGenericHi = !solHi || /^(?:हल:)?\s*सही उत्तर विकल्प\s+[A-E1-5]\s*है।?$/i.test(solHi) || solHi.length < 25;
   const isGenericEn = !solEn || /^(?:Solution:)?\s*The correct option is\s+[A-E1-5]\.?$/i.test(solEn) || solEn.length < 25;
   const hasDummySolution = isGenericHi && isGenericEn;
+  if (hasDummySolution) {
+    missingFieldNames.push('Solution');
+  }
 
   const issueParts: string[] = [];
   if (hasMissingOptions) {
@@ -589,20 +623,190 @@ export function detectItemFieldIssues(item: MockTestMcqItem): ItemFieldIssues {
   if (hasEmptyQuestion) {
     issueParts.push('Missing Question Text');
   }
+  if (hasMissingAnswer) {
+    issueParts.push('Missing Answer');
+  }
   if (hasDummySolution) {
     issueParts.push('Placeholder/Generic Solution');
   }
 
-  const hasIssues = hasMissingOptions || hasEmptyQuestion || hasDummySolution;
+  const hasIssues = hasMissingOptions || hasEmptyQuestion || hasMissingAnswer || hasDummySolution;
   const issueSummary = issueParts.join(' • ');
 
   return {
     hasMissingOptions,
     missingOptionsList,
     hasEmptyQuestion,
+    hasMissingAnswer,
     hasDummySolution,
     hasIssues,
+    missingFieldNames,
     issueSummary: issueSummary || 'All fields complete'
+  };
+}
+
+/**
+ * Cleanly separates extracted page MCQs into:
+ * 1. completeItems: Finished MCQs with complete options/stem
+ * 2. pendingItems: Incomplete question(s) at the bottom of the page that must be carried forward to the next page.
+ */
+export function separateCompleteAndPendingItems(
+  items: MockTestMcqItem[],
+  isLastPage: boolean = false
+): { completeItems: MockTestMcqItem[]; pendingItems: MockTestMcqItem[] } {
+  if (!items || items.length === 0) {
+    return { completeItems: [], pendingItems: [] };
+  }
+
+  // If this is the last page, no carry-over can occur; keep all items
+  if (isLastPage) {
+    return { completeItems: items, pendingItems: [] };
+  }
+
+  // Check the trailing items from the end of the page
+  const complete: MockTestMcqItem[] = [];
+  const pending: MockTestMcqItem[] = [];
+
+  // Identify trailing items that are cut off or missing critical options (e.g. only A/B present, or 0 options)
+  let foundCutoff = false;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    const issues = detectItemFieldIssues(it);
+    
+    // An item is incomplete/pending if it is at the bottom of the page and:
+    // 1. Missing option C or D or both, OR
+    // 2. Missing all options, OR
+    // 3. Question stem does not end in standard punctuation or ends with conjunction (और, तथा, if, when, -)
+    const stem = (it.question_hi || it.question_en || '').replace(/<[^>]*>/g, '').trim();
+    const endsWithContinuation = /(?:और|तथा|एवं|यदि|तो|या|का|की|के|में|पर|से|है|tha|if|when|where|is|are|the|of|to|and|or|[+\-*\/=,;:\-])$/i.test(stem);
+    const isIncompleteStem = !/[?।\.!]$/.test(stem) || endsWithContinuation;
+    const isBottomItem = (i === items.length - 1);
+
+    if (isBottomItem && (issues.hasMissingOptions || issues.hasEmptyQuestion || isIncompleteStem)) {
+      pending.unshift(it);
+      foundCutoff = true;
+    } else if (foundCutoff && (issues.hasMissingOptions || issues.hasEmptyQuestion)) {
+      // Multiple items at page bottom can be pending if they were both cut off
+      pending.unshift(it);
+    } else {
+      foundCutoff = false;
+      complete.unshift(it);
+    }
+  }
+
+  // If all items were flagged as pending, but there are multiple questions, keep the first ones as complete
+  if (complete.length === 0 && pending.length > 1) {
+    complete.push(pending.shift()!);
+  }
+
+  return { completeItems: complete, pendingItems: pending };
+}
+
+export interface MergePendingResult {
+  mergedPendingItems: MockTestMcqItem[];
+  freshPageItems: MockTestMcqItem[];
+  logMessage: string;
+}
+
+/**
+ * Safely merges continuations returned from Page N+1 with pending question(s) from Page N.
+ * Avoids duplicate question numbers or duplicate items.
+ */
+export function mergePendingCarryOver(
+  extractedFromNextPage: MockTestMcqItem[],
+  pendingContext: PendingMcqContext | null,
+  currentPageNumber: number
+): MergePendingResult {
+  if (!pendingContext || !pendingContext.pendingItems || pendingContext.pendingItems.length === 0) {
+    return {
+      mergedPendingItems: [],
+      freshPageItems: extractedFromNextPage,
+      logMessage: `Page ${currentPageNumber}: No pending context to merge. Extracted ${extractedFromNextPage.length} new question(s).`
+    };
+  }
+
+  if (!extractedFromNextPage || extractedFromNextPage.length === 0) {
+    return {
+      mergedPendingItems: pendingContext.pendingItems,
+      freshPageItems: [],
+      logMessage: `Page ${currentPageNumber}: Empty response from page. Carried ${pendingContext.pendingItems.length} pending item(s).`
+    };
+  }
+
+  const mergedPending: MockTestMcqItem[] = [];
+  const freshItems: MockTestMcqItem[] = [...extractedFromNextPage];
+
+  // Try to match each pending item with the beginning of the next page
+  for (const pendingItem of pendingContext.pendingItems) {
+    if (freshItems.length === 0) {
+      mergedPending.push(pendingItem);
+      continue;
+    }
+
+    const candidate = freshItems[0];
+    const candidateStem = (candidate.question_hi || candidate.question_en || '').replace(/<[^>]*>/g, '').trim();
+    const pendingStem = (pendingItem.question_hi || pendingItem.question_en || '').replace(/<[^>]*>/g, '').trim();
+
+    // Check if candidate continues pendingItem:
+    // 1. Candidate's source_pages explicitly mentions both pages, OR
+    // 2. Candidate has empty or very short stem (continuation fragment), OR
+    // 3. Candidate stem matches or continues pending stem, OR
+    // 4. Candidate has options C & D filled while pending was missing them
+    const candidateSourcePages = String(candidate.source_pages || '');
+    const mentionsBothPages = candidateSourcePages.includes(String(pendingContext.sourcePageNumber));
+    const isFragment = candidateStem.length < 20 || candidateStem.startsWith('(') || candidateStem.startsWith('Option');
+    const stemsMatch = candidateStem.includes(pendingStem.slice(0, 30)) || pendingStem.includes(candidateStem.slice(0, 30));
+    const pendingMissingOpts = detectItemFieldIssues(pendingItem).hasMissingOptions;
+
+    const isMatch = mentionsBothPages || isFragment || stemsMatch || (pendingMissingOpts && candidate.option3_hi || candidate.option4_hi);
+
+    if (isMatch) {
+      // Merge candidate into pendingItem!
+      const merged: MockTestMcqItem = {
+        ...pendingItem,
+        question_hi: pendingItem.question_hi && pendingItem.question_hi.length > candidate.question_hi.length
+          ? pendingItem.question_hi
+          : (candidate.question_hi || pendingItem.question_hi),
+        question_en: pendingItem.question_en && pendingItem.question_en.length > candidate.question_en.length
+          ? pendingItem.question_en
+          : (candidate.question_en || pendingItem.question_en),
+        option1_hi: pendingItem.option1_hi || candidate.option1_hi,
+        option2_hi: pendingItem.option2_hi || candidate.option2_hi,
+        option3_hi: candidate.option3_hi || pendingItem.option3_hi,
+        option4_hi: candidate.option4_hi || pendingItem.option4_hi,
+        option5_hi: candidate.option5_hi || pendingItem.option5_hi,
+        option1_en: pendingItem.option1_en || candidate.option1_en,
+        option2_en: pendingItem.option2_en || candidate.option2_en,
+        option3_en: candidate.option3_en || pendingItem.option3_en,
+        option4_en: candidate.option4_en || pendingItem.option4_en,
+        option5_en: candidate.option5_en || pendingItem.option5_en,
+        answer: candidate.answer || pendingItem.answer,
+        solution_hi: candidate.solution_hi && candidate.solution_hi.length > (pendingItem.solution_hi || '').length
+          ? candidate.solution_hi
+          : (pendingItem.solution_hi || candidate.solution_hi),
+        solution_en: candidate.solution_en && candidate.solution_en.length > (pendingItem.solution_en || '').length
+          ? candidate.solution_en
+          : (pendingItem.solution_en || candidate.solution_en),
+        source_pages: `${pendingContext.sourcePageNumber}, ${currentPageNumber}`,
+        subject: candidate.subject || pendingItem.subject,
+        difficulty_level: candidate.difficulty_level || pendingItem.difficulty_level
+      };
+
+      mergedPending.push(merged);
+      // Consume the first item since it was the continuation
+      freshItems.shift();
+    } else {
+      // Not a continuation; keep pending item as was
+      mergedPending.push(pendingItem);
+    }
+  }
+
+  const logMessage = `Page ${currentPageNumber}: Merged ${mergedPending.length} continuation(s) from Page ${pendingContext.sourcePageNumber}. Formed ${freshItems.length} new question(s).`;
+
+  return {
+    mergedPendingItems: mergedPending,
+    freshPageItems: freshItems,
+    logMessage
   };
 }
 
@@ -1137,11 +1341,54 @@ export function convertElementsToMockTestItems(
 }
 
 /**
- * Generate a specialized AI prompt for directly extracting images into the 34-column MockTest schema.
+ * Generate a specialized AI prompt for directly extracting images into the 34-column MockTest schema,
+ * with optional carry-over context from the previous page.
  */
-export function buildMockTestDirectPrompt(setName = 'PYPs Shift-3'): string {
+export function buildMockTestDirectPrompt(
+  setName = 'PYPs Shift-3',
+  pendingContext?: PendingMcqContext | null,
+  pageNumber?: number
+): string {
+  let carryOverSection = '';
+  if (pendingContext && pendingContext.pendingItems && pendingContext.pendingItems.length > 0) {
+    const pendingJson = JSON.stringify(pendingContext.pendingItems.map(it => ({
+      question_reference: it.source_question_reference || it.question_r,
+      question_hi: it.question_hi || '',
+      question_en: it.question_en || '',
+      option1_hi: it.option1_hi || '',
+      option2_hi: it.option2_hi || '',
+      option3_hi: it.option3_hi || '',
+      option4_hi: it.option4_hi || '',
+      option1_en: it.option1_en || '',
+      option2_en: it.option2_en || '',
+      option3_en: it.option3_en || '',
+      option4_en: it.option4_en || '',
+      answer: it.answer || '',
+      source_pages: it.source_pages || String(pendingContext.sourcePageNumber)
+    })), null, 2);
+
+    carryOverSection = `\n\nCRITICAL: CARRY-OVER CONTEXT FROM PREVIOUS PAGE (Page ${pendingContext.sourcePageNumber}):
+The previous page ended with the following incomplete question(s) that may continue on this current page:
+${pendingJson}
+
+CARRY-OVER CONTINUATION INSTRUCTIONS:
+1. Carefully check the VERY TOP of this page image:
+   - Does this page start with the continuation of any pending question from the previous page (e.g., remaining options C and D, remainder of question text, answer, or explanation)?
+   - IF YES:
+     * MERGE the continuation with the pending question data from above to produce a SINGLE COMPLETE QUESTION.
+     * Set its "source_pages" to "${pendingContext.sourcePageNumber}, ${pageNumber || pendingContext.sourcePageNumber + 1}".
+     * Place this merged question as the FIRST object in the JSON output array.
+     * DO NOT output the continuation fragment as a detached or separate question!
+   - IF NO:
+     * If this page begins with a brand new question, extract all questions on this page normally.
+2. EXTRACT SUBSEQUENT QUESTIONS:
+   - Extract all subsequent new multiple-choice questions appearing on this page normally.
+3. INCOMPLETE QUESTIONS AT PAGE BOTTOM:
+   - If the last question at the bottom of this page is cut off or missing options, extract whatever stem and options are visible.`;
+  }
+
   return `You are a professional Exam Paper Digitizer and MockTest Content Architect.
-Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.
+Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.${carryOverSection}
 
 TARGET SCHEMA:
 Extract into a strict JSON array of objects, where each object has these exact 34 fields:
@@ -1173,7 +1420,7 @@ Extract into a strict JSON array of objects, where each object has these exact 3
 23. figure_notes: Notes about any diagram/chart in the question, or empty string ""
 24. correction_notes: Notes about any clipping or corrections observed, or empty string ""
 25. source_pdf: Source PDF file name if known, else empty string ""
-26. source_pages: Source page number(s), e.g. "17"
+26. source_pages: Source page number(s), e.g. "${pageNumber || '1'}"
 27. source_question_reference: Question reference in source, e.g. "Q.1"
 28. latex_check: "checked"
 29. html_check: "checked"
@@ -1515,11 +1762,54 @@ export function parseAiOutputToMockTestItems(
 
 /**
  * Fast & ultra-reliable prompt for AI browser chat (DeepSeek, ChatGPT, Gemini, Claude) via Extension Bridge
- * that guarantees all 34 columns are provided with Hindi, English, options, and step-by-step solutions!
+ * that guarantees all 34 columns are provided with Hindi, English, options, step-by-step solutions,
+ * and optional carry-over context from the previous page.
  */
-export function buildMockTestBridgePrompt(setName = 'PYPs Shift-3'): string {
+export function buildMockTestBridgePrompt(
+  setName = 'PYPs Shift-3',
+  pendingContext?: PendingMcqContext | null,
+  pageNumber?: number
+): string {
+  let carryOverSection = '';
+  if (pendingContext && pendingContext.pendingItems && pendingContext.pendingItems.length > 0) {
+    const pendingJson = JSON.stringify(pendingContext.pendingItems.map(it => ({
+      question_reference: it.source_question_reference || it.question_r,
+      question_hi: it.question_hi || '',
+      question_en: it.question_en || '',
+      option1_hi: it.option1_hi || '',
+      option2_hi: it.option2_hi || '',
+      option3_hi: it.option3_hi || '',
+      option4_hi: it.option4_hi || '',
+      option1_en: it.option1_en || '',
+      option2_en: it.option2_en || '',
+      option3_en: it.option3_en || '',
+      option4_en: it.option4_en || '',
+      answer: it.answer || '',
+      source_pages: it.source_pages || String(pendingContext.sourcePageNumber)
+    })), null, 2);
+
+    carryOverSection = `\n\nCRITICAL: CARRY-OVER CONTEXT FROM PREVIOUS PAGE (Page ${pendingContext.sourcePageNumber}):
+The previous page ended with incomplete question(s) that may continue on this current page:
+${pendingJson}
+
+CARRY-OVER CONTINUATION INSTRUCTIONS:
+1. Carefully inspect the VERY TOP of this page image:
+   - Does this page start with the continuation of any pending question from the previous page (e.g., remaining options C and D, remainder of question text, answer, or explanation)?
+   - IF YES:
+     * MERGE the continuation with the pending question data from above to produce a SINGLE COMPLETE QUESTION.
+     * Set its "source_pages" to "${pendingContext.sourcePageNumber}, ${pageNumber || pendingContext.sourcePageNumber + 1}".
+     * Place this merged question as the FIRST object in the JSON output array.
+     * DO NOT output the continuation fragment as a detached or separate question!
+   - IF NO:
+     * If the top of this page starts with a brand new question, extract all questions on this page normally.
+2. EXTRACT SUBSEQUENT QUESTIONS:
+   - Extract all new questions appearing on this page normally.
+3. INCOMPLETE QUESTIONS AT PAGE BOTTOM:
+   - If the last question at the bottom of this page is cut off or missing options, extract whatever stem and options are visible.`;
+  }
+
   return `You are a professional Exam Paper Digitizer and MockTest Content Architect.
-Extract ALL multiple-choice questions (MCQs), MSQs, and numerical questions from this exam page image.
+Extract ALL multiple-choice questions (MCQs), MSQs, and numerical questions from this exam page image.${carryOverSection}
 
 STRICT REQUIREMENT: You MUST fill ALL 34 fields for EVERY question in strict JSON format.
 For every question, output an object in a JSON array with these exact 34 fields:
@@ -1548,7 +1838,7 @@ For every question, output an object in a JSON array with these exact 34 fields:
 - "figure_notes": Diagram notes if any, else empty string ""
 - "correction_notes": Clipping/correction notes if any, else empty string ""
 - "source_pdf": Source PDF name if known, else empty string ""
-- "source_pages": Source page number, e.g. "17"
+- "source_pages": Source page number, e.g. "${pageNumber || '1'}"
 - "source_question_reference": e.g. "Q.98"
 - "latex_check": "checked"
 - "html_check": "checked"
@@ -1585,11 +1875,14 @@ CRITICAL RULES:
 
 /**
  * Extract MockTest MCQs from a base64 image using direct Gemini API (/api/mocktest-extract or /api/extract)
+ * with optional carry-over pending context from the preceding page.
  */
 export async function extractMockTestWithDirectApi(
   base64Image: string,
   setName: string = 'Mock Test Paper',
-  startIndex: number = 1
+  startIndex: number = 1,
+  pendingContext?: PendingMcqContext | null,
+  pageNumber?: number
 ): Promise<MockTestMcqItem[]> {
   const settings = await getAiSettings();
   const headers: Record<string, string> = {
@@ -1606,7 +1899,9 @@ export async function extractMockTestWithDirectApi(
       headers,
       body: JSON.stringify({
         base64Image,
-        setName
+        setName,
+        pendingContext: pendingContext || undefined,
+        pageNumber: pageNumber || undefined
       })
     });
 
@@ -1645,6 +1940,76 @@ export async function extractMockTestWithDirectApi(
   const data = await extractRes.json();
   const elements = data.elements || [];
   return convertElementsToMockTestItems(elements, setName);
+}
+
+/**
+ * Multimodal Visual Re-verification of missing or incomplete fields:
+ * Inspects the actual page image (and adjacent page image if question is split across pages)
+ * to recover ONLY the missing fields without hallucination.
+ */
+export async function reverifyMockTestItemWithImages(
+  item: MockTestMcqItem,
+  primaryImage: string,
+  secondaryImage?: string,
+  missingFields?: string[]
+): Promise<MockTestMcqItem> {
+  const detectedIssues = detectItemFieldIssues(item);
+  const targetFields = missingFields && missingFields.length > 0
+    ? missingFields
+    : detectedIssues.missingFieldNames;
+
+  if (targetFields.length === 0) {
+    return item;
+  }
+
+  const settings = await getAiSettings();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (settings.apiKey) {
+    headers['x-user-gemini-key'] = settings.apiKey.trim();
+  }
+
+  const response = await fetch('/api/mocktest-reverify', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      item,
+      primaryImage,
+      secondaryImage,
+      missingFields: targetFields
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Visual re-verification failed');
+  }
+
+  const data = await response.json();
+  const recovered = data.recovered_fields || {};
+
+  const updated: MockTestMcqItem = {
+    ...item,
+    question_hi: recovered.question_hi || item.question_hi,
+    question_en: recovered.question_en || item.question_en,
+    option1_hi: recovered.option1_hi || item.option1_hi,
+    option2_hi: recovered.option2_hi || item.option2_hi,
+    option3_hi: recovered.option3_hi || item.option3_hi,
+    option4_hi: recovered.option4_hi || item.option4_hi,
+    option5_hi: recovered.option5_hi || item.option5_hi,
+    option1_en: recovered.option1_en || item.option1_en,
+    option2_en: recovered.option2_en || item.option2_en,
+    option3_en: recovered.option3_en || item.option3_en,
+    option4_en: recovered.option4_en || item.option4_en,
+    option5_en: recovered.option5_en || item.option5_en,
+    answer: recovered.answer || item.answer,
+    solution_hi: recovered.solution_hi || item.solution_hi,
+    solution_en: recovered.solution_en || item.solution_en,
+    source_pages: data.source_pages || item.source_pages
+  };
+
+  return cleanMockTestItem(updated);
 }
 
 /**

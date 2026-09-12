@@ -30,7 +30,11 @@ import {
   normalizeStrictSubject,
   detectItemFieldIssues,
   autoRecoverItemOptionsFromStem,
-  repairMockTestItemWithAi
+  repairMockTestItemWithAi,
+  PendingMcqContext,
+  separateCompleteAndPendingItems,
+  mergePendingCarryOver,
+  reverifyMockTestItemWithImages
 } from '../services/mocktestService';
 import { 
   extractWithStudyAiBridge, 
@@ -55,6 +59,7 @@ interface PageQueueItem {
   mcqCount: number;
   isSelected: boolean;
   items?: MockTestMcqItem[];
+  pendingContext?: PendingMcqContext | null;
 }
 
 /**
@@ -234,50 +239,112 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     }
   };
 
-  // Process a single page item
-  const processPageItem = async (page: PageQueueItem, pageIndex: number, totalPages: number): Promise<MockTestMcqItem[]> => {
+  // Process a single page item sequentially with carry-over context
+  const processPageItemSequential = async (
+    page: PageQueueItem,
+    pendingContext: PendingMcqContext | null,
+    pageIndex: number,
+    totalPages: number,
+    isLastPage: boolean
+  ): Promise<{ completeItems: MockTestMcqItem[]; nextPendingContext: PendingMcqContext | null }> => {
     setActivePageIndex(pageIndex);
     setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'processing', errorMessage: undefined } : p));
-    setLiveStatusText(`Page ${page.pageNumber}: Starting AI extraction...`);
+    
+    const carryNotice = pendingContext && pendingContext.pendingItems.length > 0
+      ? ` (Carrying forward ${pendingContext.pendingItems.length} pending MCQ from P.${pendingContext.sourcePageNumber})`
+      : '';
+    setLiveStatusText(`[Sequential ${pageIndex + 1}/${totalPages}] Page ${page.pageNumber}: Starting AI extraction...${carryNotice}`);
 
     const isUsingBridge = aiEngine === 'bridge' && bridgeStatus.connected;
 
     try {
-      let formattedItems: MockTestMcqItem[] = [];
+      let rawExtractedItems: MockTestMcqItem[] = [];
 
       if (isUsingBridge) {
-        const prompt = buildMockTestBridgePrompt(setName);
+        const prompt = buildMockTestBridgePrompt(setName, pendingContext, page.pageNumber);
         const { rawText, elements } = await extractWithStudyAiBridge({
           base64Image: page.imageUrl,
           fileName: `mocktest_page_${page.pageNumber}.png`,
           mimeType: 'image/png',
           prompt,
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
-          continueChat: false, // Each exam page extracts independently with its own image
+          continueChat: false,
           onProgress: (step, detail) => {
             const msg = detail || `${step.toUpperCase()}...`;
-            setLiveStatusText(`Page ${page.pageNumber}: ${msg}`);
+            setLiveStatusText(`[Page ${page.pageNumber}] ${msg}`);
             setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
           }
         });
 
-        // 1. FIRST: Parse AI rawText as JSON
+        // 1. Parse AI rawText as JSON
         const startIndex = extractedMcqs.length + 1;
-        formattedItems = parseAiOutputToMockTestItems(rawText, setName, startIndex);
+        rawExtractedItems = parseAiOutputToMockTestItems(rawText, setName, startIndex);
 
         // 2. Fallback: if JSON parse produced nothing, convert elements
-        if (formattedItems.length === 0 && elements && elements.length > 0) {
-          formattedItems = convertElementsToMockTestItems(elements, setName);
+        if (rawExtractedItems.length === 0 && elements && elements.length > 0) {
+          rawExtractedItems = convertElementsToMockTestItems(elements, setName);
         }
       } else {
         // Direct API mode
-        setLiveStatusText(`Page ${page.pageNumber}: Calling Gemini API...`);
+        setLiveStatusText(`[Page ${page.pageNumber}] Calling Gemini API with carry-over context...`);
         const startIndex = extractedMcqs.length + 1;
-        formattedItems = await extractMockTestWithDirectApi(page.imageUrl, setName, startIndex);
+        rawExtractedItems = await extractMockTestWithDirectApi(
+          page.imageUrl,
+          setName,
+          startIndex,
+          pendingContext,
+          page.pageNumber
+        );
       }
 
-      // Link page metadata to each MCQ
-      formattedItems = formattedItems.map(item => ({
+      // 1. RECONCILE CARRY-OVER MERGE
+      const { mergedPendingItems, freshPageItems, logMessage } = mergePendingCarryOver(
+        rawExtractedItems,
+        pendingContext,
+        page.pageNumber
+      );
+      console.log(`[Sequential Engine] ${logMessage}`);
+      setLiveStatusText(logMessage);
+
+      // If pending items were merged/completed, update them in state
+      if (mergedPendingItems.length > 0 && pendingContext) {
+        setPages(prev => prev.map(p => {
+          if (p.pageNumber === pendingContext.sourcePageNumber || p.id === pendingContext.sourcePageId) {
+            const existingItems = p.items || [];
+            const updatedItems = existingItems.map(existing => {
+              const matchedMerged = mergedPendingItems.find(m => m.id === existing.id || m.question_r === existing.question_r);
+              return matchedMerged || existing;
+            });
+            for (const m of mergedPendingItems) {
+              if (!updatedItems.some(it => it.id === m.id || it.question_r === m.question_r)) {
+                updatedItems.push(m);
+              }
+            }
+            return {
+              ...p,
+              items: updatedItems,
+              mcqCount: updatedItems.length
+            };
+          }
+          return p;
+        }));
+
+        setExtractedMcqs(prev => {
+          const updated = prev.map(it => {
+            const matched = mergedPendingItems.find(m => m.id === it.id || m.question_r === it.question_r);
+            return matched || it;
+          });
+          for (const m of mergedPendingItems) {
+            if (!updated.some(it => it.id === m.id)) {
+              updated.push(m);
+            }
+          }
+          return updated.map((it, idx) => ({ ...it, question_r: idx + 1 }));
+        });
+      }
+
+      // 2. PROCESS FRESH PAGE ITEMS: Tag with this page's metadata
+      const taggedFreshItems = freshPageItems.map(item => ({
         ...item,
         pageNumber: page.pageNumber,
         pageId: page.id,
@@ -285,16 +352,21 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         difficulty_level: difficulty
       }));
 
-      // If One-Shot Auto-Fill All Fields is enabled, perform deep research pass
-      if (autoDeepSolveAll && formattedItems.length > 0) {
-        setLiveStatusText(`Page ${page.pageNumber}: Deep-researching solutions for ${formattedItems.length} question(s)...`);
+      // 3. SEPARATE COMPLETE VS INCOMPLETE/PENDING ITEMS
+      const { completeItems, pendingItems } = separateCompleteAndPendingItems(taggedFreshItems, isLastPage);
+      console.log(`[Sequential Engine] Page ${page.pageNumber}: ${completeItems.length} complete, ${pendingItems.length} pending.`);
+
+      // 4. If One-Shot Auto-Fill All Fields is enabled, perform deep research pass on complete items
+      let finalComplete = completeItems;
+      if (autoDeepSolveAll && finalComplete.length > 0) {
+        setLiveStatusText(`[Page ${page.pageNumber}] Deep-researching solutions for ${finalComplete.length} MCQs...`);
         setPages(prev => prev.map(p => p.id === page.id ? {
           ...p,
-          errorMessage: `Deep-researching solutions (${formattedItems.length} MCQs)...`
+          errorMessage: `Deep-researching solutions (${finalComplete.length} MCQs)...`
         } : p));
 
-        const solvedItems = await Promise.all(
-          formattedItems.map(async (item) => {
+        finalComplete = await Promise.all(
+          finalComplete.map(async (item) => {
             if (item.solution_hi && item.solution_hi.length > 35 && item.solution_en && item.solution_en.length > 35) {
               return item;
             }
@@ -312,28 +384,40 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
             }
           })
         );
-        formattedItems = solvedItems;
       }
 
-      // Update page state with its own extracted items
+      // If last page, include any pending items as complete so nothing is lost
+      if (isLastPage && pendingItems.length > 0) {
+        finalComplete = [...finalComplete, ...pendingItems];
+      }
+
+      // Update current page state
       setPages(prev => prev.map(p => p.id === page.id ? {
         ...p,
         status: 'ready',
-        mcqCount: formattedItems.length,
-        errorMessage: undefined,
-        items: formattedItems
+        mcqCount: finalComplete.length,
+        errorMessage: pendingItems.length > 0 && !isLastPage ? `Carried forward ${pendingItems.length} incomplete MCQ to next page` : undefined,
+        items: finalComplete
       } : p));
 
       // Append/Update in global extracted MCQs list
-      if (formattedItems.length > 0) {
+      if (finalComplete.length > 0) {
         setExtractedMcqs(prev => {
           const withoutThisPage = prev.filter(it => it.pageId !== page.id);
-          const nextList = [...withoutThisPage, ...formattedItems];
+          const nextList = [...withoutThisPage, ...finalComplete];
           return nextList.map((it, idx) => ({ ...it, question_r: idx + 1 }));
         });
       }
 
-      return formattedItems;
+      const nextPendingContext: PendingMcqContext | null = (pendingItems.length > 0 && !isLastPage)
+        ? {
+            sourcePageNumber: page.pageNumber,
+            sourcePageId: page.id,
+            pendingItems
+          }
+        : null;
+
+      return { completeItems: finalComplete, nextPendingContext };
     } catch (err: any) {
       const msg = err.message || 'Extraction failed';
       setPages(prev => prev.map(p => p.id === page.id ? {
@@ -345,7 +429,13 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     }
   };
 
-  // Multi-Page Batch & Concurrency Loop
+  // Convenient single-page process wrapper
+  const processPageItem = async (page: PageQueueItem, pageIndex: number, totalPages: number): Promise<MockTestMcqItem[]> => {
+    const res = await processPageItemSequential(page, null, pageIndex, totalPages, true);
+    return res.completeItems;
+  };
+
+  // Multi-Page Sequential Extraction Loop with Carry-Over Context
   const handleStartExtraction = async () => {
     const selectedPages = pages.filter(p => p.isSelected && p.status !== 'ready');
     if (selectedPages.length === 0) {
@@ -373,42 +463,128 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     setIsPaused(false);
 
     try {
-      // In bridge mode, drive the AI tab sequentially (1 page at a time) to prevent tab/prompt collisions
-      const effectiveBatchSize = (aiEngine === 'bridge' && bridgeStatus.connected) ? 1 : Math.max(1, batchSize);
+      let carriedPendingContext: PendingMcqContext | null = null;
 
-      for (let i = 0; i < selectedPages.length; i += effectiveBatchSize) {
+      for (let i = 0; i < selectedPages.length; i++) {
         if (pauseRef.current) {
           setLiveStatusText('Processing paused by user.');
           break;
         }
 
-        const currentBatch = selectedPages.slice(i, i + effectiveBatchSize);
-        const batchNum = Math.floor(i / effectiveBatchSize) + 1;
-        const totalBatches = Math.ceil(selectedPages.length / effectiveBatchSize);
+        const page = selectedPages[i];
+        const isLast = (i === selectedPages.length - 1);
 
+        const carryInfo = carriedPendingContext && carriedPendingContext.pendingItems.length > 0
+          ? ` (Carrying ${carriedPendingContext.pendingItems.length} pending MCQ from P.${carriedPendingContext.sourcePageNumber})`
+          : '';
         setLiveStatusText(
-          `Batch ${batchNum}/${totalBatches}: Processing ${currentBatch.length} page(s) simultaneously (P.${currentBatch.map(p => p.pageNumber).join(', ')})...`
+          `[Sequential ${i + 1}/${selectedPages.length}] Processing Page ${page.pageNumber}...${carryInfo}`
         );
 
-        await Promise.allSettled(
-          currentBatch.map(async (page, indexInBatch) => {
-            if (indexInBatch > 0) {
-              await new Promise(r => setTimeout(r, indexInBatch * 200));
-            }
-            return processPageItem(page, i + indexInBatch, selectedPages.length);
-          })
-        );
+        try {
+          const { nextPendingContext } = await processPageItemSequential(
+            page,
+            carriedPendingContext,
+            i,
+            selectedPages.length,
+            isLast
+          );
+          carriedPendingContext = nextPendingContext;
+        } catch (pageErr: any) {
+          console.error(`Error processing page ${page.pageNumber}:`, pageErr);
+        }
 
-        await new Promise(res => setTimeout(res, 500));
+        // Brief delay between sequential pages to avoid rate limiting
+        await new Promise(res => setTimeout(res, 600));
       }
 
-      setLiveStatusText('All selected batches completed!');
+      setLiveStatusText('All selected pages sequentially processed with carry-over context!');
     } catch (err: any) {
-      console.error('Batch extraction error:', err);
+      console.error('Sequential extraction error:', err);
       setLiveStatusText(`Extraction stopped: ${err.message || err}`);
     } finally {
       setIsProcessingAll(false);
       setActivePageIndex(null);
+    }
+  };
+
+  // Re-verify single item with missing fields using actual page images
+  const handleReverifyItem = async (item: MockTestMcqItem) => {
+    const primaryPage = pages.find(p => p.pageNumber === item.pageNumber || p.id === item.pageId);
+    if (!primaryPage || !primaryPage.imageUrl) {
+      alert('Cannot locate page image for this question.');
+      return;
+    }
+
+    const nextPage = pages.find(p => p.pageNumber === (item.pageNumber || 1) + 1);
+    const prevPage = pages.find(p => p.pageNumber === (item.pageNumber || 1) - 1);
+    const adjacentPage = (item.source_pages && String(item.source_pages).includes(','))
+      ? (nextPage || prevPage)
+      : nextPage;
+
+    setRepairingId(item.id);
+    setLiveStatusText(`Visual Re-verifying Q#${item.question_r} using Page ${primaryPage.pageNumber}${adjacentPage ? ` & Page ${adjacentPage.pageNumber}` : ''}...`);
+
+    try {
+      const reverified = await reverifyMockTestItemWithImages(
+        item,
+        primaryPage.imageUrl,
+        adjacentPage?.imageUrl
+      );
+      updateItem(item.id, reverified);
+      setLiveStatusText(`✓ Q#${item.question_r} visually re-verified successfully!`);
+    } catch (err: any) {
+      alert(`Re-verification failed for Q#${item.question_r}: ${err.message || err}`);
+    } finally {
+      setRepairingId(null);
+    }
+  };
+
+  // Bulk Re-verify Missing Fields using actual page images
+  const handleReverifyMissingFields = async (targetItems?: MockTestMcqItem[]) => {
+    const list = targetItems || extractedMcqs.filter(it => detectItemFieldIssues(it).hasIssues);
+    if (list.length === 0) {
+      alert('All questions are already complete!');
+      return;
+    }
+
+    setIsRepairingAll(true);
+    setRepairProgress({ current: 0, total: list.length });
+    setLiveStatusText(`🔍 Visually re-verifying ${list.length} question(s) with original page images...`);
+
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        setRepairProgress({ current: i + 1, total: list.length });
+        setRepairingId(item.id);
+        setLiveStatusText(`Visual Re-verifying Q#${item.question_r} (${i + 1}/${list.length})...`);
+
+        const primaryPage = pages.find(p => p.pageNumber === item.pageNumber || p.id === item.pageId);
+        const nextPage = pages.find(p => p.pageNumber === (item.pageNumber || 1) + 1);
+        const prevPage = pages.find(p => p.pageNumber === (item.pageNumber || 1) - 1);
+        const adjacentPage = (item.source_pages && String(item.source_pages).includes(','))
+          ? (nextPage || prevPage)
+          : nextPage;
+
+        if (primaryPage?.imageUrl) {
+          try {
+            const reverified = await reverifyMockTestItemWithImages(
+              item,
+              primaryPage.imageUrl,
+              adjacentPage?.imageUrl
+            );
+            updateItem(item.id, reverified);
+          } catch (e) {
+            console.warn(`Visual re-verify failed for Q#${item.question_r}:`, e);
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 600));
+      }
+      setLiveStatusText(`✓ Visual re-verification completed!`);
+    } finally {
+      setIsRepairingAll(false);
+      setRepairingId(null);
     }
   };
 
@@ -1533,16 +1709,28 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
                               <div className="flex items-center gap-2">
                                 {pageIncompleteCount > 0 && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleAiRepairPageItems(pageQuestions)}
-                                    disabled={isRepairingAll}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
-                                    title="Auto-fill missing options & solutions for incomplete questions on this page"
-                                  >
-                                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                                    <span>AI Fill Page ({pageIncompleteCount})</span>
-                                  </button>
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleReverifyMissingFields(pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues))}
+                                      disabled={isRepairingAll}
+                                      className="flex items-center gap-1 px-2.5 py-1 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                      title="Visually re-inspect page images to recover missing fields"
+                                    >
+                                      <Eye className="w-3.5 h-3.5 text-blue-400" />
+                                      <span>Re-verify ({pageIncompleteCount})</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAiRepairPageItems(pageQuestions)}
+                                      disabled={isRepairingAll}
+                                      className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                      title="Auto-fill missing options & solutions for incomplete questions on this page"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                                      <span>AI Fill ({pageIncompleteCount})</span>
+                                    </button>
+                                  </>
                                 )}
                                 <button
                                   type="button"
@@ -1680,6 +1868,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                       />
                                     </div>
 
+                                    {/* Visual Re-verify from Image Button */}
+                                    {issues.hasIssues && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleReverifyItem(item)}
+                                        disabled={isRepairing || isSolving}
+                                        className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-extrabold bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 transition-all disabled:opacity-50"
+                                        title="Visually re-inspect page images to recover missing fields"
+                                      >
+                                        {isRepairing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3 text-blue-400" />}
+                                        <span>Re-verify</span>
+                                      </button>
+                                    )}
+
                                     {/* AI Auto-Repair / Fill Button */}
                                     <button
                                       type="button"
@@ -1743,32 +1945,42 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                       <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
                                       <div>
                                         <div className="font-extrabold text-amber-300 flex items-center gap-1.5">
-                                          <span>⚠️ चेतावनी: रिक्त विकल्प व फ़ील्ड (Blank Fields Detected)</span>
+                                          <span>⚠️ चेतावनी: रिक्त फ़ील्ड (Missing Fields Detected)</span>
                                           <span className="px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 text-[10px]">Action Required</span>
                                         </div>
                                         <div className="text-slate-300 text-[11px] mt-0.5 font-medium">
-                                          {issues.issueSummary} — इस प्रश्न के विकल्प खाली हैं। कृपया <strong>⚡ Auto-Fill</strong> दबाकर AI से भरें।
+                                          {issues.issueSummary}
+                                        </div>
+                                        <div className="flex flex-wrap gap-1 mt-1.5">
+                                          {issues.missingFieldNames.map((name) => (
+                                            <span key={name} className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-bold border border-amber-500/30">
+                                              Missing: {name}
+                                            </span>
+                                          ))}
                                         </div>
                                       </div>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleAiRepairSingle(item)}
-                                      disabled={isRepairing}
-                                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow-md shadow-amber-500/20 transition-all disabled:opacity-50 ml-auto sm:ml-0"
-                                    >
-                                      {isRepairing ? (
-                                        <>
-                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                          <span>AI Filling...</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Sparkles className="w-3.5 h-3.5 fill-black" />
-                                          <span>⚡ AI Auto-Fill Missing Fields</span>
-                                        </>
-                                      )}
-                                    </button>
+                                    <div className="flex flex-wrap items-center gap-2 ml-auto sm:ml-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleReverifyItem(item)}
+                                        disabled={isRepairing}
+                                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 font-extrabold rounded-lg text-xs shadow-md transition-all disabled:opacity-50"
+                                        title="Inspect original page images to recover missing fields without hallucinating"
+                                      >
+                                        {isRepairing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5 text-blue-400" />}
+                                        <span>🔍 Re-verify from Images</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAiRepairSingle(item)}
+                                        disabled={isRepairing}
+                                        className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow-md shadow-amber-500/20 transition-all disabled:opacity-50"
+                                      >
+                                        {isRepairing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 fill-black" />}
+                                        <span>⚡ AI Auto-Fill</span>
+                                      </button>
+                                    </div>
                                   </div>
                                 )}
 
@@ -2135,25 +2347,46 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
                 <div className="flex flex-wrap items-center gap-3">
                   {incompleteTotal > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleAiRepairAllIncomplete}
-                      disabled={isRepairingAll}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
-                      title="AI will deduce options, verify answers, and generate solutions for all incomplete items"
-                    >
-                      {isRepairingAll ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Repairing ({repairProgress?.current || 0}/{repairProgress?.total || incompleteTotal})...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                          <span>⚡ AI Auto-Fill All Incomplete ({incompleteTotal})</span>
-                        </>
-                      )}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleReverifyMissingFields()}
+                        disabled={isRepairingAll}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+                        title="Visually re-inspect page images to recover missing fields across the whole document"
+                      >
+                        {isRepairingAll ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Re-verifying ({repairProgress?.current || 0}/{repairProgress?.total || incompleteTotal})...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5 text-blue-400" />
+                            <span>🔍 Re-verify All from Images ({incompleteTotal})</span>
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAiRepairAllIncomplete}
+                        disabled={isRepairingAll}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+                        title="AI will deduce options, verify answers, and generate solutions for all incomplete items"
+                      >
+                        {isRepairingAll ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Repairing ({repairProgress?.current || 0}/{repairProgress?.total || incompleteTotal})...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            <span>⚡ AI Auto-Fill All ({incompleteTotal})</span>
+                          </>
+                        )}
+                      </button>
+                    </>
                   )}
 
                   <button

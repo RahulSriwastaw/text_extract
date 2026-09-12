@@ -1709,9 +1709,142 @@ Respond ONLY with a valid JSON object:
   }
 });
 
+app.post('/api/mocktest-reverify', async (req, res) => {
+  try {
+    const { item, primaryImage, secondaryImage, missingFields } = req.body;
+    if (!item) {
+      return res.status(400).json({ error: "Missing question item in request body" });
+    }
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    const cleanImg = (img?: string) => {
+      if (!img) return '';
+      return img.includes(';base64,') ? img.split(';base64,')[1] : img;
+    };
+
+    const cleanPrimary = cleanImg(primaryImage);
+    const cleanSecondary = cleanImg(secondaryImage);
+
+    const targetList = Array.isArray(missingFields) && missingFields.length > 0
+      ? missingFields.join(', ')
+      : 'Options, Question Stem, or Answer';
+
+    const reverifyPrompt = `You are an expert competitive exam paper digitizer and visual inspector.
+An MCQ was extracted from this exam paper, but the following required field(s) were flagged as MISSING, INCOMPLETE, or EMPTY:
+MISSING FIELDS TO RECOVER: ${targetList}
+
+EXISTING EXTRACTED QUESTION CONTEXT:
+Question Reference: "${item.source_question_reference || item.question_r || ''}"
+Current Page: "${item.source_pages || item.pageNumber || ''}"
+Question (Hindi): "${item.question_hi || ''}"
+Question (English): "${item.question_en || ''}"
+Option 1: "${item.option1_hi || item.option1_en || ''}"
+Option 2: "${item.option2_hi || item.option2_en || ''}"
+Option 3: "${item.option3_hi || item.option3_en || ''}"
+Option 4: "${item.option4_hi || item.option4_en || ''}"
+Answer: "${item.answer || ''}"
+
+INSPECTION INSTRUCTIONS:
+1. Closely inspect the provided page image(s). If two images are provided, check the bottom of the first image and the top of the second image (since questions and options frequently cross page borders).
+2. Locate this exact question.
+3. Extract ONLY the true missing fields.
+4. STRICT ACCURACY & TRUTHFULNESS:
+   - If a missing field is NOT visible or cannot be found anywhere on the image(s), DO NOT invent fake data. Return empty string "" for that field.
+   - Format text with clean Unicode math (use '×', '÷', '−', '≤', '≥', '≠', '°', '√') and semantic HTML (<p>...). NEVER output LaTeX commands (\\frac, \\times) or dollar sign delimiters ($...$).
+5. Output ONLY valid JSON:
+{
+  "recovered_fields": {
+    "question_hi": "",
+    "question_en": "",
+    "option1_hi": "",
+    "option2_hi": "",
+    "option3_hi": "",
+    "option4_hi": "",
+    "option1_en": "",
+    "option2_en": "",
+    "option3_en": "",
+    "option4_en": "",
+    "answer": "",
+    "solution_hi": "",
+    "solution_en": ""
+  },
+  "source_pages": "${cleanSecondary ? `${item.pageNumber || '1'}, ${(item.pageNumber || 1) + 1}` : `${item.pageNumber || '1'}`}"
+}`;
+
+    const executeReverify = async (client: any) => {
+      const parts: any[] = [];
+      if (cleanPrimary) {
+        parts.push({
+          inlineData: {
+            mimeType: 'image/png',
+            data: cleanPrimary
+          }
+        });
+      }
+      if (cleanSecondary) {
+        parts.push({
+          inlineData: {
+            mimeType: 'image/png',
+            data: cleanSecondary
+          }
+        });
+      }
+      parts.push({ text: reverifyPrompt });
+
+      let modelToUse = 'gemini-2.5-flash';
+      try {
+        const response = await client.models.generateContent({
+          model: modelToUse,
+          contents: parts,
+          config: {
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      } catch (err: any) {
+        const response = await client.models.generateContent({
+          model: 'gemini-flash-lite-latest',
+          contents: parts,
+          config: {
+            temperature: 0.1,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      }
+    };
+
+    const rawJson = await runAIAction(executeReverify, userKey);
+    const parsed = safeParseAiJson(rawJson);
+    const rec = parsed?.recovered_fields || {};
+    const cleanedRecovered: any = {};
+    for (const k of Object.keys(rec)) {
+      if (rec[k]) {
+        cleanedRecovered[k] = cleanServerMocktestText(rec[k]);
+      }
+    }
+    res.json({
+      recovered_fields: cleanedRecovered,
+      source_pages: parsed?.source_pages || item.source_pages
+    });
+  } catch (error: any) {
+    console.warn("MockTest reverify failed:", error?.message || error);
+    res.status(500).json({ error: error.message || "Failed to re-verify missing fields" });
+  }
+});
+
 app.post('/api/mocktest-extract', async (req, res) => {
   try {
-    const { base64Image, setName = 'Exam Paper' } = req.body;
+    const { base64Image, setName = 'Exam Paper', pendingContext, pageNumber } = req.body;
     const userKey = (req.headers['x-user-gemini-key'] as string) || '';
 
     let cleanBase64 = base64Image || '';
@@ -1719,8 +1852,46 @@ app.post('/api/mocktest-extract', async (req, res) => {
       cleanBase64 = cleanBase64.split(';base64,')[1];
     }
 
+    let carryOverPrompt = '';
+    if (pendingContext && pendingContext.pendingItems && pendingContext.pendingItems.length > 0) {
+      const pendingJson = JSON.stringify(pendingContext.pendingItems.map((it: any) => ({
+        question_reference: it.source_question_reference || it.question_r,
+        question_hi: it.question_hi || '',
+        question_en: it.question_en || '',
+        option1_hi: it.option1_hi || '',
+        option2_hi: it.option2_hi || '',
+        option3_hi: it.option3_hi || '',
+        option4_hi: it.option4_hi || '',
+        option1_en: it.option1_en || '',
+        option2_en: it.option2_en || '',
+        option3_en: it.option3_en || '',
+        option4_en: it.option4_en || '',
+        answer: it.answer || '',
+        source_pages: it.source_pages || String(pendingContext.sourcePageNumber)
+      })), null, 2);
+
+      carryOverPrompt = `\n\nCRITICAL: CARRY-OVER CONTEXT FROM PREVIOUS PAGE (Page ${pendingContext.sourcePageNumber}):
+The previous page ended with the following incomplete question(s) that may continue on this current page:
+${pendingJson}
+
+CARRY-OVER CONTINUATION INSTRUCTIONS:
+1. Carefully check the VERY TOP of this page image:
+   - Does this page start with the continuation of any pending question from the previous page (e.g., remaining options C and D, remainder of question text, answer, or explanation)?
+   - IF YES:
+     * MERGE the continuation with the pending question data from above to produce a SINGLE COMPLETE QUESTION.
+     * Set its "source_pages" to "${pendingContext.sourcePageNumber}, ${pageNumber || pendingContext.sourcePageNumber + 1}".
+     * Place this merged question as the FIRST object in the JSON output array.
+     * DO NOT output the continuation fragment as a detached or separate question!
+   - IF NO:
+     * If this page begins with a brand new question, extract all questions on this page normally.
+2. EXTRACT SUBSEQUENT QUESTIONS:
+   - Extract all subsequent new multiple-choice questions appearing on this page normally.
+3. INCOMPLETE QUESTIONS AT PAGE BOTTOM:
+   - If the last question at the bottom of this page is cut off or missing options, extract whatever stem and options are visible.`;
+    }
+
     const promptText = `You are a professional Exam Paper Digitizer and MockTest Content Architect.
-Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.
+Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.${carryOverPrompt}
 
 Extract into a strict JSON array of objects with these exact 34 fields:
 1. question_r: Sequence number (1, 2, 3...)
@@ -1750,7 +1921,7 @@ Extract into a strict JSON array of objects with these exact 34 fields:
 23. figure_notes: Figure notes or empty string ""
 24. correction_notes: Clipping or correction notes or empty string ""
 25. source_pdf: Source PDF file name if known, else empty string ""
-26. source_pages: Source page number(s), e.g. "17"
+26. source_pages: Source page number(s), e.g. "${pageNumber || '1'}"
 27. source_question_reference: Question reference in paper, e.g. "Q.98"
 28. latex_check: "checked"
 29. html_check: "checked"

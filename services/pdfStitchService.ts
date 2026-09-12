@@ -584,8 +584,10 @@ export const renderMergedCardToA4 = async (
     const drawX = marginX + (availableWidth - drawW) / 2;
     const drawY = marginY;
 
-    ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
-    return canvas.toDataURL('image/jpeg', 0.94);
+    const result = canvas.toDataURL('image/jpeg', 0.94);
+    canvas.width = 0;
+    canvas.height = 0;
+    return result;
   }
 
   // Case 2: Multi-Item Merged Set (2, 3, 4+ snippets stacked cleanly)
@@ -647,7 +649,10 @@ export const renderMergedCardToA4 = async (
     }
   }
 
-  return canvas.toDataURL('image/jpeg', 0.94);
+  const result = canvas.toDataURL('image/jpeg', 0.94);
+  canvas.width = 0;
+  canvas.height = 0;
+  return result;
 };
 
 /**
@@ -678,6 +683,9 @@ export const exportMergedCardsToPdf = async (
       width: a4WidthPt,
       height: a4HeightPt,
     });
+
+    // Yield control so export progress updates smoothly on screen
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   const pdfBytes = await pdfDoc.save();

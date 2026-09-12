@@ -1311,75 +1311,156 @@ app.post('/api/proofread', async (req, res) => {
 });
 
 // Server-side cleaner for math, LaTeX, stray $, and template scaffolding
+const SERVER_EXAM_KEYWORD_REGEX = '(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\\s\\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\\s\\-]*डी|टेक)';
+const SERVER_SHIFT_KEYWORD_REGEX = '(?:Afternoon|Morning|Evening|Night|Shift[\\s\\-]*[I|II|III|IV|V|1|2|3|4|5]|Batch[\\s\\-]*\\d+|दोपहर|सुबह|शाम|रात|प्रथम[\\s\\-]*पाली|द्वितीय[\\s\\-]*पाली|तृतीय[\\s\\-]*पाली|पाली[\\s\\-]*\\d+)';
+const SERVER_DATE_PATTERN_REGEX = '(?:\\d{1,2}[\\/\\.\\-]\\d{1,2}[\\/\\.\\-]\\d{2,4}|\\b(?:19|20)\\d{2}\\b)';
+
+function stripServerExamTagsAndJunk(text: string): string {
+  if (!text) return '';
+  let res = text;
+  res = res.replace(/\[\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\]]*\]/gi, '');
+  res = res.replace(/\(\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\)]*\)/gi, '');
+  res = res.replace(/(?:^|<p>)\s*\[\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\]]*\]\s*/gi, (m) => m.startsWith('<p>') ? '<p>' : '');
+  res = res.replace(/(?:^|<p>)\s*\(\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\)]*\)\s*/gi, (m) => m.startsWith('<p>') ? '<p>' : '');
+  const trailingPattern = new RegExp(
+    '(?:[\\s\\.\\,\\;\\-\\–\\—]|\\?|\\!)+(' + SERVER_EXAM_KEYWORD_REGEX + '[\\s\\S]*?(?:' + SERVER_DATE_PATTERN_REGEX + '|' + SERVER_SHIFT_KEYWORD_REGEX + ')[\\s\\S]*?)(\\s*<\\/p>|$)',
+    'i'
+  );
+  res = res.replace(trailingPattern, (match, _tag, closing) => {
+    const preChar = match.trim().charAt(0);
+    const punct = (preChar === '?' || preChar === '!' || preChar === '.') ? preChar : '';
+    return punct + (closing || '');
+  });
+  res = res.replace(new RegExp('(?:[\\s\\-\\–\\—]+)(' + SERVER_DATE_PATTERN_REGEX + '\\s*\\(?' + SERVER_SHIFT_KEYWORD_REGEX + '\\)?|\\(?' + SERVER_SHIFT_KEYWORD_REGEX + '\\)?)(\\s*<\\/p>|$)', 'i'), '$2');
+  res = res.replace(/(?:Youth\s*Competition\s*Times|Pinnacle\s*Publication|Testbook\.com|Adda247|Exampur|Gradeup|Drishti\s*IAS|Kiran\s*Prakashan|Platform\s*Education|Rukmini\s*Prakashan)[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
+  res = res.replace(/\s+<\/p>/gi, '</p>').replace(/[ \t]{2,}/g, ' ');
+  return res.trim();
+}
+
 function cleanServerMocktestText(text: string): string {
   if (!text) return '';
   let res = text;
+  res = stripServerExamTagsAndJunk(res);
   // Strip AI coach filler
   res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Important Exam Point\s*:\s*(?:<\/strong>|<\/b>)?[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
   // Strip scaffolding headers
   res = res.replace(/(?:<strong>|<b>)?\s*Key Point\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
   res = res.replace(/(?:<strong>|<b>)?\s*Detailed Explanation\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
   res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Additional Information\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '<br>');
+
   // Corrupted escapes
   res = res.replace(/[\x0c\u21e1\u2191]rac/g, '\\frac');
   res = res.replace(/[\x09\b]imes/g, '\\times');
   res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
+
+  // Fix broken br tags
   res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
   res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
-  // Degree symbol in prose
-  res = res.replace(/(\d+(?:\.\d+)?)\s*\^\\circ/g, '$1°');
-  // Stray $ on variables
-  res = res.replace(/\$([A-Za-z])\s*([=+\-*\/])\s*(\d+)\$?/g, '$1 $2 $3');
-  res = res.replace(/(?<=[\u0900-\u097F]\s*)\$([A-Za-z])\b/g, '$1');
-  res = res.replace(/\$([A-Za-z])\b(?=\s*[\u0900-\u097F]|\s*[,\.\(\)])/g, '$1');
-  res = res.replace(/\$([A-Za-z])\$(?=\s*[\u0900-\u097F]|\s*[,\.\(\)])/g, '$1');
-  // Stray $ on numbers/counts/rupees
-  res = res.replace(/(?<!\$[^$]*)\b(\d+)\s*\$(?=\s+[\u0900-\u097F]|[^\d\w]|$)/g, '$1');
-  res = res.replace(/\$\s*(\d+(?:\.\d+)?%)/g, '$1');
+
+  // 1. Convert LaTeX fractions \frac{num}{den} to (num) / (den) or num / den
+  for (let i = 0; i < 4; i++) {
+    res = res.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_m, num, den) => {
+      const cleanNum = num.trim();
+      const cleanDen = den.trim();
+      const numWrap = /[\s+\-*\/=]|\\times|\\div|×|÷|−|\+/.test(cleanNum) && !cleanNum.startsWith('(') && !cleanNum.startsWith('|')
+        ? `(${cleanNum})`
+        : cleanNum;
+      const denWrap = /[\s+\-*\/=]|\\times|\\div|×|÷|−|\+/.test(cleanDen) && !cleanDen.startsWith('(')
+        ? `(${cleanDen})`
+        : cleanDen;
+      return `${numWrap} / ${denWrap}`;
+    });
+  }
+  res = res.replace(/\\frac\s*\{?([^}\s]+)\}?\s*\{?([^}\s]+)\}?/g, '$1 / $2');
+
+  // 2. Convert roots
+  res = res.replace(/\\sqrt\[3\]\s*\{([^{}]+)\}/g, '∛($1)');
+  res = res.replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)');
+  res = res.replace(/\\sqrt\s*([a-zA-Z0-9]+)/g, '√$1');
+
+  // 3. Convert standard math operators to clean Unicode
+  res = res.replace(/\\times\b/g, '×');
+  res = res.replace(/\\div\b/g, '÷');
+  res = res.replace(/\\pm\b/g, '±');
+  res = res.replace(/\\mp\b/g, '∓');
+  res = res.replace(/\\cdot\b/g, '·');
+  res = res.replace(/\\leq?\b/g, '≤');
+  res = res.replace(/\\geq?\b/g, '≥');
+  res = res.replace(/\\neq?\b/g, '≠');
+  res = res.replace(/\\approx\b/g, '≈');
+  res = res.replace(/\\equiv\b/g, '≡');
+  res = res.replace(/\\propto\b/g, '∝');
+  res = res.replace(/\\infty\b/g, '∞');
+
+  // 4. Degree symbol
+  res = res.replace(/(?:\^\\circ|\^\{\\circ\}|\\circ)\b/g, '°');
+  res = res.replace(/(\d+)\s*\^\\circ/g, '$1°');
+  res = res.replace(/(\d+)\s*°/g, '$1°');
+
+  // 5. Greek letters
+  res = res.replace(/\\alpha\b/g, 'α');
+  res = res.replace(/\\beta\b/g, 'β');
+  res = res.replace(/\\theta\b/g, 'θ');
+  res = res.replace(/\\pi\b/g, 'π');
+  res = res.replace(/\\Delta\b/g, 'Δ');
+  res = res.replace(/\\sigma\b/g, 'σ');
+  res = res.replace(/\\lambda\b/g, 'λ');
+  res = res.replace(/\\omega\b/g, 'ω');
+  res = res.replace(/\\mu\b/g, 'μ');
+
+  // 6. Superscripts & Subscripts
+  res = res.replace(/\^2\b/g, '²');
+  res = res.replace(/\^3\b/g, '³');
+  res = res.replace(/\^\{2\}/g, '²');
+  res = res.replace(/\^\{3\}/g, '³');
+  res = res.replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>');
+  res = res.replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>');
+  res = res.replace(/\^([0-9a-zA-Z])/g, '<sup>$1</sup>');
+  res = res.replace(/_([0-9a-zA-Z])/g, '<sub>$1</sub>');
+
+  // 7. LaTeX formatting wrappers
+  res = res.replace(/\\text(?:bf|it|rm)?\s*\{([^{}]+)\}/g, '$1');
+  res = res.replace(/\\math(?:bf|it|rm|sf|tt)?\s*\{([^{}]+)\}/g, '$1');
+  res = res.replace(/\\left\s*([|(\[{])/g, '$1');
+  res = res.replace(/\\right\s*([|)\]}])/g, '$1');
+  res = res.replace(/\\left\./g, '');
+  res = res.replace(/\\right\./g, '');
+
+  // 8. Logic and set symbols
+  res = res.replace(/\\wedge\b/g, '∧');
+  res = res.replace(/\\vee\b/g, '∨');
+  res = res.replace(/\\rightarrow\b/g, '→');
+  res = res.replace(/\\Rightarrow\b/g, '⇒');
+  res = res.replace(/\\cap\b/g, '∩');
+  res = res.replace(/\\cup\b/g, '∪');
+  res = res.replace(/\\subset\b/g, '⊂');
+  res = res.replace(/\\in\b/g, '∈');
+
+  // 9. Percentage & currency
+  res = res.replace(/(\d+(?:\.\d+)?)\\\%/g, '$1%');
   res = res.replace(/\$\s*=\s*/g, '= ');
   res = res.replace(/=\s*\$\s*₹/g, '= ₹');
   res = res.replace(/\$\s*₹/g, '₹');
   res = res.replace(/₹\s*\$/g, '₹');
   res = res.replace(/(₹\s*\d+(?:,\d+)*(?:\.\d+)?)\$/g, '$1');
-  res = res.replace(/₹\s*\$\$\s*([^\$]+?)\s*\$\$/g, (_m, val) => `₹${val.trim()}`);
-  res = res.replace(/₹\s*\$\s*([^\$]+?)\s*\$/g, (_m, val) => `₹${val.trim()}`);
-  res = res.replace(/\$\$\s*₹\s*([^\$]+?)\s*\$\$/g, (_m, val) => `₹${val.trim()}`);
-  res = res.replace(/\$\s*₹\s*([^\$]+?)\s*\$/g, (_m, val) => `₹${val.trim()}`);
-  res = res.replace(/\$([A-Z](?:,\s*[A-Z])+)\$/g, '$1');
-  res = res.replace(/(?<=[\u0900-\u097F]\s*)\$([A-Z])\$(?=\s*[\u0900-\u097F]|\s*और|\s*तथा|\s*के|\s*का|\s*की|\s*को|\s*से|\s*में|\s*पर|\s*है|\s*था|$)/g, '$1');
-  res = res.replace(/(?<=\b(?:और|तथा|एवं|यदि|तो|माना|कि|स्थान|व्यक्ति|मित्र|छात्र|पंक्ति)\s*)\$([A-Z])\$/g, '$1');
-  res = res.replace(/\$([A-Z])\$(?=\s*(?:पंक्ति|के|का|की|को|से|में|पर|है|था|बाएं|दाएं|बाएँ|दाएँ))/g, '$1');
-  res = res.replace(/\$\$?\s*([+-]?\d+(?:[,\.]\d+)?)\s*(?:\\%|%)\s*\$\$?/g, '$1%');
-  res = res.replace(/\$\$?\s*([+-]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*\$\$?/g, '$1');
-  res = res.replace(/(\d+(?:\.\d+)?)\\\%/g, '$1%');
-  res = res.replace(/\$\$([^\$\n]+?)\$\$/g, '$$$1$$');
-  const parts = res.split('<br>');
-  if (parts.length > 1) {
-    res = parts.map(part => {
-      const dollarCount = (part.match(/(?<!\\)\$/g) || []).length;
-      if (dollarCount % 2 !== 0) return part + '$';
-      return part;
-    }).join('<br>');
-  }
-  const lines = res.split(/(<br\s*\/?>|\n)/gi);
-  const processedLines = lines.map(line => {
-    if (line.startsWith('<br') || line === '\n') return line;
-    if ((line.includes('\\frac') || line.includes('\\times')) && !line.includes('$')) {
-      return line.replace(/(?:(कोण|सूत्र|मान|उत्तर)\s*[:=]\s*)?(\\frac[^\n<]+|[^=\n<]*\\times[^\n<]+)/g, (match, label, eq) => {
-        const prefix = label ? `${label} = ` : '';
-        return `${prefix}$${eq.trim()}$`;
-      });
-    }
-    return line;
-  });
-  res = processedLines.join('');
-  const totalDollars = (res.match(/(?<!\\)\$/g) || []).length;
-  if (totalDollars % 2 !== 0) {
-    const lastIdx = res.lastIndexOf('$');
-    if (lastIdx >= 0) res = res.slice(0, lastIdx) + res.slice(lastIdx + 1);
-  }
+
+  // 10. COMPLETE STRIPPING OF ALL $ AND $$ DELIMITERS!
+  res = res.replace(/\$\$/g, '');
+  res = res.replace(/(?<!\\)\$/g, '');
+  res = res.replace(/\\\$/g, '$');
+
+  // 11. Spacing artifacts
+  res = res.replace(/\\[,;!\s]/g, ' ');
+  res = res.replace(/\\quad\b/g, ' ');
+  res = res.replace(/\\qquad\b/g, '  ');
+
+  // 12. Minus sign
+  res = res.replace(/(\w|\))\s*-\s*(\w|\()/g, '$1 − $2');
+
+  // 13. Paragraph & whitespace cleanup
   res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
   res = res.replace(/<p>\s*<br\s*\/?>/gi, '<p>');
+  res = res.replace(/[ \t]{2,}/g, ' ');
   res = res.replace(/\s*[\/\\]\s*$/g, '');
   return res.trim();
 }
@@ -1431,22 +1512,23 @@ DEEP RESEARCH & SOLUTION REQUIREMENTS:
 1. 'solution_hi': Detailed, pedagogical explanation in Hindi wrapped in clean semantic HTML (<p><b>हल:</b>...</p>).
    - Must include:
      a) दिया गया डेटा (Given Data) & मुख्य अवधारणा (Core Concept/Theorem).
-     b) आवश्यक सूत्र (Formula in LaTeX $...$).
+     b) आवश्यक सूत्र (Formula in clean Unicode & text).
      c) चरण-दर-चरण विस्तृत गणना (Step-by-step calculation).
      d) निष्कर्ष एवं सही विकल्प (Final answer conclusion stating why Option ${answer} is correct).
    - DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 2. 'solution_en': Detailed, rigorous solution in English wrapped in clean semantic HTML (<p><b>Solution:</b>...</p>).
    - Must include:
      a) Key concept & underlying principle.
-     b) Standard formula / theorem in LaTeX $...$.
+     b) Standard formula / theorem in clean Unicode & text.
      c) Intermediate algebraic/numerical steps with proofs.
      d) Final deduction matching option ${answer}.
    - DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-3. LaTeX Math & Negative Rules:
-   - Put actual algebraic/calculus formulas, fractions, powers, and roots in LaTeX $...$: e.g. $\\frac{a}{b}$, $\\times$, $x^2 + y = 10$, $\\sqrt{z}$.
-   - NEVER write variables as "$H = 9$" or "$M = 30$" with stray dollar signs in explanatory sentences. Write them as "H = 9 (घंटा) और M = 30 (मिनट)".
-   - NEVER enclose normal numbers, counts, percentages, or money in dollar signs (write 5, NOT 5$; write 60%, NOT $60%; write ₹2550, NOT $= ₹2550$ or $₹2550$).
-   - Double escape all LaTeX backslashes in JSON (\\\\frac, \\\\times, \\\\sqrt).
+3. Math & Symbols (PURE UNICODE & CLEAN HTML - NO LATEX):
+   - NEVER output LaTeX commands (like \\frac, \\times, \\div, \\sqrt, \\circ) or dollar delimiters ($...$ or $$...$$)!
+   - Write symbols directly in Unicode: '×' for multiplication, '÷' for division, '−' for subtraction, '≤' and '≥', '≠', '°' for degrees, '√x', '²' for squared.
+   - Write fractions as '(num) / (den)' or 'num / den' (e.g. '(60 × 9 − 11 × 30) / 2 = 105°').
+   - Use '&gt;' and '&lt;' for comparisons in HTML.
+   - NEVER use $ delimiters for human names, variables, counts, percentages, or money (write 40%, ₹4,800, 5, NOT $40%, $₹4800$).
 4. Determine 'difficulty_level': 'easy' | 'medium' | 'hard'.
 5. Output ONLY valid JSON:
 {
@@ -1642,14 +1724,14 @@ Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), 
 
 Extract into a strict JSON array of objects with these exact 34 fields:
 1. question_r: Sequence number (1, 2, 3...)
-2. question_hi: Question in Hindi wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
+2. question_hi: Question in Hindi wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
 3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p>
 4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p>
 5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
 6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
 8. solution_hi: Detailed step-by-step pedagogical solution in Hindi in clean HTML (<p><b>हल:</b> [Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with inline LaTeX math ($...$ or $$...$$).
+9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
 10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
 11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
 12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
@@ -1681,7 +1763,7 @@ Extract into a strict JSON array of objects with these exact 34 fields:
 RULES:
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam shift citations, tags, dates, or publisher labels in question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED). The question text must be purely the question statement itself!
 - If question is in one language only, translate and generate counterpart fields so BOTH Hindi and English are populated.
-- Enclose actual algebraic/calculus formulas in LaTeX ($...$). NEVER enclose plain numbers, percentages (40%), or rupee amounts (₹4,800) in dollar signs.
+- NO LATEX, NO DOLLAR SIGNS: Output all mathematical symbols directly in clean Unicode and HTML (e.g. '×', '÷', '−', '≤', '≥', '≠', '°', '√x', '(a) / (b)', '&gt;', '&lt;'). NEVER output LaTeX commands (\\frac, \\times, \\sqrt, \\circ) or dollar sign delimiters ($...$ or $$...$$)! NEVER enclose plain numbers, percentages (40%), or rupee amounts (₹4,800) in dollar signs.
 - NEVER use artificial labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 - Solutions MUST be thorough, complete, and pedagogical.
 - Respond ONLY with the JSON array.`;
@@ -1765,9 +1847,9 @@ STRICT EDITORIAL GUIDELINES:
    - Ensure clean, natural Devanagari Hindi (question_hi) and English (question_en).
    - If Hindi or English counterpart is missing or malformed, provide an accurate translation so both languages are fully populated.
 
-3. PRESERVE NUMBERS & ANSWERS:
+3. PRESERVE NUMBERS & ANSWERS (PURE UNICODE & CLEAN HTML - NO LATEX):
    - DO NOT alter mathematical numerical values, variables, or the correct answer.
-   - Use LaTeX ($...$) for algebraic/fractional equations.
+   - NO LATEX, NO DOLLAR SIGNS: NEVER introduce or retain LaTeX commands (like \\frac, \\times, \\div, \\sqrt, \\circ) or dollar delimiters ($...$). Convert all math into clean Unicode symbols ('×', '÷', '−', '≤', '≥', '≠', '°', '√') and write fractions as '(a) / (b)' or 'a / b'.
    - Plain numbers, percentages (40%), and currency (₹4,800) MUST NOT be enclosed in dollar signs.
 
 4. SEMANTIC HTML:
@@ -1817,7 +1899,23 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
 
     const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     const parsed = JSON.parse(cleaned);
-    res.json({ items: Array.isArray(parsed) ? parsed : items });
+    const rawProofread = Array.isArray(parsed) ? parsed : items;
+    const cleanedItems = rawProofread.map((item: any) => ({
+      ...item,
+      question_hi: cleanServerMocktestText(item.question_hi),
+      question_en: cleanServerMocktestText(item.question_en),
+      solution_hi: cleanServerMocktestText(item.solution_hi),
+      solution_en: cleanServerMocktestText(item.solution_en),
+      option1_hi: cleanServerMocktestText(item.option1_hi),
+      option2_hi: cleanServerMocktestText(item.option2_hi),
+      option3_hi: cleanServerMocktestText(item.option3_hi),
+      option4_hi: cleanServerMocktestText(item.option4_hi),
+      option1_en: cleanServerMocktestText(item.option1_en),
+      option2_en: cleanServerMocktestText(item.option2_en),
+      option3_en: cleanServerMocktestText(item.option3_en),
+      option4_en: cleanServerMocktestText(item.option4_en),
+    }));
+    res.json({ items: cleanedItems });
   } catch (error: any) {
     console.warn("MockTest proofread failed:", error?.message || error);
     res.status(500).json({ error: error.message || "Proofread failed" });

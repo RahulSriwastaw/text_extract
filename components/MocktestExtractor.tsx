@@ -3,7 +3,7 @@ import {
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
-  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera
+  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -132,9 +132,24 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showConnectModal, setShowConnectModal] = useState(false);
 
+  // UI Enhancement: Collapsible Paper Settings & Grouped AI Tools
+  const [showPaperSettings, setShowPaperSettings] = useState(false);
+  const [showAiToolsMenu, setShowAiToolsMenu] = useState(false);
+  const aiToolsRef = useRef<HTMLDivElement>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvImportInputRef = useRef<HTMLInputElement>(null);
   const pauseRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (aiToolsRef.current && !aiToolsRef.current.contains(e.target as Node)) {
+        setShowAiToolsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     pauseRef.current = isPaused;
@@ -1122,297 +1137,86 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Header Banner */}
-      <div className="relative rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-600/10 border border-amber-500/20 p-5 backdrop-blur-xl">
+      {/* Main Header & Studio Command Bar */}
+      <div className="relative rounded-2xl bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-white/[0.08] p-4 sm:p-5 backdrop-blur-xl shadow-2xl space-y-4">
+        {/* Row 1: Title, Subtitle, Stats & Top Actions */}
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold tracking-wide uppercase">
-              <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-              <span>Dedicated MockTest MCQ Extractor • 34-Column Engine</span>
+            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-400 text-[11px] font-bold tracking-wide uppercase">
+              <FileSpreadsheet className="w-3 h-3 text-amber-400" />
+              <span>MockTest Studio • 34-Column Engine</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white font-display">
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight font-display">
               Bilingual MockTest MCQ Extractor
             </h1>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
-              Extract bilingual MCQs page-by-page from PDFs & scanned papers into the strict 34-column mocktest standard with exact academic subjects and pedagogical solutions.
+            <p className="text-xs text-slate-400 max-w-xl">
+              Strict 34-column exam standard with bilingual Hindi/English extraction, pedagogical solutions, and LaTeX KaTeX support.
             </p>
           </div>
 
-          {/* Quick Stats */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2">
-              <span className="text-xs text-slate-400">Total MCQs:</span>
-              <span className="text-base font-extrabold text-amber-400">{extractedMcqs.length}</span>
-            </div>
-
-            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2">
-              <span className="text-xs text-slate-400">Pages:</span>
-              <span className="text-base font-extrabold text-blue-400">{pages.length}</span>
-            </div>
-
-            <div className="px-3 py-2 bg-black/40 border border-white/[0.08] rounded-xl flex items-center gap-2">
-              <span className="text-xs text-slate-400">Solved:</span>
-              <span className="text-base font-extrabold text-emerald-400">{solvedCount}/{extractedMcqs.length}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* AI Engine Switcher & Bridge Bar */}
-        <div className="mt-4 p-3 rounded-xl bg-black/50 border border-white/[0.08] flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              AI Engine:
-            </span>
-            <div className="flex items-center p-0.5 bg-black/60 border border-white/[0.1] rounded-lg">
-              <button
-                type="button"
-                onClick={() => setAiEngine('bridge')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-                  aiEngine === 'bridge'
-                    ? 'bg-emerald-500 text-black shadow-md'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>Free Extension Bridge</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setAiEngine('api')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-all ${
-                  aiEngine === 'api'
-                    ? 'bg-blue-500 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Key className="w-3.5 h-3.5" />
-                <span>Direct Gemini API</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            {aiEngine === 'bridge' ? (
-              <>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-slate-400">Provider:</span>
-                  <select
-                    value={selectedProvider}
-                    onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
-                    className="px-2.5 py-1 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-300 font-bold focus:outline-none"
-                  >
-                    <option value="gemini">Gemini</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="chatgpt">ChatGPT</option>
-                    <option value="claude">Claude</option>
-                  </select>
-                </div>
-
-                {bridgeStatus.connected ? (
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg text-xs font-bold">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <span>Bridge Connected</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setAiEngine('api')}
-                      className="px-2 py-1 bg-white/[0.04] hover:bg-rose-500/20 border border-white/[0.08] hover:border-rose-500/30 text-slate-400 hover:text-rose-300 rounded-lg text-xs font-semibold transition-all"
-                      title="Disconnect Bridge and switch to Direct API"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowConnectModal(true)}
-                      className="px-3 py-1 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-extrabold rounded-lg text-xs shadow transition-all"
-                    >
-                      Connect Extension Bridge
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => pingStudyAiExtension().catch(() => {})}
-                      title="Refresh Bridge status"
-                      className="p-1 bg-white/[0.04] text-slate-400 hover:text-white rounded-lg"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                <span className="text-xs text-blue-400 font-bold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Direct Gemini API Mode Active</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowSettingsModal(true)}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 rounded-lg text-xs font-bold transition-all"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>Configure API Key</span>
-                </button>
-              </>
-            )}
-
-            {/* Parallel Batch Selector */}
-            <div className="flex items-center gap-1.5 pl-2 border-l border-white/[0.1]">
-              <span className="text-xs font-bold text-slate-300" title="How many pages to send simultaneously">
-                Parallel Batch:
-              </span>
-              <div className="flex items-center gap-1">
-                {[1, 2, 3, 5].map((count) => (
-                  <button
-                    key={count}
-                    type="button"
-                    onClick={() => setBatchSize(count)}
-                    className={`px-2 py-1 text-xs font-bold rounded-lg border transition-all ${
-                      batchSize === count
-                        ? 'bg-amber-500 border-amber-400 text-black shadow'
-                        : 'bg-black/60 border-white/[0.1] text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {count} {count === 1 ? 'Page' : 'Pages'}
-                  </button>
-                ))}
+          {/* Quick Stats & Primary Actions */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* Compact Stats Pill */}
+            <div className="flex items-center bg-black/50 border border-white/[0.08] rounded-xl px-3 py-1.5 gap-3 text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 font-medium">Pages:</span>
+                <span className="font-bold text-blue-400">{pages.length}</span>
+              </div>
+              <div className="h-3 w-px bg-white/[0.1]" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 font-medium">MCQs:</span>
+                <span className="font-bold text-amber-400">{extractedMcqs.length}</span>
+              </div>
+              <div className="h-3 w-px bg-white/[0.1]" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 font-medium">Solved:</span>
+                <span className="font-bold text-emerald-400">{solvedCount}/{extractedMcqs.length}</span>
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Global Configuration Fields */}
-        <div className="mt-3 pt-3 border-t border-white/[0.08] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Set / Paper Name (set_name)
-            </label>
-            <input
-              type="text"
-              value={setName}
-              onChange={(e) => {
-                setSetName(e.target.value);
-                setExtractedMcqs(prev => prev.map(i => ({ ...i, set_name: e.target.value })));
-              }}
-              placeholder="e.g. RRB NTPC 2024 CBT-1"
-              className="px-3 py-1.5 bg-black/40 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none focus:border-amber-500/60 font-medium"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Answer Format
-            </label>
-            <div className="flex items-center gap-1 p-0.5 bg-black/40 border border-white/[0.1] rounded-lg">
-              <button
-                type="button"
-                onClick={() => setAnswerFormat('letters')}
-                className={`flex-1 py-1 text-xs font-bold rounded ${
-                  answerFormat === 'letters'
-                    ? 'bg-amber-500 text-black shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Letters (A, B, C, D)
-              </button>
-              <button
-                type="button"
-                onClick={() => setAnswerFormat('numbers')}
-                className={`flex-1 py-1 text-xs font-bold rounded ${
-                  answerFormat === 'numbers'
-                    ? 'bg-amber-500 text-black shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Numbers (1, 2, 3, 4)
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Math Notation (LaTeX/HTML)
-            </label>
-            <div className="flex items-center gap-1 p-0.5 bg-black/40 border border-white/[0.1] rounded-lg">
-              <button
-                type="button"
-                onClick={() => setMathFormat('mathjax')}
-                title="MathJax \(...\) for exponents, roots, and fractions"
-                className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
-                  mathFormat === 'mathjax'
-                    ? 'bg-amber-500 text-black shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                MathJax \(...\)
-              </button>
-              <button
-                type="button"
-                onClick={() => setMathFormat('unicode')}
-                title="Plain Unicode and HTML <sup>/<sub> tags"
-                className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
-                  mathFormat === 'unicode'
-                    ? 'bg-amber-500 text-black shadow'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Unicode / HTML
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Default Difficulty
-            </label>
-            <select
-              value={difficulty}
-              onChange={(e) => {
-                const diff = e.target.value as DifficultyLevel;
-                setDifficulty(diff);
-                setExtractedMcqs(prev => prev.map(i => ({ ...i, difficulty_level: diff })));
-              }}
-              className="px-3 py-1.5 bg-black/40 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none focus:border-amber-500/60 font-medium"
+            {/* Paper Settings Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setShowPaperSettings(!showPaperSettings)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                showPaperSettings 
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' 
+                  : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.1] text-slate-300 hover:text-white'
+              }`}
             >
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Paper Settings</span>
+              {showPaperSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
 
-          {/* Export & Import Actions */}
-          <div className="flex flex-col gap-1 justify-end">
-            <div className="flex items-center gap-2">
+            {/* Export 34-Col CSV Button Group */}
+            <div className="flex items-center p-0.5 bg-black/40 border border-white/[0.1] rounded-xl shadow-sm">
               <button
                 type="button"
                 onClick={handleDownloadCsv}
                 disabled={extractedMcqs.length === 0}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow-md transition-all disabled:opacity-40"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-lg text-xs transition-all disabled:opacity-40 shadow"
+                title="Download standard 34-column CSV for MockTest portal"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Export 34-Col CSV</span>
+                <span>Export CSV</span>
               </button>
               <button
                 type="button"
                 onClick={handleCopyCsv}
                 disabled={extractedMcqs.length === 0}
-                title="Copy CSV to clipboard"
-                className="p-1.5 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs transition-all disabled:opacity-40"
+                title="Copy CSV data to clipboard"
+                className="p-1.5 hover:bg-white/[0.1] text-slate-400 hover:text-white rounded-lg text-xs transition-all disabled:opacity-40"
               >
-                {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
               <button
                 type="button"
                 onClick={() => csvImportInputRef.current?.click()}
-                title="Import existing MockTest CSV"
-                className="p-1.5 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs transition-all"
+                title="Import existing CSV to edit"
+                className="p-1.5 hover:bg-white/[0.1] text-slate-400 hover:text-white rounded-lg text-xs transition-all"
               >
-                <Upload className="w-4 h-4" />
+                <Upload className="w-3.5 h-3.5" />
               </button>
               <input
                 ref={csvImportInputRef}
@@ -1425,34 +1229,236 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           </div>
         </div>
 
-        {/* One-Shot All Fields & Deep Solutions Checkbox Option */}
-        <div className="mt-3.5 pt-3 border-t border-white/[0.08] flex items-center justify-between flex-wrap gap-3 bg-amber-500/[0.03] p-3 rounded-xl border border-amber-500/20">
-          <label className="flex items-center gap-3 cursor-pointer select-none group flex-1">
-            <input
-              type="checkbox"
-              checked={autoDeepSolveAll}
-              onChange={(e) => setAutoDeepSolveAll(e.target.checked)}
-              className="w-4 h-4 rounded border-amber-500/50 text-amber-500 focus:ring-amber-400 bg-black/80 cursor-pointer accent-amber-500"
-            />
-            <div className="flex flex-col">
-              <span className="text-xs font-extrabold text-amber-300 flex items-center gap-1.5 group-hover:text-amber-200 transition-colors">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span>One-Shot Auto-Fill All 34 Fields + Deep Solutions (सभी 34 Fields & Solutions एक साथ भरें)</span>
-              </span>
-              <span className="text-[11px] text-slate-300">
-                Image bhejte hi Question, Options, Answer, <strong>Strict Academic Subject</strong>, Exam Level, aur <strong>Deep Research Step-by-Step Solutions</strong> ek saath fill hokar final store hoga.
-              </span>
+        {/* Row 2: Streamlined AI Engine, Provider & Concurrency Strip */}
+        <div className="p-2.5 rounded-xl bg-black/40 border border-white/[0.06] flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          {/* Left: Engine Switcher */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Engine:</span>
+            <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+              <button
+                type="button"
+                onClick={() => setAiEngine('bridge')}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                  aiEngine === 'bridge'
+                    ? 'bg-emerald-500 text-black shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Zap className="w-3 h-3" />
+                <span>Extension Bridge</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAiEngine('api')}
+                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                  aiEngine === 'api'
+                    ? 'bg-blue-500 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Key className="w-3 h-3" />
+                <span>Direct Gemini API</span>
+              </button>
             </div>
-          </label>
 
-          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition-all ${
-            autoDeepSolveAll 
-              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' 
-              : 'bg-white/[0.05] text-slate-400 border-white/[0.1]'
-          }`}>
-            {autoDeepSolveAll ? '✓ All 34 Fields Auto-Fill Active' : 'Extraction Only (Fast)'}
-          </span>
+            {/* Provider / Bridge / API Controls */}
+            {aiEngine === 'bridge' ? (
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedProvider}
+                  onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
+                  className="px-2 py-0.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-300 font-bold focus:outline-none"
+                >
+                  <option value="gemini">Gemini</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="chatgpt">ChatGPT</option>
+                  <option value="claude">Claude</option>
+                </select>
+
+                {bridgeStatus.connected ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-md text-[11px] font-bold">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Connected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAiEngine('api')}
+                      className="text-[10px] text-slate-500 hover:text-rose-400 underline transition-colors"
+                      title="Disconnect Bridge"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowConnectModal(true)}
+                    className="px-2.5 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold rounded-lg text-xs transition-all"
+                  >
+                    Connect Bridge
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-blue-400 font-medium flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Direct API Active
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(true)}
+                  className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 rounded-lg text-[11px] font-semibold transition-all"
+                >
+                  <Settings className="w-3 h-3" />
+                  <span>Configure Key</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Parallel Batch & One-Shot Toggle */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Batch Selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Batch:</span>
+              <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+                {[1, 2, 3, 5].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => setBatchSize(count)}
+                    className={`px-2 py-0.5 text-xs font-bold rounded transition-all ${
+                      batchSize === count
+                        ? 'bg-amber-500 text-black shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                    title={`Process ${count} page(s) simultaneously`}
+                  >
+                    {count}P
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
+
+            {/* One-Shot Auto-Fill Toggle */}
+            <label className="flex items-center gap-2 cursor-pointer select-none group" title="Image bhejte hi Question, Options, Answer, Subject, aur Solutions ek sath fill honge">
+              <input
+                type="checkbox"
+                checked={autoDeepSolveAll}
+                onChange={(e) => setAutoDeepSolveAll(e.target.checked)}
+                className="w-3.5 h-3.5 rounded border-amber-500/50 text-amber-500 focus:ring-amber-400 bg-black/80 cursor-pointer accent-amber-500"
+              />
+              <span className={`text-xs font-semibold transition-colors ${autoDeepSolveAll ? 'text-amber-300' : 'text-slate-400'}`}>
+                Auto-Fill All 34 Fields & Solutions
+              </span>
+            </label>
+          </div>
         </div>
+
+        {/* Row 3: Collapsible Paper Settings Panel */}
+        {showPaperSettings && (
+          <div className="p-4 rounded-xl bg-black/60 border border-amber-500/30 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 animate-fadeIn">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Set / Paper Name (SET_NAME)
+              </label>
+              <input
+                type="text"
+                value={setName}
+                onChange={(e) => {
+                  setSetName(e.target.value);
+                  setExtractedMcqs(prev => prev.map(i => ({ ...i, set_name: e.target.value })));
+                }}
+                placeholder="e.g. RRB NTPC 2024 CBT-1"
+                className="px-2.5 py-1.5 bg-black/40 border border-white/[0.12] focus:border-amber-500/60 rounded-lg text-xs text-white focus:outline-none"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Answer Format
+              </label>
+              <div className="flex items-center gap-1 p-0.5 bg-black/40 border border-white/[0.12] rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setAnswerFormat('letters')}
+                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
+                    answerFormat === 'letters'
+                      ? 'bg-amber-500 text-black shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Letters (A, B, C, D)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAnswerFormat('numbers')}
+                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
+                    answerFormat === 'numbers'
+                      ? 'bg-amber-500 text-black shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Numbers (1, 2, 3, 4)
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Math Notation
+              </label>
+              <div className="flex items-center gap-1 p-0.5 bg-black/40 border border-white/[0.12] rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setMathFormat('mathjax')}
+                  title="LaTeX standard \(...\)"
+                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
+                    mathFormat === 'mathjax'
+                      ? 'bg-amber-500 text-black shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  MathJax \(...\)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMathFormat('unicode')}
+                  title="Plain Unicode and HTML"
+                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
+                    mathFormat === 'unicode'
+                      ? 'bg-amber-500 text-black shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Unicode / HTML
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Default Difficulty
+              </label>
+              <select
+                value={difficulty}
+                onChange={(e) => {
+                  const diff = e.target.value as DifficultyLevel;
+                  setDifficulty(diff);
+                  setExtractedMcqs(prev => prev.map(i => ({ ...i, difficulty_level: diff })));
+                }}
+                className="px-2.5 py-1.5 bg-black/40 border border-white/[0.12] focus:border-amber-500/60 rounded-lg text-xs text-white focus:outline-none"
+              >
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* File Upload Dropzone (Compact if pages exist) */}
@@ -1464,10 +1470,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
         }}
         onClick={() => fileInputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all ${
+        className={`relative border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${
           pages.length === 0 
-            ? 'border-amber-500/40 bg-amber-500/[0.03] hover:bg-amber-500/[0.06] py-12' 
-            : 'border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.04] py-4'
+            ? 'border-amber-500/40 bg-amber-500/[0.03] hover:bg-amber-500/[0.06] p-8' 
+            : 'border-white/[0.08] bg-white/[0.015] hover:bg-white/[0.04] p-3'
         }`}
       >
         <input
@@ -1479,23 +1485,25 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           className="hidden"
         />
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-          <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-            <Upload className="w-5 h-5" />
+        <div className="flex items-center justify-center gap-2.5">
+          <div className={`rounded-lg border text-amber-400 ${pages.length === 0 ? 'p-3 bg-amber-500/10 border-amber-500/20' : 'p-1.5 bg-amber-500/10 border-amber-500/20'}`}>
+            <Upload className={pages.length === 0 ? "w-5 h-5" : "w-3.5 h-3.5"} />
           </div>
           <div className="text-left">
-            <h3 className="text-sm font-bold text-white">
-              {pages.length === 0 ? 'Upload PDF or Question Paper Images' : 'Add More Pages (PDF / Images)'}
+            <h3 className={`font-bold text-white ${pages.length === 0 ? 'text-sm' : 'text-xs'}`}>
+              {pages.length === 0 ? 'Upload Exam PDF or Question Paper Images' : '+ Add More Pages (PDF / Images)'}
             </h3>
-            <p className="text-xs text-slate-400">
-              Drag & drop exam PDF files or photos. Each page will render with its high-res image on the left and extracted questions on the right.
-            </p>
+            {pages.length === 0 && (
+              <p className="text-xs text-slate-400 mt-0.5">
+                Drag & drop exam PDF files or photos. Each page will render with its high-res image on the left and extracted questions on the right.
+              </p>
+            )}
           </div>
         </div>
 
         {uploadProgress && (
-          <div className="mt-3 max-w-md mx-auto p-2.5 bg-black/60 rounded-xl border border-amber-500/30 flex items-center gap-3">
-            <Loader2 className="w-4 h-4 text-amber-400 animate-spin flex-shrink-0" />
+          <div className="mt-3 max-w-md mx-auto p-2 bg-black/60 rounded-lg border border-amber-500/30 flex items-center gap-2.5">
+            <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0" />
             <span className="text-xs text-amber-300 font-medium">{uploadProgress.text}</span>
           </div>
         )}
@@ -1504,98 +1512,202 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       {/* Main Workspace: TextExtract Style UI (Left: Pages | Right: Questions) */}
       {pages.length > 0 && (
         <div className="space-y-4">
-          {/* Workspace Controls & Quick Jump Strip */}
-          <div className="p-4 bg-white/[0.03] border border-white/[0.08] rounded-2xl space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="text-xs font-extrabold text-white uppercase tracking-wider">
-                  Page Queue ({pages.length} Pages • Batch: {batchSize} Parallel)
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const allSelected = pages.every(p => p.isSelected);
-                    setPages(prev => prev.map(p => ({ ...p, isSelected: !allSelected })));
-                  }}
-                  className="text-xs text-amber-400 hover:text-amber-300 underline font-medium"
-                >
-                  {pages.every(p => p.isSelected) ? 'Deselect All' : 'Select All'}
-                </button>
-                {liveStatusText && (
-                  <span className="text-xs text-amber-300 font-medium flex items-center gap-1.5 animate-pulse">
-                    <span className="h-2 w-2 rounded-full bg-amber-400" />
-                    {liveStatusText}
-                  </span>
-                )}
-              </div>
-
-              {/* View Switcher & Processing Buttons */}
-              <div className="flex items-center flex-wrap gap-2">
-                {/* View Tabs */}
-                <div className="flex items-center p-0.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('split')}
-                    className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 ${
-                      activeTab === 'split' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <BookOpen className="w-3.5 h-3.5" />
-                    <span>Split View (Left: Page | Right: MCQs)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('grid')}
-                    className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 ${
-                      activeTab === 'grid' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    <span>18-Col Grid</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('csv')}
-                    className={`px-3 py-1.5 font-bold rounded-md transition-all flex items-center gap-1.5 ${
-                      activeTab === 'csv' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Raw CSV</span>
-                  </button>
-                </div>
-
+          {/* Workspace Command Bar & Filmstrip */}
+          <div className="p-3.5 bg-slate-900/80 border border-white/[0.08] rounded-2xl space-y-3 backdrop-blur-md shadow-xl">
+            {/* Top Command Row: Extraction Control, Views & Grouped Actions */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              {/* Left: Primary Run Control & Status */}
+              <div className="flex flex-wrap items-center gap-2.5">
                 {!isProcessingAll ? (
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => handleStartExtraction()}
-                      className="flex items-center gap-2 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
                     >
                       <Play className="w-3.5 h-3.5 fill-black" />
-                      <span>Start MCQ Extraction</span>
+                      <span>Start Extraction</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleReExtractAll}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.06] hover:bg-amber-500/20 border border-white/[0.1] hover:border-amber-500/40 text-slate-200 hover:text-amber-300 font-bold rounded-xl text-xs transition-all"
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-white/[0.04] hover:bg-amber-500/15 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 font-semibold rounded-xl text-xs transition-all"
                       title="Re-extract all pages from scratch"
                     >
-                      <RotateCw className="w-3.5 h-3.5" />
-                      <span>Re-Extract All ({pages.length} Pages)</span>
+                      <RotateCw className="w-3 h-3" />
+                      <span>Re-Extract</span>
                     </button>
                   </div>
                 ) : (
                   <button
                     type="button"
                     onClick={() => setIsPaused(!isPaused)}
-                    className="flex items-center gap-2 px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all"
                   >
-                    {isPaused ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                    {isPaused ? <Play className="w-3.5 h-3.5 fill-white" /> : <Pause className="w-3.5 h-3.5" />}
                     <span>{isPaused ? 'Resume' : 'Pause'}</span>
                   </button>
                 )}
 
+                {/* Status indicator */}
+                {liveStatusText ? (
+                  <span className="text-xs text-amber-300 font-medium flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg animate-pulse max-w-sm sm:max-w-md truncate">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                    <span className="truncate">{liveStatusText}</span>
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allSelected = pages.every(p => p.isSelected);
+                        setPages(prev => prev.map(p => ({ ...p, isSelected: !allSelected })));
+                      }}
+                      className="hover:text-amber-300 underline font-medium"
+                    >
+                      {pages.every(p => p.isSelected) ? 'Deselect All' : 'Select All'}
+                    </button>
+                    <span className="text-slate-500">
+                      ({pages.filter(p => p.isSelected).length}/{pages.length} selected)
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Center: View Switcher Tabs */}
+              <div className="flex items-center p-0.5 bg-black/60 border border-white/[0.08] rounded-xl self-start lg:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('split')}
+                  className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 ${
+                    activeTab === 'split' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>Split View</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('grid')}
+                  className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 ${
+                    activeTab === 'grid' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>18-Col Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('csv')}
+                  className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 ${
+                    activeTab === 'csv' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Raw CSV</span>
+                </button>
+              </div>
+
+              {/* Right: Grouped AI Tools Menu, Add Question & Clear All */}
+              <div className="flex items-center gap-2 self-end lg:self-auto">
+                {/* Grouped AI Tools Dropdown Menu */}
+                <div className="relative" ref={aiToolsRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowAiToolsMenu(!showAiToolsMenu)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-500/15 to-indigo-500/15 hover:from-purple-500/25 hover:to-indigo-500/25 border border-purple-500/30 text-purple-200 rounded-xl text-xs font-bold transition-all shadow-sm"
+                  >
+                    {isSolvingAll || isProofreading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-400" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    )}
+                    <span>AI Tools</span>
+                    <ChevronDown className={`w-3 h-3 transition-transform ${showAiToolsMenu ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {/* Dropdown Card */}
+                  {showAiToolsMenu && (
+                    <div className="absolute right-0 mt-1.5 w-64 rounded-xl bg-slate-900 border border-white/[0.12] shadow-2xl p-1.5 z-50 space-y-1 animate-fadeIn">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAiToolsMenu(false);
+                          handleAutoSolveAll();
+                        }}
+                        disabled={isSolvingAll || extractedMcqs.length === 0}
+                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-purple-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
+                      >
+                        <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-purple-200">Auto-Solve All (AI)</div>
+                          <div className="text-[11px] text-slate-400 font-normal">Generate deep bilingual solutions for all MCQs</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAiToolsMenu(false);
+                          handleProofreadAll();
+                        }}
+                        disabled={isProofreading || extractedMcqs.length === 0}
+                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-cyan-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
+                      >
+                        <Sparkles className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-cyan-200">AI Proofread (Clean Tags)</div>
+                          <div className="text-[11px] text-slate-400 font-normal">Validate HTML tags & fix OCR anomalies</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAiToolsMenu(false);
+                          handleStandardizeMathJaxAndHtml();
+                        }}
+                        disabled={extractedMcqs.length === 0}
+                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-emerald-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
+                      >
+                        <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-emerald-200">Fix MathJax + &lt;p&gt;</div>
+                          <div className="text-[11px] text-slate-400 font-normal">Standardize all 14 fields with &lt;p&gt; and \(...\)</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAiToolsMenu(false);
+                          handleCleanAllMath();
+                        }}
+                        disabled={extractedMcqs.length === 0}
+                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-amber-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-amber-200">Clean Tags & Math</div>
+                          <div className="text-[11px] text-slate-400 font-normal">Sanitize raw symbols & formatting glitches</div>
+                        </div>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Manual Add MCQ */}
+                <button
+                  type="button"
+                  onClick={handleAddQuestion}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-slate-200 hover:text-white rounded-xl text-xs font-semibold transition-all"
+                  title="Manually create a new MCQ row"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Add MCQ</span>
+                </button>
+
+                {/* Clear All */}
                 <button
                   type="button"
                   onClick={() => {
@@ -1605,18 +1717,18 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                     }
                   }}
                   disabled={isProcessingAll}
-                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all disabled:opacity-40"
-                  title="Clear all pages"
+                  className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all disabled:opacity-40"
+                  title="Clear all pages and extracted questions"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
 
-            {/* Quick Jump Filmstrip Bar for Fast Navigation */}
+            {/* Bottom Row: Quick Jump Filmstrip */}
             <div className="pt-2 border-t border-white/[0.04] flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-              <span className="text-[11px] font-bold text-slate-400 shrink-0 uppercase tracking-wider">
-                Quick Jump:
+              <span className="text-[10px] font-bold text-slate-500 shrink-0 uppercase tracking-wider">
+                Jump:
               </span>
               {pages.map((p) => {
                 const count = (p.items?.length) || extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id).length;
@@ -1625,7 +1737,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                     key={p.id}
                     type="button"
                     onClick={() => scrollToPageCard(p.pageNumber)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 ${
+                    className={`px-2 py-0.5 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1 ${
                       p.status === 'processing'
                         ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse'
                         : p.status === 'ready'
@@ -1644,77 +1756,6 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                   </button>
                 );
               })}
-            </div>
-
-            {/* Bulk Action Buttons Row */}
-            <div className="pt-2 border-t border-white/[0.04] flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                {/* Auto-Solve All */}
-                <button
-                  type="button"
-                  onClick={handleAutoSolveAll}
-                  disabled={isSolvingAll || extractedMcqs.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-500/20 to-indigo-500/20 hover:from-purple-500/30 hover:to-indigo-500/30 border border-purple-500/30 text-purple-200 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
-                >
-                  {isSolvingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-purple-400" />}
-                  <span>Auto-Solve All (AI)</span>
-                </button>
-
-                {/* AI Proofread */}
-                <button
-                  type="button"
-                  onClick={handleProofreadAll}
-                  disabled={isProofreading || extractedMcqs.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
-                >
-                  {isProofreading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-cyan-300" />}
-                  <span>✨ AI Proofread (Clean Tags)</span>
-                </button>
-
-                {/* Standardize MathJax & <p> */}
-                <button
-                  type="button"
-                  onClick={handleStandardizeMathJaxAndHtml}
-                  disabled={extractedMcqs.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
-                  title="Enforce 100% consistent <p> wrapping on all 14 fields (no bare text) and apply standard MathJax \(...\) notation"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>📐 Fix & Standardize MathJax + &lt;p&gt;</span>
-                </button>
-
-                {/* Clean Tags & Math */}
-                <button
-                  type="button"
-                  onClick={handleCleanAllMath}
-                  disabled={extractedMcqs.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>🧹 Clean Tags & Math</span>
-                </button>
-
-                {/* Add MCQ */}
-                <button
-                  type="button"
-                  onClick={handleAddQuestion}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-xl text-xs font-semibold transition-all"
-                >
-                  <Plus className="w-3.5 h-3.5 text-amber-400" />
-                  <span>+ Add MCQ</span>
-                </button>
-              </div>
-
-              {/* Download CSV */}
-              <button
-                type="button"
-                onClick={handleDownloadCsv}
-                disabled={extractedMcqs.length === 0}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold shadow-md transition-all disabled:opacity-40"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download 18-Col CSV</span>
-              </button>
             </div>
           </div>
 

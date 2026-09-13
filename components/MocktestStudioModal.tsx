@@ -205,8 +205,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
   };
 
   const handleDownload = () => {
-    const cleanFileName = (setName || 'mocktest').replace(/[^a-zA-Z0-9_-]/g, '_');
-    downloadMockTestCsv(items, cleanFileName, answerFormat);
+    const chosenName = (setName || 'mocktest').trim();
+    const safeBase = chosenName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'mocktest';
+    const finalFileName = safeBase.toLowerCase().endsWith('.csv') ? safeBase : `${safeBase}.csv`;
+    downloadMockTestCsv(items, finalFileName, answerFormat);
   };
 
   const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {

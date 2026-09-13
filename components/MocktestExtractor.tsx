@@ -3,7 +3,7 @@ import {
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
-  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal
+  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -35,7 +35,10 @@ import {
   PendingMcqContext,
   separateCompleteAndPendingItems,
   mergePendingCarryOver,
-  reverifyMockTestItemWithImages
+  reverifyMockTestItemWithImages,
+  buildMockTestSimilarBridgePrompt,
+  generateSimilarQuestionItem,
+  generateSimilarBatchFromItems
 } from '../services/mocktestService';
 import { 
   extractWithStudyAiBridge, 
@@ -107,11 +110,16 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
 
   // Configuration state
+  const [outputFileName, setOutputFileName] = useState<string>('');
   const [setName, setSetName] = useState<string>('RRB NTPC 2024 CBT-1');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('medium');
   const [answerFormat, setAnswerFormat] = useState<'letters' | 'numbers'>('letters');
   const [mathFormat, setMathFormat] = useState<'mathjax' | 'unicode'>('mathjax');
   const [autoDeepSolveAll, setAutoDeepSolveAll] = useState<boolean>(true);
+  // Extraction Mode: 'exact' (Extract as written) vs 'similar' (Input PDF as Reference -> Generate Brand-New Practice Questions)
+  const [extractionMode, setExtractionMode] = useState<'exact' | 'similar'>('exact');
+  const [generatingSimilarId, setGeneratingSimilarId] = useState<string | null>(null);
+  const [isGeneratingSimilarBatch, setIsGeneratingSimilarBatch] = useState(false);
 
   // Extracted MCQs state
   const [extractedMcqs, setExtractedMcqs] = useState<MockTestMcqItem[]>([]);
@@ -188,6 +196,16 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     const validFiles = Array.from(files);
     if (validFiles.length === 0) return;
 
+    // Automatically set output file name and setName from the uploaded input file
+    const firstFile = validFiles[0];
+    if (firstFile && firstFile.name) {
+      const baseName = firstFile.name.replace(/\.[^/.]+$/, '').trim();
+      if (baseName) {
+        setOutputFileName(baseName);
+        setSetName(baseName);
+      }
+    }
+
     setUploadProgress({ current: 0, total: validFiles.length, text: 'Reading files...' });
     const newQueueItems: PageQueueItem[] = [];
 
@@ -262,15 +280,23 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     pendingContext: PendingMcqContext | null,
     pageIndex: number,
     totalPages: number,
-    isLastPage: boolean
+    isLastPage: boolean,
+    mode?: 'exact' | 'similar'
   ): Promise<{ completeItems: MockTestMcqItem[]; nextPendingContext: PendingMcqContext | null }> => {
+    const activeMode = mode || extractionMode;
+    const isSimilar = activeMode === 'similar';
+
     setActivePageIndex(pageIndex);
     setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'processing', errorMessage: undefined } : p));
     
     const carryNotice = pendingContext && pendingContext.pendingItems.length > 0
       ? ` (Carrying forward ${pendingContext.pendingItems.length} pending MCQ from P.${pendingContext.sourcePageNumber})`
       : '';
-    setLiveStatusText(`[Sequential ${pageIndex + 1}/${totalPages}] Page ${page.pageNumber}: Starting AI extraction...${carryNotice}`);
+    setLiveStatusText(
+      isSimilar
+        ? `[Sequential ${pageIndex + 1}/${totalPages}] Page ${page.pageNumber}: 🧠 Generating BRAND NEW similar MCQs from reference page...${carryNotice}`
+        : `[Sequential ${pageIndex + 1}/${totalPages}] Page ${page.pageNumber}: Starting AI extraction...${carryNotice}`
+    );
 
     const isUsingBridge = aiEngine === 'bridge' && bridgeStatus.connected;
 
@@ -278,7 +304,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       let rawExtractedItems: MockTestMcqItem[] = [];
 
       if (isUsingBridge) {
-        const prompt = buildMockTestBridgePrompt(setName, pendingContext, page.pageNumber);
+        const prompt = isSimilar
+          ? buildMockTestSimilarBridgePrompt(setName, pendingContext, page.pageNumber)
+          : buildMockTestBridgePrompt(setName, pendingContext, page.pageNumber);
         const { rawText, elements } = await extractWithStudyAiBridge({
           base64Image: page.imageUrl,
           fileName: `mocktest_page_${page.pageNumber}.png`,
@@ -303,14 +331,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         }
       } else {
         // Direct API mode
-        setLiveStatusText(`[Page ${page.pageNumber}] Calling Gemini API with carry-over context...`);
+        setLiveStatusText(
+          isSimilar
+            ? `[Page ${page.pageNumber}] 🧠 Calling Gemini API to generate NEW practice MCQs from reference page...`
+            : `[Page ${page.pageNumber}] Calling Gemini API with carry-over context...`
+        );
         const startIndex = extractedMcqs.length + 1;
         rawExtractedItems = await extractMockTestWithDirectApi(
           page.imageUrl,
           setName,
           startIndex,
           pendingContext,
-          page.pageNumber
+          page.pageNumber,
+          isSimilar
         );
       }
 
@@ -451,7 +484,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   };
 
   // Multi-Page Sequential Extraction Loop with Carry-Over Context
-  const handleStartExtraction = async (forceAll: boolean = false) => {
+  const handleStartExtraction = async (targetMode?: 'exact' | 'similar', forceAll: boolean = false) => {
+    const mode = targetMode || extractionMode;
+    if (targetMode) setExtractionMode(targetMode);
+
     let selectedPages = pages.filter(p => p.isSelected);
     if (selectedPages.length === 0) {
       alert('No pages selected for extraction. Please select at least one page.');
@@ -462,13 +498,15 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       const pendingOrError = selectedPages.filter(p => p.status !== 'ready');
       if (pendingOrError.length === 0) {
         const confirmAll = confirm(
-          `All ${selectedPages.length} selected pages have already been extracted.\n\nWould you like to RE-EXTRACT all ${selectedPages.length} selected pages from scratch?`
+          `All ${selectedPages.length} selected pages have already been processed.\n\n` +
+          `Would you like to ${mode === 'similar' ? 'GENERATE NEW SIMILAR MCQs for' : 'RE-EXTRACT'} all ${selectedPages.length} selected pages from scratch?`
         );
         if (!confirmAll) return;
         setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
       } else if (pendingOrError.length < selectedPages.length) {
         const reExtractAll = confirm(
-          `${pendingOrError.length} page(s) need extraction, and ${selectedPages.length - pendingOrError.length} are already extracted.\n\nClick OK to re-extract ALL ${selectedPages.length} selected pages,\nor Cancel to extract ONLY the ${pendingOrError.length} pending/failed page(s).`
+          `${pendingOrError.length} page(s) need processing, and ${selectedPages.length - pendingOrError.length} are already ready.\n\n` +
+          `Click OK to process ALL ${selectedPages.length} selected pages,\nor Cancel to process ONLY the ${pendingOrError.length} pending/failed page(s).`
         );
         if (reExtractAll) {
           setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
@@ -517,7 +555,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           ? ` (Carrying ${carriedPendingContext.pendingItems.length} pending MCQ from P.${carriedPendingContext.sourcePageNumber})`
           : '';
         setLiveStatusText(
-          `[Sequential ${i + 1}/${selectedPages.length}] Processing Page ${page.pageNumber}...${carryInfo}`
+          mode === 'similar'
+            ? `[Sequential ${i + 1}/${selectedPages.length}] Page ${page.pageNumber}: 🧠 Generating NEW similar MCQs from reference page...${carryInfo}`
+            : `[Sequential ${i + 1}/${selectedPages.length}] Processing Page ${page.pageNumber}...${carryInfo}`
         );
 
         try {
@@ -526,7 +566,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
             carriedPendingContext,
             i,
             selectedPages.length,
-            isLast
+            isLast,
+            mode
           );
           carriedPendingContext = nextPendingContext;
         } catch (pageErr: any) {
@@ -537,7 +578,11 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         await new Promise(res => setTimeout(res, 600));
       }
 
-      setLiveStatusText('All selected pages sequentially processed with carry-over context!');
+      setLiveStatusText(
+        mode === 'similar'
+          ? '✓ All selected pages processed: Brand-new similar practice MCQs generated successfully!'
+          : 'All selected pages sequentially processed with carry-over context!'
+      );
     } catch (err: any) {
       console.error('Sequential extraction error:', err);
       setLiveStatusText(`Extraction stopped: ${err.message || err}`);
@@ -548,16 +593,18 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   };
 
   // Dedicated full re-extraction from scratch
-  const handleReExtractAll = async () => {
+  const handleReExtractAll = async (targetMode?: 'exact' | 'similar') => {
     if (pages.length === 0) return;
-    const confirmAll = confirm(`Are you sure you want to RE-EXTRACT ALL ${pages.length} pages sequentially from scratch?`);
+    const mode = targetMode || extractionMode;
+    const actionLabel = mode === 'similar' ? 'generate BRAND-NEW SIMILAR MCQs for' : 'RE-EXTRACT';
+    const confirmAll = confirm(`Are you sure you want to ${actionLabel} ALL ${pages.length} pages sequentially from scratch?`);
     if (!confirmAll) return;
     setPages(prev => prev.map(p => ({ ...p, isSelected: true, status: 'pending', errorMessage: undefined })));
     setIsProcessingAll(false);
     setIsPaused(false);
     pauseRef.current = false;
     setTimeout(() => {
-      handleStartExtraction(true);
+      handleStartExtraction(mode, true);
     }, 150);
   };
 
@@ -641,11 +688,12 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     }
   };
 
-  // Single page retry
-  const handleRetryPage = async (page: PageQueueItem, idx: number) => {
+  // Single page retry / process (supports 'exact' vs 'similar')
+  const handleRetryPage = async (page: PageQueueItem, idx: number, mode?: 'exact' | 'similar') => {
+    const targetMode = mode || extractionMode;
     if (isProcessingAll && !isPaused) {
       const confirmOverride = confirm(
-        `Batch extraction is active. Would you like to pause batch extraction and retry Page ${page.pageNumber} now?`
+        `Batch processing is active. Would you like to pause batch extraction and process Page ${page.pageNumber} now?`
       );
       if (!confirmOverride) return;
       pauseRef.current = true;
@@ -663,7 +711,11 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       status: 'processing',
       errorMessage: undefined
     } : p));
-    setLiveStatusText(`[Page ${page.pageNumber}] Retrying extraction with intelligent key rotation...`);
+    setLiveStatusText(
+      targetMode === 'similar'
+        ? `[Page ${page.pageNumber}] 🧠 Generating BRAND NEW similar MCQs using this page as reference...`
+        : `[Page ${page.pageNumber}] Retrying extraction with intelligent key rotation...`
+    );
 
     try {
       // Find if previous page has pending / incomplete items to carry over
@@ -685,19 +737,95 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         }
       }
 
-      await processPageItemSequential(page, retryPendingContext, idx, pages.length, idx === pages.length - 1);
-      setLiveStatusText(`✓ Page ${page.pageNumber} extracted successfully!`);
+      await processPageItemSequential(page, retryPendingContext, idx, pages.length, idx === pages.length - 1, targetMode);
+      setLiveStatusText(
+        targetMode === 'similar'
+          ? `✓ Page ${page.pageNumber}: Similar practice MCQs generated successfully!`
+          : `✓ Page ${page.pageNumber} extracted successfully!`
+      );
     } catch (err: any) {
-      console.error(`Page ${page.pageNumber} retry failed:`, err);
-      const errMsg = err?.message || 'Extraction failed';
+      console.error(`Page ${page.pageNumber} processing failed:`, err);
+      const errMsg = err?.message || 'Processing failed';
       setPages(prev => prev.map(p => p.id === page.id ? {
         ...p,
         status: 'error',
         errorMessage: errMsg
       } : p));
-      setLiveStatusText(`Page ${page.pageNumber} extraction failed: ${errMsg}`);
+      setLiveStatusText(`Page ${page.pageNumber} processing failed: ${errMsg}`);
     } finally {
       setActivePageIndex(null);
+    }
+  };
+
+  // Generate a brand-new similar question variant from an existing MCQ item
+  const handleGenerateSimilarSingleItem = async (item: MockTestMcqItem) => {
+    setGeneratingSimilarId(item.id);
+    setLiveStatusText(`Generating brand-new similar question inspired by Q#${item.question_r}...`);
+    try {
+      const newItem = await generateSimilarQuestionItem(item);
+      // Insert newItem immediately after the reference item
+      setExtractedMcqs(prev => {
+        const idx = prev.findIndex(it => it.id === item.id);
+        const copy = [...prev];
+        if (idx >= 0) {
+          copy.splice(idx + 1, 0, newItem);
+        } else {
+          copy.push(newItem);
+        }
+        return copy.map((it, i) => ({ ...it, question_r: i + 1 }));
+      });
+      // Also update pages items if associated
+      if (item.pageId) {
+        setPages(prev => prev.map(p => {
+          if (p.id === item.pageId && p.items) {
+            const pIdx = p.items.findIndex(it => it.id === item.id);
+            const pCopy = [...p.items];
+            if (pIdx >= 0) {
+              pCopy.splice(pIdx + 1, 0, newItem);
+            } else {
+              pCopy.push(newItem);
+            }
+            return { ...p, items: pCopy, mcqCount: pCopy.length };
+          }
+          return p;
+        }));
+      }
+      setLiveStatusText(`✓ New similar question variant generated successfully!`);
+    } catch (err: any) {
+      alert(`Failed to generate similar question: ${err?.message || err}`);
+    } finally {
+      setGeneratingSimilarId(null);
+    }
+  };
+
+  // Batch generate brand new similar questions from currently extracted MCQs
+  const handleGenerateSimilarFromCurrentMcqs = async () => {
+    if (extractedMcqs.length === 0) {
+      alert('No MCQs currently loaded to use as reference.');
+      return;
+    }
+    const confirmGen = confirm(
+      `Generate brand-new similar practice MCQs for all ${extractedMcqs.length} questions?\n\n` +
+      `The current questions will be used strictly as conceptual reference (topics, formulas, difficulty), and fresh, unique practice questions will be created (NO duplicates).`
+    );
+    if (!confirmGen) return;
+
+    setIsGeneratingSimilarBatch(true);
+    setLiveStatusText(`Generating ${extractedMcqs.length} new similar questions from reference set...`);
+    try {
+      const newItems = await generateSimilarBatchFromItems(extractedMcqs, (msg) => {
+        setLiveStatusText(msg);
+      });
+      // Append the new variants with updated numbering
+      setExtractedMcqs(prev => {
+        const combined = [...prev, ...newItems];
+        return combined.map((it, idx) => ({ ...it, question_r: idx + 1 }));
+      });
+      setLiveStatusText(`✓ Successfully generated ${newItems.length} new similar practice questions!`);
+    } catch (err: any) {
+      alert(`Batch similar generation failed: ${err?.message || err}`);
+    } finally {
+      setIsGeneratingSimilarBatch(false);
     }
   };
 
@@ -826,8 +954,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       alert('No MCQs to download yet. Extract some pages first!');
       return;
     }
-    const safeName = setName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
-    downloadMockTestCsv(extractedMcqs, `${safeName}_mocktest.csv`, answerFormat, mathFormat);
+    const chosenName = (outputFileName || setName || 'mocktest').trim();
+    const safeBase = chosenName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'mocktest';
+    const finalFileName = safeBase.toLowerCase().endsWith('.csv') ? safeBase : `${safeBase}.csv`;
+    downloadMockTestCsv(extractedMcqs, finalFileName, answerFormat, mathFormat);
   };
 
   // Copy CSV to clipboard
@@ -1125,11 +1255,24 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     }
   };
 
-  // Jump to specific page card
+  // Jump to specific page card with animated pulse highlight
   const scrollToPageCard = (pageNumber: number) => {
-    const el = document.getElementById(`page-card-${pageNumber}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const doScroll = () => {
+      const el = document.getElementById(`page-card-${pageNumber}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.add('ring-4', 'ring-amber-400', 'shadow-[0_0_35px_rgba(245,158,11,0.6)]', 'transition-all', 'duration-300');
+        setTimeout(() => {
+          el.classList.remove('ring-4', 'ring-amber-400', 'shadow-[0_0_35px_rgba(245,158,11,0.6)]');
+        }, 2500);
+      }
+    };
+
+    if (activeTab !== 'split') {
+      setActiveTab('split');
+      setTimeout(doScroll, 120);
+    } else {
+      doScroll();
     }
   };
 
@@ -1188,6 +1331,27 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
               <span>Paper Settings</span>
               {showPaperSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
+
+            {/* Output File Name / Rename Input Box */}
+            <div 
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-black/40 border border-white/[0.1] hover:border-amber-500/50 focus-within:border-amber-500 rounded-xl transition-all shadow-sm"
+              title="Output file name. Rename here before download!"
+            >
+              <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <input
+                type="text"
+                value={outputFileName || setName}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setOutputFileName(val);
+                  setSetName(val);
+                  setExtractedMcqs(prev => prev.map(i => ({ ...i, set_name: val })));
+                }}
+                placeholder="File name (Rename)..."
+                className="w-28 sm:w-48 bg-transparent text-xs text-white placeholder:text-slate-500 font-medium focus:outline-none"
+              />
+              <span className="text-[10px] text-slate-500 font-bold shrink-0">.csv</span>
+            </div>
 
             {/* Export 34-Col CSV Button Group */}
             <div className="flex items-center p-0.5 bg-black/40 border border-white/[0.1] rounded-xl shadow-sm">
@@ -1259,6 +1423,41 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                 <Key className="w-3 h-3" />
                 <span>Direct Gemini API</span>
               </button>
+            </div>
+
+            <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
+
+            {/* Mode Switcher: Exact PDF vs Reference Mode (New Questions) */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Mode:</span>
+              <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setExtractionMode('exact')}
+                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                    extractionMode === 'exact'
+                      ? 'bg-amber-500 text-black shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Extract exact questions directly as written in the PDF"
+                >
+                  <BookOpen className="w-3 h-3" />
+                  <span>Exact PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExtractionMode('similar')}
+                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                    extractionMode === 'similar'
+                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-purple-300'
+                  }`}
+                  title="PDF questions act strictly as conceptual reference; AI generates brand-new practice MCQs (No duplicates)"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span>Ref Mode (New MCQs)</span>
+                </button>
+              </div>
             </div>
 
             {/* Provider / Bridge / API Controls */}
@@ -1363,18 +1562,24 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           <div className="p-4 rounded-xl bg-black/60 border border-amber-500/30 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 animate-fadeIn">
             <div className="flex flex-col gap-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Set / Paper Name (SET_NAME)
+                Set / Output File Name (.csv)
               </label>
-              <input
-                type="text"
-                value={setName}
-                onChange={(e) => {
-                  setSetName(e.target.value);
-                  setExtractedMcqs(prev => prev.map(i => ({ ...i, set_name: e.target.value })));
-                }}
-                placeholder="e.g. RRB NTPC 2024 CBT-1"
-                className="px-2.5 py-1.5 bg-black/40 border border-white/[0.12] focus:border-amber-500/60 rounded-lg text-xs text-white focus:outline-none"
-              />
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-black/40 border border-white/[0.12] focus-within:border-amber-500/60 rounded-lg">
+                <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <input
+                  type="text"
+                  value={outputFileName || setName}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setOutputFileName(val);
+                    setSetName(val);
+                    setExtractedMcqs(prev => prev.map(i => ({ ...i, set_name: val })));
+                  }}
+                  placeholder="e.g. RRB NTPC 2024 CBT-1"
+                  className="w-full bg-transparent text-xs text-white focus:outline-none"
+                />
+                <span className="text-xs text-slate-500 font-bold shrink-0">.csv</span>
+              </div>
             </div>
 
             <div className="flex flex-col gap-1">
@@ -1519,23 +1724,36 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
               {/* Left: Primary Run Control & Status */}
               <div className="flex flex-wrap items-center gap-2.5">
                 {!isProcessingAll ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => handleStartExtraction()}
+                      onClick={() => handleStartExtraction('exact')}
                       className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
+                      title="Extract exact questions directly as written in the PDF"
                     >
                       <Play className="w-3.5 h-3.5 fill-black" />
                       <span>Start Extraction</span>
                     </button>
+
+                    {/* NEW REQUESTED BUTTON: Generate Similar MCQs (Reference Mode) */}
                     <button
                       type="button"
-                      onClick={handleReExtractAll}
+                      onClick={() => handleStartExtraction('similar')}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-violet-600 hover:from-purple-500 hover:via-indigo-500 hover:to-violet-500 text-white font-extrabold rounded-xl text-xs shadow-lg shadow-purple-500/30 border border-purple-400/30 transition-all group"
+                      title="PDF questions act strictly as conceptual reference/blueprint. Generates brand-new similar MCQs (strictly no verbatim duplicates)!"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300 group-hover:rotate-12 transition-transform" />
+                      <span>✨ Generate Similar MCQs (Ref Mode)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleReExtractAll(extractionMode)}
                       className="flex items-center gap-1 px-2.5 py-1.5 bg-white/[0.04] hover:bg-amber-500/15 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 font-semibold rounded-xl text-xs transition-all"
-                      title="Re-extract all pages from scratch"
+                      title="Re-run all pages from scratch"
                     >
                       <RotateCw className="w-3 h-3" />
-                      <span>Re-Extract</span>
+                      <span>Re-Run All</span>
                     </button>
                   </div>
                 ) : (
@@ -1633,6 +1851,22 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                         type="button"
                         onClick={() => {
                           setShowAiToolsMenu(false);
+                          handleGenerateSimilarFromCurrentMcqs();
+                        }}
+                        disabled={isGeneratingSimilarBatch || extractedMcqs.length === 0}
+                        className="w-full flex items-start gap-2.5 p-2 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-left text-xs font-semibold text-purple-200 hover:text-white transition-all disabled:opacity-40 border border-purple-500/20"
+                      >
+                        <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-purple-200">✨ Generate Similar Set (AI)</div>
+                          <div className="text-[11px] text-slate-400 font-normal">Create brand-new practice MCQs using current items as reference</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAiToolsMenu(false);
                           handleAutoSolveAll();
                         }}
                         disabled={isSolvingAll || extractedMcqs.length === 0}
@@ -1725,38 +1959,103 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
               </div>
             </div>
 
-            {/* Bottom Row: Quick Jump Filmstrip */}
-            <div className="pt-2 border-t border-white/[0.04] flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-              <span className="text-[10px] font-bold text-slate-500 shrink-0 uppercase tracking-wider">
-                Jump:
-              </span>
-              {pages.map((p) => {
-                const count = (p.items?.length) || extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id).length;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => scrollToPageCard(p.pageNumber)}
-                    className={`px-2 py-0.5 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1 ${
-                      p.status === 'processing'
-                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse'
-                        : p.status === 'ready'
-                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
-                        : p.status === 'error'
-                        ? 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
-                        : 'bg-black/40 border-white/[0.08] text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span>P.{p.pageNumber}</span>
-                    {count > 0 && (
-                      <span className="px-1 py-0.2 rounded-full text-[9px] bg-black/60 font-extrabold text-amber-300">
-                        {count}
-                      </span>
+            {/* Bottom Row: Quick Jump Filmstrip with Problem Indicators */}
+            {(() => {
+              const pagesWithIssues = pages.filter(p => {
+                if (p.status === 'error' || Boolean(p.errorMessage)) return true;
+                const pageQuestions = (p.items && p.items.length > 0)
+                  ? p.items
+                  : extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id);
+                return pageQuestions.some(it => detectItemFieldIssues(it).hasIssues);
+              });
+
+              return (
+                <div className="pt-2 border-t border-white/[0.04] flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                      P:
+                    </span>
+                    {pagesWithIssues.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          scrollToPageCard(pagesWithIssues[0].pageNumber);
+                        }}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 transition-all shrink-0 animate-pulse shadow-sm"
+                        title="Click to jump directly to the first page with missing/incomplete fields"
+                      >
+                        <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                        <span>{pagesWithIssues.length} Needs Fix</span>
+                      </button>
                     )}
-                  </button>
-                );
-              })}
-            </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {pages.map((p) => {
+                      const pageQuestions = (p.items && p.items.length > 0)
+                        ? p.items
+                        : extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id);
+                      const count = pageQuestions.length;
+                      const isError = p.status === 'error' || Boolean(p.errorMessage);
+                      const problemQuestions = pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues);
+                      const problemCount = problemQuestions.length;
+                      const hasIncomplete = p.status === 'ready' && problemCount > 0;
+
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => scrollToPageCard(p.pageNumber)}
+                          title={
+                            isError
+                              ? `Page ${p.pageNumber}: Error processing page! Click to jump & inspect.`
+                              : hasIncomplete
+                              ? `Page ${p.pageNumber}: ⚠️ ${problemCount} of ${count} question(s) have incomplete/missing fields! Click to jump directly.`
+                              : p.status === 'ready'
+                              ? `Page ${p.pageNumber}: All ${count} questions complete & verified.`
+                              : `Page ${p.pageNumber}`
+                          }
+                          className={`px-2 py-0.5 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 shadow-sm ${
+                            p.status === 'processing'
+                              ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse'
+                              : isError
+                              ? 'bg-rose-500/25 border-rose-500/60 text-rose-200 hover:bg-rose-500/35 ring-1 ring-rose-500/40 animate-pulse'
+                              : hasIncomplete
+                              ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 hover:bg-amber-500/30 ring-1 ring-amber-500/40 shadow-sm shadow-amber-500/10'
+                              : p.status === 'ready'
+                              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
+                              : 'bg-black/40 border-white/[0.08] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {isError ? (
+                            <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
+                          ) : hasIncomplete ? (
+                            <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                          ) : null}
+
+                          <span>P.{p.pageNumber}</span>
+
+                          {count > 0 && (
+                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-extrabold flex items-center gap-0.5 ${
+                              hasIncomplete 
+                                ? 'bg-amber-500 text-black font-black' 
+                                : isError 
+                                ? 'bg-rose-900 text-rose-200' 
+                                : 'bg-black/60 text-amber-300'
+                            }`}>
+                              {count}
+                              {hasIncomplete && (
+                                <span className="opacity-90">({problemCount}⚠)</span>
+                              )}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* TAB 1: SPLIT VIEW (TextExtract Style: Left Page Thumbnail | Right Questions) */}
@@ -1809,9 +2108,26 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                               </span>
                             )}
                             {page.status === 'ready' && (
-                              <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
-                                <CheckCircle2 className="w-3 h-3" /> {pageQuestions.length} MCQs
-                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                {(() => {
+                                  const issueCount = pageQuestions.filter(q => detectItemFieldIssues(q).hasIssues).length;
+                                  if (issueCount > 0) {
+                                    return (
+                                      <span 
+                                        className="bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-sm"
+                                        title={`${issueCount} of ${pageQuestions.length} question(s) have missing or incomplete fields`}
+                                      >
+                                        <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                                        <span>{issueCount} Need Fix</span>
+                                      </span>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                                <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-3 h-3" /> {pageQuestions.length} MCQs
+                                </span>
+                              </div>
                             )}
                             {page.status === 'error' && (
                               <span className="bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
@@ -1846,16 +2162,27 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
                       {/* Bottom Controls for Page */}
                       <div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs gap-1.5 flex-wrap">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             type="button"
-                            onClick={() => handleRetryPage(page, idx)}
+                            onClick={() => handleRetryPage(page, idx, 'exact')}
                             disabled={page.status === 'processing'}
                             className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] hover:bg-amber-500/20 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 rounded-lg font-bold transition-all disabled:opacity-40"
-                            title="Re-extract this page with prompt"
+                            title="Extract exact questions from this page"
                           >
                             <RotateCw className={`w-3.5 h-3.5 ${page.status === 'processing' ? 'animate-spin' : ''}`} />
-                            <span>Re-Extract</span>
+                            <span>Exact</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRetryPage(page, idx, 'similar')}
+                            disabled={page.status === 'processing'}
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 hover:text-purple-200 rounded-lg font-bold transition-all disabled:opacity-40"
+                            title="Use this page strictly as conceptual reference and generate brand-new practice MCQs"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                            <span>✨ Similar</span>
                           </button>
 
                           <button
@@ -2023,6 +2350,14 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                       Q#{item.question_r}
                                     </span>
 
+                                    {/* Ref Variant Badge */}
+                                    {(item.source_question_reference?.includes('Variant') || item.correction_notes?.includes('reference')) && (
+                                      <span className="px-2 py-0.5 rounded bg-purple-500/25 text-purple-300 font-extrabold text-[10px] border border-purple-500/40 flex items-center gap-1 shadow-sm">
+                                        <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                                        <span>Ref Variant</span>
+                                      </span>
+                                    )}
+
                                     {/* STRICT ACADEMIC SUBJECT SELECTOR */}
                                     <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs">
                                       <span className="text-amber-400 font-bold text-[10px] uppercase">Subject:</span>
@@ -2108,6 +2443,22 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                       <span className="hidden sm:inline">
                                         {item.solution_hi || item.solution_en ? 'Re-Solve' : 'Auto-Solve'}
                                       </span>
+                                    </button>
+
+                                    {/* Generate Similar Question Variant Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleGenerateSimilarSingleItem(item)}
+                                      disabled={generatingSimilarId === item.id || isSolving || isRepairing}
+                                      className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-violet-600/20 to-purple-600/20 hover:from-violet-600/30 hover:to-purple-600/30 border border-violet-500/30 text-violet-300 rounded text-xs font-semibold transition-all disabled:opacity-50 shadow-sm"
+                                      title="Generate brand-new practice MCQ testing this same concept (No duplicate)"
+                                    >
+                                      {generatingSimilarId === item.id ? (
+                                        <Loader2 className="w-3 h-3 animate-spin text-violet-400" />
+                                      ) : (
+                                        <Sparkles className="w-3 h-3 text-violet-400" />
+                                      )}
+                                      <span className="hidden sm:inline">Similar Variant</span>
                                     </button>
 
                                     {/* Edit Toggle Button */}
@@ -2586,6 +2937,23 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                       </button>
                     </>
                   )}
+
+                  <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs">
+                    <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="text-[10px] text-slate-400 font-bold">File:</span>
+                    <input
+                      type="text"
+                      value={outputFileName || setName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setOutputFileName(val);
+                        setSetName(val);
+                      }}
+                      className="w-36 sm:w-48 bg-transparent text-xs text-amber-300 font-bold focus:outline-none"
+                      title="Rename output file before downloading"
+                    />
+                    <span className="text-[10px] text-slate-500 font-bold">.csv</span>
+                  </div>
 
                   <button
                     type="button"

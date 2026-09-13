@@ -1587,14 +1587,14 @@ Extract into a strict JSON array of objects, where each object has these exact 3
 5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
 6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: DETAILED, STEP-BY-STEP EXPLANATION in Hindi formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). Include formulas, full workings, and rationale. DO NOT prefix with "हल:", "<b>हल:</b>", or "उत्तर:" because the portal UI already provides the Solution label! DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
+8. solution_hi: DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
 9. question_en: Question text in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
 10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
 11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
 12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
 13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: DETAILED, STEP-BY-STEP EXPLANATION in English formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with "Solution:", "<b>Solution:</b>", or "Explanation:" because the portal UI already provides the Solution label! DO NOT include filler labels like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:"!
+15. solution_en: DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
 16. answer: Correct answer identifier: Single choice MCQ: "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
 17. set_name: Exam paper/shift name, e.g. "${setName}"
 18. difficulty_level: "Easy", "Medium", or "Hard"
@@ -1618,6 +1618,17 @@ Extract into a strict JSON array of objects, where each object has these exact 3
 33. manually_review: "checked"
 34. duplicate_statistics: "Unique within this shift; duplicate check completed."
 
+YCT EXAM PUBLICATION SOLUTION PATTERN (जैसा प्रश्न वैसा पैटर्न):
+- DYNAMIC PATTERN BY DISCIPLINE:
+  * For MATHEMATICS / NUMERICALS: State given data ("दिया गया है / Given that:"), write formula in clean Unicode, show full step-by-step intermediate calculation without skipping steps so weaker students understand clearly, and conclude with the calculated value.
+  * For REASONING / LOGIC: State the underlying rule/logic, show pattern verification for each term/option, conclude why option is uniquely correct.
+  * For GK / HISTORY / POLITY / GEOGRAPHY: State direct factual context (date, treaty, place, or Article) + 3–4 high-yield connected exam facts or mini-list.
+  * For GENERAL SCIENCE: State scientific cause/reaction/law + practical remedies or discoverers with years.
+  * For LANGUAGE: State grammar rule, meaning, or usage clearly.
+- ACCESSIBLE TO WEAKER STUDENTS: Simple, clear, and direct language.
+- BALANCED MEDIUM LENGTH: Typically 3 to 6 focused lines or 3-5 structured steps/points. Neither a 1-line answer nor an essay.
+- STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', '<b>हल:</b>', 'Solution:', '<b>Solution:</b>', or 'Explanation:'. Start directly with the derivation or explanation in <p>...</p>. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'.
+
 FORMATTING RULES (PURE UNICODE & CLEAN HTML - NO LATEX):
 - NO LATEX, NO DOLLAR SIGNS: NEVER output LaTeX commands (such as \\frac, \\times, \\div, \\sqrt, \\circ) or dollar delimiters ($...$ or $$...$$)!
   * Write '×' (multiplication sign) instead of '\\times'
@@ -1634,12 +1645,10 @@ FORMATTING RULES (PURE UNICODE & CLEAN HTML - NO LATEX):
   * NEVER use $ delimiters for reasoning puzzle human names, alphabets, or positions (write P, Q, R, S, T, U, V and W, Q as plain letters, NEVER $P, Q, R$ or $W, Q$).
   * NEVER enclose normal numbers, counts, percentages, or money in dollar signs (write 40%, ₹4,800, 300, 5 washing machines, NOT $40%, $₹4800$, 5$).
   * Write variables simply as 'H = 9 (घंटा) और M = 30 (मिनट)'.
-- NO SOLUTION PREFIX LABELS & NO FILLER LABELS: NEVER start solutions with "हल:", "<b>हल:</b>", "Solution:", "<b>Solution:</b>", or "Explanation:". The mocktest application has its own built-in Solution header, so adding a label results in duplicate text. Solutions must start directly with the first sentence or derivation step in <p>...</p>. NEVER use artificial filler headers like "Key Point:", "Detailed Explanation:", "Additional Information:", or "Important Exam Point:".
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam tags, shift dates, shift times, paper citations, or book publisher labels in the question text or options!
   - Examples that MUST BE OMITTED from question/option text: "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT - I (GL) 17/06/2025 (Afternoon)", "[SSC CGL 14/07/2023 (Shift-1)]", "(Shift-2)", "(Morning)", "Youth Competition Times", "Pinnacle".
   - The question text must be PURELY the question statement!
 - If the original document is only in Hindi or only in English, TRANSLATE and generate the counterpart language so BOTH Hindi and English fields are fully populated!
-- Both solution_hi and solution_en MUST BE DETAILED, pedagogy-grade solutions suitable for student practice.
 - Respond ONLY with the JSON array inside \`\`\`json ... \`\`\` block.`;
 }
 
@@ -2008,14 +2017,14 @@ For every question, output an object in a JSON array with these exact 34 fields:
 - "option3_hi": Option 3 (C) in Hindi wrapped in <p>...</p>
 - "option4_hi": Option 4 (D) in Hindi wrapped in <p>...</p>
 - "option5_hi": Option 5 (E) in Hindi (or empty string if 4 options)
-- "solution_hi": DETAILED step-by-step pedagogical explanation in Hindi formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'हल:', '<b>हल:</b>', or 'उत्तर:' because the test portal already renders this label automatically! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+- "solution_hi": DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
 - "question_en": Question text in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
 - "option1_en": Option 1 (A) in English wrapped in <p>...</p>
 - "option2_en": Option 2 (B) in English wrapped in <p>...</p>
 - "option3_en": Option 3 (C) in English wrapped in <p>...</p>
 - "option4_en": Option 4 (D) in English wrapped in <p>...</p>
 - "option5_en": Option 5 (E) in English (or empty string if 4 options)
-- "solution_en": DETAILED step-by-step pedagogical explanation in English formatted in clean HTML (<p>[Clean step-by-step formula and mathematical calculation proof]</p>). DO NOT prefix with 'Solution:', '<b>Solution:</b>', or 'Explanation:' because the test portal already renders this label automatically! DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+- "solution_en": DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
 - "answer": Correct answer identifier (e.g. "A", "B", "C", or "D")
 - "set_name": "${setName}"
 - "difficulty_level": "Easy", "Medium", or "Hard"
@@ -2036,11 +2045,19 @@ For every question, output an object in a JSON array with these exact 34 fields:
 - "manually_review": "checked"
 - "duplicate_statistics": "Unique within this shift; duplicate check completed."
 
-CRITICAL RULES:
+CRITICAL RULES & YCT SOLUTION PATTERN (जैसा प्रश्न वैसा पैटर्न):
 1. STRICT SUBJECT RULE: The "subject" field MUST ONLY contain the academic subject name (like "Current Affairs", "Mathematics", "Reasoning", "Polity"). NEVER include exam names like "RRB", "NTPC", or "Shift" in "subject". Exam names belong strictly in "subject_level".
 2. BOTH Hindi and English fields MUST be fully populated! If the paper is only in Hindi or only in English, TRANSLATE and generate the counterpart language so NO field is left blank.
-3. NO SOLUTION PREFIX LABELS: Both solution_hi and solution_en MUST start DIRECTLY with the explanation text or derivation step wrapped in <p>...</p>. DO NOT write '<b>हल:</b>' or '<b>Solution:</b>' at the start because the portal has built-in labels! NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-4. NO LATEX, NO DOLLAR SIGNS: NEVER output LaTeX commands (like \\frac, \\times, \\sqrt, \\div, \\circ) or dollar sign delimiters ($...$ or $$...$$)!
+3. DYNAMIC PEDAGOGICAL SOLUTION PATTERN:
+   - For Math/Numericals: State given data ("दिया गया है / Given that:"), write formula in clean Unicode, show full step-by-step intermediate calculation without skipping steps so weaker students understand clearly, conclude with final value.
+   - For Reasoning: State underlying logic/rule, show step-by-step pattern verification for each term/option, conclude why option is uniquely correct.
+   - For GK/Polity/History/Geography: State direct factual context (date, treaty, place, or Article) + 3–4 high-yield connected exam facts or mini-list.
+   - For General Science: State scientific principle/reaction/mechanism + practical remedies or discoverers with years.
+   - For Language: State grammar rule, meaning, or usage clearly.
+   - Accessible to weaker students: simple and clear steps.
+   - Balanced medium length: 3 to 6 focused lines or 3-5 structured steps/points.
+4. NO SOLUTION PREFIX LABELS & NO FILLER LABELS: Both solution_hi and solution_en MUST start DIRECTLY with the explanation text wrapped in <p>...</p>. DO NOT write '<b>हल:</b>', 'हल:', '<b>Solution:</b>', or 'Solution:' because the portal has built-in labels! NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+5. NO LATEX, NO DOLLAR SIGNS: NEVER output LaTeX commands (like \\frac, \\times, \\sqrt, \\div, \\circ) or dollar sign delimiters ($...$ or $$...$$)!
    - Output all mathematical symbols and operators directly in clean Unicode and HTML:
      * Use '×' instead of '\\times'
      * Use '÷' instead of '\\div'
@@ -2051,26 +2068,115 @@ CRITICAL RULES:
      * Use '√x' instead of '\\sqrt{x}'
      * Use '(a) / (b)' or 'a / b' instead of '\\frac{a}{b}' (e.g. '(60 × 9 − 11 × 30) / 2')
      * Use '&gt;' and '&lt;' for greater-than and less-than inside HTML
-5. NO DOLLAR SIGNS ($):
+6. NO DOLLAR SIGNS ($):
    - NEVER use $ delimiters for reasoning puzzle human names, alphabets, or positions (write P, Q, R, S, T, U, V and W, Q as plain letters, NEVER $P, Q, R$ or $W, Q$).
    - NEVER enclose normal numbers, counts, percentages, or money in dollar signs! (Write 5, NOT 5$; write 60%, NOT $60%; write ₹2550, NOT $= ₹2550$ or $₹2550$).
    - NEVER write variables as "$H = 9$" or "$M = 30$" with stray dollar signs in explanatory text. Write them as "H = 9 (घंटा) और M = 30 (मिनट)".
-6. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED).
-7. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.
-8. At the very end after the JSON code block, on a new line, output:
+7. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED).
+8. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.
+9. At the very end after the JSON code block, on a new line, output:
+---STUDY_AI_COMPLETE---`;
+}
+
+/**
+ * Generate a specialized AI prompt for reference-based generation of brand-new, similar MCQs
+ * using the StudyAI Bridge extension. The questions in the image act STRICTLY AS REFERENCE.
+ */
+export function buildMockTestSimilarBridgePrompt(
+  setName = 'PYPs Shift-3',
+  pendingContext?: PendingMcqContext | null,
+  pageNumber?: number
+): string {
+  let carryOverSection = '';
+  if (pendingContext && pendingContext.pendingItems && pendingContext.pendingItems.length > 0) {
+    carryOverSection = `\n(Note: Continue generating similar practice questions matching the test syllabus).`;
+  }
+
+  return `You are an elite Competitive Exam Test-Series Architect, Question Creator, and Educator (SSC CGL, Railway RRB, Banking, UPSC, State PSC).
+
+CRITICAL MISSION - REFERENCE-ONLY MODE (NO VERBATIM COPIES):
+- The attached exam page image contains questions that you MUST USE STRICTLY AS REFERENCE AND CONCEPT BLUEPRINT!
+- ABSOLUTELY DO NOT copy, transcribe, or extract the exact questions from this image!
+- "SAME TO SAME" OR VERBATIM QUESTIONS ARE STRICTLY FORBIDDEN!
+- For each question visible on this exam page:
+  1. Deeply analyze its core academic subject, topic, concept, mathematical theorem/formula, difficulty level, and reasoning pattern.
+  2. GENERATE A BRAND NEW, UNIQUE PRACTICE MCQ based on that underlying topic/concept:
+     * For Math / Quant / Science: Create a fresh problem testing the same mathematical theorem or formula, but with COMPLETELY DIFFERENT numbers, variables, values, and scenarios. Ensure the values calculate cleanly.
+     * For GK / GS / History / Polity / Geography: Test the same historical period, constitutional article/concept, geographical feature, or scientific phenomenon with a FRESH, DISTINCT QUESTION.
+     * For Reasoning / Logic: Create a new puzzle, series, syllogism, or coding-decoding problem following the identical logic/pattern but with NEW letters, words, or arrangements.
+     * For English / Hindi Language: Test the same grammatical concept or vocabulary standard using DIFFERENT sentences and context.
+  3. Formulate 4 completely fresh, plausible options (A, B, C, D) with authentic distractors.
+  4. Rigorously solve and verify the SINGLE CORRECT ANSWER ("A", "B", "C", or "D").
+  5. Provide an exhaustive, step-by-step pedagogical solution in BOTH Hindi (<p>...</p>) and English (<p>...</p>).
+  6. Set "source_question_reference" to "Ref-Q.X (Variant)" where X corresponds to the reference question sequence on the page.${carryOverSection}
+
+STRICT REQUIREMENT: You MUST fill ALL 34 fields for EVERY question in strict JSON format.
+For every question, output an object in a JSON array with these exact 34 fields:
+- "question_r": Sequence number (1, 2, 3...)
+- "question_hi": Brand new question in Hindi wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
+- "option1_hi": Option 1 (A) in Hindi wrapped in <p>...</p>
+- "option2_hi": Option 2 (B) in Hindi wrapped in <p>...</p>
+- "option3_hi": Option 3 (C) in Hindi wrapped in <p>...</p>
+- "option4_hi": Option 4 (D) in Hindi wrapped in <p>...</p>
+- "option5_hi": Option 5 (E) in Hindi (or empty string if 4 options)
+- "solution_hi": DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
+- "question_en": Brand new question in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
+- "option1_en": Option 1 (A) in English wrapped in <p>...</p>
+- "option2_en": Option 2 (B) in English wrapped in <p>...</p>
+- "option3_en": Option 3 (C) in English wrapped in <p>...</p>
+- "option4_en": Option 4 (D) in English wrapped in <p>...</p>
+- "option5_en": Option 5 (E) in English (or empty string if 4 options)
+- "solution_en": DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
+- "answer": Correct answer identifier (e.g. "A", "B", "C", or "D")
+- "set_name": "${setName}"
+- "difficulty_level": "Easy", "Medium", or "Hard"
+- "test_date": Test date in YYYY-MM-DD or empty string ""
+- "test_time": Test time (e.g. "4:30 PM - 6:00 PM") or empty string ""
+- "subject": STRICT ACADEMIC SUBJECT ONLY! (e.g. "Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK"). NEVER put exam name/stage/shift in subject!
+- "subject_level": Exam level/stage (e.g. "RRB Level 01 Stage I 2025")
+- "figure_notes": Diagram notes if any, else empty string ""
+- "correction_notes": "Generated from reference question concept"
+- "source_pdf": Source PDF name if known, else empty string ""
+- "source_pages": Source page number, e.g. "${pageNumber || '1'}"
+- "source_question_reference": e.g. "Ref-Q.1 (Variant)"
+- "latex_check": "checked"
+- "html_check": "checked"
+- "answer_check": "checked"
+- "solution_check": "checked"
+- "hash_figure": ""
+- "manually_review": "checked"
+- "duplicate_statistics": "Unique generated variant based on reference concept."
+
+CRITICAL RULES & YCT SOLUTION PATTERN (जैसा प्रश्न वैसा पैटर्न):
+1. STRICT SUBJECT RULE: The "subject" field MUST ONLY contain the academic subject name (like "Current Affairs", "Mathematics", "Reasoning", "Polity").
+2. BOTH Hindi and English fields MUST be fully populated!
+3. DYNAMIC PEDAGOGICAL SOLUTION PATTERN:
+   - For Math/Numericals: State given data ("दिया गया है / Given that:"), formula in clean Unicode, complete step-by-step intermediate calculation without skipping steps so weaker students understand easily, conclude with final value.
+   - For Reasoning: State core rule/logic, show step-by-step verification, conclude why option is uniquely correct.
+   - For GK/Polity/History/Geography: State direct factual context (date, treaty, place, or Article) + 3–4 high-yield connected exam facts or mini-list.
+   - For General Science: State scientific principle/reaction/mechanism + practical remedies or discoverers with years.
+   - For Language: State grammar rule, meaning, or usage clearly.
+   - Accessible to weaker students: clear, step-by-step reasoning.
+   - Balanced medium length: 3 to 6 focused lines or 3-5 structured steps/points.
+4. NO SOLUTION PREFIX LABELS & NO FILLER LABELS: Both solution_hi and solution_en MUST start DIRECTLY with the explanation text wrapped in <p>...</p>. DO NOT write '<b>हल:</b>', 'हल:', '<b>Solution:</b>', or 'Solution:'! NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
+5. NO LATEX, NO DOLLAR SIGNS: Output all mathematical symbols and operators directly in clean Unicode and HTML (use '×', '÷', '−', '≤', '≥', '≠', '°', '√x', '(a) / (b)', '&gt;', '&lt;').
+6. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.
+7. At the very end after the JSON code block, on a new line, output:
 ---STUDY_AI_COMPLETE---`;
 }
 
 /**
  * Extract MockTest MCQs from a base64 image using direct Gemini API (/api/mocktest-extract or /api/extract)
  * with optional carry-over pending context from the preceding page.
+ * When generateSimilar is true, questions on the page are used ONLY as reference to generate brand new MCQs.
  */
 export async function extractMockTestWithDirectApi(
   base64Image: string,
   setName: string = 'Mock Test Paper',
   startIndex: number = 1,
   pendingContext?: PendingMcqContext | null,
-  pageNumber?: number
+  pageNumber?: number,
+  generateSimilar: boolean = false
 ): Promise<MockTestMcqItem[]> {
   const settings = await getAiSettings();
   const headers: Record<string, string> = {
@@ -2089,7 +2195,8 @@ export async function extractMockTestWithDirectApi(
         base64Image,
         setName,
         pendingContext: pendingContext || undefined,
-        pageNumber: pageNumber || undefined
+        pageNumber: pageNumber || undefined,
+        generateSimilar
       })
     });
 
@@ -2100,12 +2207,25 @@ export async function extractMockTestWithDirectApi(
         const parsed = parseAiOutputToMockTestItems(rawText, setName, startIndex);
         if (parsed.length > 0) return parsed;
       }
+      if (Array.isArray(data.items) && data.items.length > 0) {
+        return data.items.map((it: any, idx: number) => cleanMockTestItem({
+          ...it,
+          question_r: startIndex + idx
+        }));
+      }
     }
   } catch (e) {
-    console.warn('/api/mocktest-extract error, attempting /api/extract fallback:', e);
+    console.warn('/api/mocktest-extract error:', e);
+    if (generateSimilar) {
+      throw e;
+    }
   }
 
-  // Fallback to /api/extract
+  if (generateSimilar) {
+    throw new Error('Failed to generate similar questions from reference page. Please check Gemini API connection.');
+  }
+
+  // Fallback to /api/extract only for exact extraction mode
   const extractRes = await fetch('/api/extract', {
     method: 'POST',
     headers,
@@ -2128,6 +2248,62 @@ export async function extractMockTestWithDirectApi(
   const data = await extractRes.json();
   const elements = data.elements || [];
   return convertElementsToMockTestItems(elements, setName);
+}
+
+/**
+ * Generate a brand-new similar question variant based on an existing MCQ item.
+ * The input item serves strictly as conceptual reference (no verbatim duplicate).
+ */
+export async function generateSimilarQuestionItem(
+  item: MockTestMcqItem
+): Promise<MockTestMcqItem> {
+  const settings = await getAiSettings();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (settings.apiKey) {
+    headers['x-user-gemini-key'] = settings.apiKey.trim();
+  }
+
+  const response = await fetch('/api/mocktest-generate-similar-item', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ item })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to generate similar question');
+  }
+
+  const data = await response.json();
+  return cleanMockTestItem(data.item);
+}
+
+/**
+ * Batch generate new similar practice questions for an array of reference items.
+ */
+export async function generateSimilarBatchFromItems(
+  items: MockTestMcqItem[],
+  onProgress?: (message: string) => void
+): Promise<MockTestMcqItem[]> {
+  const result: MockTestMcqItem[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    onProgress?.(`Generating similar question ${i + 1}/${items.length} (Concept: ${item.subject || 'General'})...`);
+    try {
+      const similar = await generateSimilarQuestionItem(item);
+      result.push({
+        ...similar,
+        question_r: i + 1
+      });
+    } catch (err) {
+      console.warn(`Failed to generate similar item for Q#${item.question_r}:`, err);
+      // Keep existing item if generation failed
+      result.push(item);
+    }
+  }
+  return result;
 }
 
 /**

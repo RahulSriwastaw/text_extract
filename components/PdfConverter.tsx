@@ -819,7 +819,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${fileName}.docx`;
+      const chosenName = (fileName || 'document').trim();
+      const safeBase = chosenName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'document';
+      const docxName = safeBase.toLowerCase().endsWith('.docx') ? safeBase : `${safeBase}.docx`;
+      a.download = docxName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -838,7 +841,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${fileName}.txt`;
+    const chosenName = (fileName || 'document').trim();
+    const safeBase = chosenName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'document';
+    const txtName = safeBase.toLowerCase().endsWith('.txt') ? safeBase : `${safeBase}.txt`;
+    a.download = txtName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1252,6 +1258,20 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                         >
                                             {copySuccess ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                                         </button>
+                                        <div 
+                                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] border border-white/[0.08] hover:border-[#FF6B2B]/40 focus-within:border-[#FF6B2B] rounded-xl transition-all"
+                                            title="Output file name. Rename here before download!"
+                                        >
+                                            <FileText className="w-3.5 h-3.5 text-[#FF884D] shrink-0" />
+                                            <input 
+                                                type="text"
+                                                value={fileName}
+                                                onChange={(e) => setFileName(e.target.value)}
+                                                placeholder="Rename file..."
+                                                className="w-24 sm:w-44 bg-transparent text-xs text-white placeholder:text-slate-500 font-medium focus:outline-none"
+                                            />
+                                            <span className="text-[10px] text-slate-500 font-bold shrink-0">.docx</span>
+                                        </div>
                                         <button 
                                             onClick={downloadDocx}
                                             className="px-3.5 py-2 text-white bg-gradient-to-r from-blue-600/20 to-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm"

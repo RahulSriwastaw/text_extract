@@ -34,3 +34,4 @@ firebase-applet-config.json
 !public/*.zip
 test_*
 unzipped_*
+scratch/

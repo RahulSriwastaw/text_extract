@@ -3,7 +3,7 @@ import {
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
-  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare
+  ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -201,9 +201,48 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [repairProgress, setRepairProgress] = useState<{ current: number; total: number } | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Inline editing & Image Zoom modal
+  // Inline editing & High-Res Image Zoom modal with 500% Zoom, Pan & Page Navigation
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
+  const [zoomPageIndex, setZoomPageIndex] = useState<number | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Keyboard navigation & zoom for Lightbox modal
+  useEffect(() => {
+    if (zoomPageIndex === null) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setZoomPageIndex(null);
+        setZoomLevel(1);
+        setPanOffset({ x: 0, y: 0 });
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        setZoomPageIndex(prev => (prev !== null && prev > 0 ? prev - 1 : prev));
+        setPanOffset({ x: 0, y: 0 });
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault();
+        setZoomPageIndex(prev => (prev !== null && prev < pages.length - 1 ? prev + 1 : prev));
+        setPanOffset({ x: 0, y: 0 });
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        setZoomLevel(prev => Math.min(5, Number((prev + 0.5).toFixed(2))));
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        setZoomLevel(prev => Math.max(0.5, Number((prev - 0.5).toFixed(2))));
+      } else if (e.key === '0') {
+        e.preventDefault();
+        setZoomLevel(1);
+        setPanOffset({ x: 0, y: 0 });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [zoomPageIndex, pages.length]);
   const [activeChatQuestion, setActiveChatQuestion] = useState<MockTestMcqItem | null>(null);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
   const [addQuestionTargetPage, setAddQuestionTargetPage] = useState<number>(1);
@@ -2263,7 +2302,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                         {/* Page Image Preview with Zoom on Click */}
                         <div
                           className="relative group rounded-xl overflow-hidden border border-white/[0.08] bg-black cursor-pointer aspect-[3/4] max-h-[380px] flex items-center justify-center shadow-inner"
-                          onClick={() => setZoomImageUrl(page.imageUrl)}
+                          onClick={() => { setZoomPageIndex(idx); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
                           title="Click to view full image in lightbox"
                         >
                           <img
@@ -3164,31 +3203,275 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         </div>
       )}
 
-      {/* Lightbox / Zoom Modal for Original Page Image */}
-      {zoomImageUrl && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
-          onClick={() => setZoomImageUrl(null)}
-        >
+      {/* High-Res Page Lightbox Modal: 500% Zoom, Drag-to-Pan, Prev/Next Page Navigation */}
+      {zoomPageIndex !== null && pages[zoomPageIndex] && (() => {
+        const activePage = pages[zoomPageIndex];
+        const canPrev = zoomPageIndex > 0;
+        const canNext = zoomPageIndex < pages.length - 1;
+
+        const handleMouseDown = (e: React.MouseEvent) => {
+          setIsDragging(true);
+          dragStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+        };
+
+        const handleMouseMove = (e: React.MouseEvent) => {
+          if (!isDragging) return;
+          setPanOffset({
+            x: e.clientX - dragStartRef.current.x,
+            y: e.clientY - dragStartRef.current.y
+          });
+        };
+
+        const handleMouseUp = () => {
+          setIsDragging(false);
+        };
+
+        const handleWheel = (e: React.WheelEvent) => {
+          e.stopPropagation();
+          const delta = e.deltaY < 0 ? 0.25 : -0.25;
+          setZoomLevel(prev => Math.max(0.5, Math.min(5, Number((prev + delta).toFixed(2)))));
+        };
+
+        const handleDoubleClick = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (zoomLevel === 1) {
+            setZoomLevel(2.5);
+          } else {
+            setZoomLevel(1);
+            setPanOffset({ x: 0, y: 0 });
+          }
+        };
+
+        return (
           <div 
-            className="relative max-w-5xl max-h-[92vh] bg-black rounded-2xl overflow-hidden border border-white/[0.15] shadow-2xl p-2 flex flex-col items-center"
-            onClick={e => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col select-none overflow-hidden animate-fade-in"
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
           >
-            <button 
-              type="button" 
-              onClick={() => setZoomImageUrl(null)} 
-              className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/80 text-white hover:text-amber-400 border border-white/[0.2] transition-colors"
+            {/* Top Control Bar */}
+            <div className="flex items-center justify-between px-5 py-3 bg-slate-950/90 border-b border-white/[0.1] z-20 shrink-0">
+              {/* Page Indicator & Title */}
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-black font-extrabold text-xs shadow-md shadow-amber-500/20">
+                  Page {activePage.pageNumber} of {pages.length}
+                </span>
+                <span className="text-xs text-slate-300 font-medium hidden sm:inline truncate max-w-xs">
+                  {setName || 'Mock Test Examination Paper'}
+                </span>
+                <span className="text-[11px] text-slate-400 hidden md:inline">
+                  (Drag to Move, Scroll to Zoom up to 500%)
+                </span>
+              </div>
+
+              {/* Zoom Controls Bar (Up to 500%) */}
+              <div className="flex items-center gap-1.5 bg-white/[0.06] p-1 rounded-xl border border-white/[0.1]">
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel(prev => Math.max(0.5, Number((prev - 0.5).toFixed(2))))}
+                  disabled={zoomLevel <= 0.5}
+                  className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/[0.1] transition-all disabled:opacity-30"
+                  title="Zoom Out (Hotkey: -)"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+
+                <div className="px-2.5 py-0.5 text-xs font-mono font-extrabold text-amber-300 min-w-[54px] text-center bg-black/40 rounded-lg">
+                  {Math.round(zoomLevel * 100)}%
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel(prev => Math.min(5, Number((prev + 0.5).toFixed(2))))}
+                  disabled={zoomLevel >= 5}
+                  className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/[0.1] transition-all disabled:opacity-30"
+                  title="Zoom In (Hotkey: +)"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+
+                <div className="w-[1px] h-4 bg-white/[0.15] mx-0.5" />
+
+                {/* Quick Zoom Presets */}
+                <button
+                  type="button"
+                  onClick={() => { setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all ${
+                    zoomLevel === 1 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Reset to 100% Fit"
+                >
+                  100%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel(2.5)}
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all hidden sm:block ${
+                    zoomLevel === 2.5 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Zoom 250%"
+                >
+                  250%
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoomLevel(5)}
+                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all ${
+                    zoomLevel === 5 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Maximum 500% Zoom"
+                >
+                  500%
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.1] transition-all"
+                  title="Reset Zoom and Center (Hotkey: 0)"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Close Button */}
+              <div className="flex items-center gap-2">
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setZoomPageIndex(null);
+                    setZoomLevel(1);
+                    setPanOffset({ x: 0, y: 0 });
+                  }} 
+                  className="p-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white border border-white/[0.1] transition-all flex items-center gap-1.5 text-xs font-semibold"
+                  title="Close (Esc)"
+                >
+                  <X className="w-4 h-4" />
+                  <span className="hidden sm:inline">Close (Esc)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Main Viewport */}
+            <div 
+              className={`flex-1 relative overflow-hidden flex items-center justify-center p-2 ${
+                isDragging ? 'cursor-grabbing' : 'cursor-grab'
+              }`}
+              onMouseDown={handleMouseDown}
+              onWheel={handleWheel}
+              onDoubleClick={handleDoubleClick}
             >
-              <X className="w-5 h-5" />
-            </button>
-            <img 
-              src={zoomImageUrl} 
-              alt="Page High-Res Zoom" 
-              className="max-w-full max-h-[86vh] object-contain rounded-lg mx-auto" 
-            />
+              {/* Floating Previous Page Button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (canPrev) {
+                    setZoomPageIndex(zoomPageIndex - 1);
+                    setPanOffset({ x: 0, y: 0 });
+                  }
+                }}
+                disabled={!canPrev}
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-30 p-3 rounded-2xl bg-black/80 hover:bg-amber-500 border border-white/[0.15] text-white hover:text-black shadow-2xl transition-all disabled:opacity-20 disabled:pointer-events-none group"
+                title="Previous Page (Hotkey: Left Arrow ←)"
+              >
+                <ChevronLeft className="w-6 h-6 group-hover:-translate-x-0.5 transition-transform" />
+              </button>
+
+              {/* Floating Next Page Button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (canNext) {
+                    setZoomPageIndex(zoomPageIndex + 1);
+                    setPanOffset({ x: 0, y: 0 });
+                  }
+                }}
+                disabled={!canNext}
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-30 p-3 rounded-2xl bg-black/80 hover:bg-amber-500 border border-white/[0.15] text-white hover:text-black shadow-2xl transition-all disabled:opacity-20 disabled:pointer-events-none group"
+                title="Next Page (Hotkey: Right Arrow →)"
+              >
+                <ChevronRight className="w-6 h-6 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+
+              {/* Zoomable & Draggable Page Image */}
+              <div 
+                className="transition-transform duration-75 ease-out select-none"
+                style={{
+                  transform: `translate3d(${panOffset.x}px, ${panOffset.y}px, 0) scale(${zoomLevel})`,
+                  transformOrigin: 'center center'
+                }}
+              >
+                <img 
+                  src={activePage.imageUrl} 
+                  alt={`Page ${activePage.pageNumber} High-Res`} 
+                  draggable={false}
+                  className="max-w-[85vw] max-h-[82vh] object-contain rounded-lg shadow-2xl pointer-events-none border border-white/[0.1]" 
+                />
+              </div>
+
+              {/* Bottom Quick Page Thumbnails Strip */}
+              <div 
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-slate-950/90 border border-white/[0.15] shadow-2xl backdrop-blur-md max-w-[90vw] overflow-x-auto no-scrollbar"
+                onClick={e => e.stopPropagation()}
+                onMouseDown={e => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (canPrev) {
+                      setZoomPageIndex(zoomPageIndex - 1);
+                      setPanOffset({ x: 0, y: 0 });
+                    }
+                  }}
+                  disabled={!canPrev}
+                  className="px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs font-bold text-slate-300 disabled:opacity-30 flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Prev</span>
+                </button>
+
+                <div className="flex items-center gap-1 px-1 overflow-x-auto max-w-[60vw]">
+                  {pages.map((p, pIdx) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setZoomPageIndex(pIdx);
+                        setPanOffset({ x: 0, y: 0 });
+                      }}
+                      className={`w-7 h-7 rounded-lg text-xs font-extrabold transition-all shrink-0 ${
+                        pIdx === zoomPageIndex
+                          ? 'bg-amber-500 text-black shadow-md shadow-amber-500/30'
+                          : 'bg-white/[0.04] text-slate-400 hover:text-white hover:bg-white/[0.1]'
+                      }`}
+                      title={`Go to Page ${p.pageNumber}`}
+                    >
+                      {p.pageNumber}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (canNext) {
+                      setZoomPageIndex(zoomPageIndex + 1);
+                      setPanOffset({ x: 0, y: 0 });
+                    }
+                  }}
+                  disabled={!canNext}
+                  className="px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs font-bold text-slate-300 disabled:opacity-30 flex items-center gap-1"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Modals for Settings and Connect */}
       <GeminiSettingsModal

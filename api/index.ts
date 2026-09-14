@@ -1427,6 +1427,27 @@ function cleanServerMocktestText(text: string): string {
   res = res.replace(/[\x09\b]imes/g, '\\times');
   res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
 
+  // Corrupted \r + ightarrow or literal "ightarrow" from JSON unescaping
+  // e.g. "FISTightarrow3962" -> "FIST → 3962", "3, 4, 5ightarrow" -> "3, 4, 5 → "
+  res = res.replace(/[\r\x0d]?\\?r?ightarrow\b/gi, ' → ');
+  res = res.replace(/([a-zA-Z0-9,])\s*ightarrow\s*([a-zA-Z0-9])/gi, '$1 → $2');
+  res = res.replace(/([a-zA-Z0-9,])\s*ightarrow\b/gi, '$1 → ');
+  res = res.replace(/\bightarrow\b/gi, '→');
+
+  // Standardize LaTeX arrows to clean Unicode arrows
+  res = res.replace(/\\rightarrow\b/g, ' → ');
+  res = res.replace(/\\Rightarrow\b/g, ' ⇒ ');
+  res = res.replace(/\\leftarrow\b/g, ' ← ');
+  res = res.replace(/\\Leftarrow\b/g, ' ⇐ ');
+  res = res.replace(/\\to\b/g, ' → ');
+
+  // Clean LaTeX spacing junk \! (negative thin space)
+  res = res.replace(/\\!/g, '');
+
+  // Convert symbol-series LaTeX commands to clean Unicode symbols (e.g. \bigwedge, \wedge -> ∧)
+  res = res.replace(/\\(?:big)?wedge\b/gi, '∧');
+  res = res.replace(/\\(?:big)?vee\b/gi, '∨');
+
   // Fix double-escaped backslashes (\\frac -> \frac, \\sqrt -> \sqrt)
   res = res.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
 
@@ -1540,6 +1561,40 @@ function stripServerSolutionPrefix(text: string): string {
   return res.trim();
 }
 
+function prepareAiJsonString(raw: string): string {
+  if (!raw) return '';
+  let s = raw.trim();
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // Convert arrow LaTeX commands to Unicode so \r is not interpreted as carriage return by JSON.parse
+  s = s.replace(/(?<!\\)\\rightarrow\b/gi, ' → ');
+  s = s.replace(/(?<!\\)\\Rightarrow\b/g, ' ⇒ ');
+  s = s.replace(/(?<!\\)\\leftarrow\b/gi, ' ← ');
+  s = s.replace(/(?<!\\)\\Leftarrow\b/g, ' ⇐ ');
+  s = s.replace(/(?<!\\)\\to\b/g, ' → ');
+
+  // Convert symbol-series LaTeX commands to clean Unicode
+  s = s.replace(/(?<!\\)\\(?:big)?wedge\b/gi, '∧');
+  s = s.replace(/(?<!\\)\\(?:big)?vee\b/gi, '∨');
+  s = s.replace(/(?<!\\)\\!/g, '');
+
+  // Escape single-backslash math LaTeX commands so JSON.parse doesn't choke or corrupt \f, \t, etc.
+  s = s
+    .replace(/(?<!\\)\\frac/g, '\\\\frac')
+    .replace(/(?<!\\)\\times/g, '\\\\times')
+    .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
+    .replace(/(?<!\\)\\text/g, '\\\\text')
+    .replace(/(?<!\\)\\div/g, '\\\\div')
+    .replace(/(?<!\\)\\pm/g, '\\\\pm')
+    .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
+    .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
+    .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
+    .replace(/(?<!\\)\\neq/g, '\\\\neq')
+    .replace(/(?<!\\)\\approx/g, '\\\\approx');
+
+  return s;
+}
+
 function safeParseAiJson(rawJson: string): any {
   if (!rawJson || !rawJson.trim()) return [];
 
@@ -1583,18 +1638,7 @@ function safeParseAiJson(rawJson: string): any {
   };
 
   for (const chunk of chunksToScan) {
-    const safeChunk = chunk
-      .replace(/(?<!\\)\\frac/g, '\\\\frac')
-      .replace(/(?<!\\)\\times/g, '\\\\times')
-      .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
-      .replace(/(?<!\\)\\text/g, '\\\\text')
-      .replace(/(?<!\\)\\div/g, '\\\\div')
-      .replace(/(?<!\\)\\pm/g, '\\\\pm')
-      .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
-      .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
-      .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
-      .replace(/(?<!\\)\\neq/g, '\\\\neq')
-      .replace(/(?<!\\)\\approx/g, '\\\\approx');
+    const safeChunk = prepareAiJsonString(chunk);
 
     try {
       const p = JSON.parse(safeChunk);
@@ -1662,33 +1706,8 @@ function safeParseAiJson(rawJson: string): any {
 
 function safeParseAiJsonObject(rawJson: string): any {
   if (!rawJson || !rawJson.trim()) return {};
-  const text = rawJson.trim();
 
-  // 1. Direct parse after stripping markdown fences
-  const cleanFence = text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-
-  try {
-    const obj = JSON.parse(cleanFence);
-    if (Array.isArray(obj)) return obj[0] || {};
-    if (typeof obj === 'object' && obj !== null) return obj;
-  } catch (_) {}
-
-  // 2. Escape single-backslash LaTeX commands
-  const safeChunk = cleanFence
-    .replace(/(?<!\\)\\frac/g, '\\\\frac')
-    .replace(/(?<!\\)\\times/g, '\\\\times')
-    .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
-    .replace(/(?<!\\)\\text/g, '\\\\text')
-    .replace(/(?<!\\)\\div/g, '\\\\div')
-    .replace(/(?<!\\)\\pm/g, '\\\\pm')
-    .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
-    .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
-    .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
-    .replace(/(?<!\\)\\neq/g, '\\\\neq')
-    .replace(/(?<!\\)\\approx/g, '\\\\approx');
+  const safeChunk = prepareAiJsonString(rawJson);
 
   try {
     const obj = JSON.parse(safeChunk);
@@ -1696,7 +1715,7 @@ function safeParseAiJsonObject(rawJson: string): any {
     if (typeof obj === 'object' && obj !== null) return obj;
   } catch (_) {}
 
-  // 3. Fallback to safeParseAiJson
+  // Fallback to safeParseAiJson
   const list = safeParseAiJson(rawJson);
   if (Array.isArray(list) && list.length > 0) {
     return list[0];
@@ -1713,6 +1732,13 @@ const STRICT_MATH_AND_TEXT_PROMPT_RULES = `
   * Operators & symbols: $\\times$, $\\div$, $\\pm$, $\\le$, $\\ge$, $\\neq$, $\\approx$, $\\degree$, $\\alpha$, $\\beta$, $\\theta$, $\\pi$, $\\Delta$, $\\infty$.
   * CRITICAL: NEVER output naked LaTeX commands like \\frac, \\sqrt, \\times, or \\text in plain text without enclosing them in $...$!
   * CRITICAL: If you use \\text{...}, it MUST ALWAYS be inside $...$ with proper spacing: e.g. $\\text{Speed} = \\frac{\\text{Distance}}{\\text{Time}}$ or $45\\text{ litres}$.
+- REASONING ARROWS & SYMBOL SERIES RULE (CRITICAL):
+  * For Coding-Decoding, Letter Puzzles, Series steps, or Mappings:
+    ALWAYS use standard Unicode arrows: '→' or '⇒' (e.g. "FIST → 3962", "SOFT → 3562", "F → 3, I → 9", "3, 4, 5 → preceded by...").
+    NEVER write LaTeX '\\rightarrow', '\\Rightarrow', or 'ightarrow'!
+  * For Character / Symbol / Number Series questions (संख्या-प्रतीक श्रृंखला):
+    ALWAYS use standard keyboard & Unicode symbols: '*', '^', '∧', '#', '@', '&', '$', '%', '!', '?', ';'.
+    NEVER output LaTeX commands like '\\bigwedge', '\\wedge', '\\vee', '\\star', or '\\!' in the series!
 - WORD SPACING & PLAIN TEXT RULE (CRITICAL - NEVER CONCATENATE WORDS):
   * ALWAYS maintain natural, clear spacing between words, numbers, and variables!
   * NEVER glue words to numbers or variables!

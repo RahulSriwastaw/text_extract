@@ -198,7 +198,28 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
   }
   clean = normalizedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
-  // 6. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
+  // 6. Clean corrupted \r + ightarrow or literal "ightarrow" from JSON unescaping
+  // e.g. "FISTightarrow3962" -> "FIST → 3962", "3, 4, 5ightarrow" -> "3, 4, 5 → "
+  clean = clean.replace(/[\r\x0d]?\\?r?ightarrow\b/gi, ' → ');
+  clean = clean.replace(/([a-zA-Z0-9,])\s*ightarrow\s*([a-zA-Z0-9])/gi, '$1 → $2');
+  clean = clean.replace(/([a-zA-Z0-9,])\s*ightarrow\b/gi, '$1 → ');
+  clean = clean.replace(/\bightarrow\b/gi, '→');
+
+  // Standardize LaTeX arrows to clean Unicode arrows
+  clean = clean.replace(/\\rightarrow\b/g, ' → ');
+  clean = clean.replace(/\\Rightarrow\b/g, ' ⇒ ');
+  clean = clean.replace(/\\leftarrow\b/g, ' ← ');
+  clean = clean.replace(/\\Leftarrow\b/g, ' ⇐ ');
+  clean = clean.replace(/\\to\b/g, ' → ');
+
+  // Clean LaTeX spacing junk \! (negative thin space)
+  clean = clean.replace(/\\!/g, '');
+
+  // Convert symbol-series LaTeX commands to clean Unicode symbols (e.g. \bigwedge, \wedge -> ∧)
+  clean = clean.replace(/\\(?:big)?wedge\b/gi, '∧');
+  clean = clean.replace(/\\(?:big)?vee\b/gi, '∨');
+
+  // 7. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
   const parts = clean.split('$');
   for (let i = 0; i < parts.length; i += 2) {
     let part = parts[i];
@@ -223,14 +244,14 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
   }
   clean = parts.join('$');
 
-  // 7. Protect Indian Rupee currency ₹ from math dollars
+  // 8. Protect Indian Rupee currency ₹ from math dollars
   clean = clean.replace(/\$\s*=\s*₹/g, '= ₹');
   clean = clean.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
   clean = clean.replace(/\$\s*₹/g, '₹');
   clean = clean.replace(/₹\s*\$/g, '₹');
   clean = clean.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
 
-  // 8. Simplify options or short text with stray $: e.g. "$420 litres" or "$405$ litres"
+  // 9. Simplify options or short text with stray $: e.g. "$420 litres" or "$405$ litres"
   clean = clean.replace(/<p>\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)<\/p>/gi, '<p>$1 $2</p>');
   clean = clean.replace(/^\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)$/gi, '$1 $2');
   if (/^\s*<p>\s*\$\s*(\d+[\s\S]*)<\/p>\s*$/i.test(clean) && (clean.match(/\$/g) || []).length === 1) {

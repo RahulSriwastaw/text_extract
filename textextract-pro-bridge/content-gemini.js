@@ -770,30 +770,57 @@
       .replace(/(^|\n)\s*json\s*\n\s*(\[)/gi, "$1$2")
       .replace(/^json\s*/i, "")
       .trim();
-    const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fence) raw = fence[1].trim();
-    else {
-      const open = raw.match(/```(?:json)?\s*([\s\S]+)$/i);
-      if (open) raw = open[1].trim();
+
+    const candidates = [];
+    const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
+    let m;
+    while ((m = fenceRe.exec(raw)) !== null) {
+      if (m[1] && m[1].trim()) candidates.push(m[1].trim());
     }
-    const a0 = raw.indexOf("[");
-    if (a0 >= 0) raw = raw.slice(a0);
-    const repaired = repairJsonStringNewlines(raw);
-    const a1 = repaired.lastIndexOf("]");
-    if (repaired.startsWith("[") && a1 > 0) {
-      const slice = repaired.slice(0, a1 + 1);
-      const parsed = tryParseJsonLoose(slice);
-      if (Array.isArray(parsed) && parsed.some(isValidMcqObj)) {
-        return parsed.filter(isValidMcqObj);
+    if (!candidates.length) {
+      const open = raw.match(/```(?:json)?\s*([\s\S]+)$/i);
+      if (open) candidates.push(open[1].trim());
+      else candidates.push(raw);
+    }
+
+    const allQuestions = [];
+    const seenSignatures = new Set();
+
+    for (const chunk of candidates) {
+      const a0 = chunk.indexOf("[");
+      const working = a0 >= 0 ? chunk.slice(a0) : chunk;
+      const repaired = repairJsonStringNewlines(working);
+      const a1 = repaired.lastIndexOf("]");
+      if (repaired.startsWith("[") && a1 > 0) {
+        const slice = repaired.slice(0, a1 + 1);
+        const parsed = tryParseJsonLoose(slice);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (isValidMcqObj(item)) {
+              const sig = (item.question_hi || item.question_en || item.question || item.content || item.question_r || JSON.stringify(item)).slice(0, 60);
+              if (!seenSignatures.has(sig)) {
+                seenSignatures.add(sig);
+                allQuestions.push(item);
+              }
+            }
+          }
+        }
+      }
+
+      const objs = extractBalancedObjects(repaired);
+      for (const o of objs) {
+        const p = tryParseJsonLoose(o);
+        if (p && isValidMcqObj(p)) {
+          const sig = (p.question_hi || p.question_en || p.question || p.content || p.question_r || JSON.stringify(p)).slice(0, 60);
+          if (!seenSignatures.has(sig)) {
+            seenSignatures.add(sig);
+            allQuestions.push(p);
+          }
+        }
       }
     }
-    const objs = extractBalancedObjects(repaired);
-    const out = [];
-    for (const o of objs) {
-      const p = tryParseJsonLoose(o);
-      if (p && isValidMcqObj(p)) out.push(p);
-    }
-    return out;
+
+    return allQuestions;
   }
 
   function extractJsonCandidate(text) {

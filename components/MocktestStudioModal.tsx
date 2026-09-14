@@ -2,10 +2,13 @@ import React, { useState, useMemo, useRef } from 'react';
 import { 
   X, Download, Sparkles, Plus, Trash2, Copy, Check, FileSpreadsheet, 
   Upload, Eye, Edit3, ChevronDown, ChevronUp, AlertCircle, AlertTriangle,
-  CheckCircle2, Loader2, BookOpen, Layers, ArrowUpDown
+  CheckCircle2, Loader2, BookOpen, Layers, ArrowUpDown, MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MockTestMcqItem, QuestionType, DifficultyLevel } from '../types';
+import { MocktestAiChatModal } from './MocktestAiChatModal';
+import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
+import { LatexRenderer } from './MocktestExtractor';
 import { 
   downloadMockTestCsv, 
   serializeMockTestToCsv, 
@@ -44,6 +47,11 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
   const [isRepairingAll, setIsRepairingAll] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLevel>('medium');
+  const [activeChatQuestion, setActiveChatQuestion] = useState<MockTestMcqItem | null>(null);
+  const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview');
+  const [cardMode, setCardMode] = useState<Record<string, 'preview' | 'edit'>>({});
+  const isCardEditing = (id: string) => (cardMode[id] !== undefined ? cardMode[id] === 'edit' : viewMode === 'edit');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync initialItems if provided and local items are empty
@@ -381,6 +389,45 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                 Add Q
               </button>
 
+              <button
+                onClick={() => setShowAddQuestionModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                title="Add question via AI prompt or paste screenshot (Ctrl+V)"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>AI Add / Paste</span>
+              </button>
+
+              {/* KaTeX Preview vs Source Edit Toggle (for Cards) */}
+              {activeTab === 'cards' && (
+                <div className="flex items-center bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.06]">
+                  <button
+                    onClick={() => setViewMode('preview')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      viewMode === 'preview'
+                        ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-300 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Render mathematical equations with KaTeX & formatted HTML"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-amber-400" />
+                    <span>KaTeX View</span>
+                  </button>
+                  <button
+                    onClick={() => setViewMode('edit')}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                      viewMode === 'edit'
+                        ? 'bg-white/[0.1] text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Direct edit raw text, HTML tags, and LaTeX commands"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Edit Source</span>
+                  </button>
+                </div>
+              )}
+
               {/* View Switcher: Cards vs Table */}
               <div className="flex items-center bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.06]">
                 <button
@@ -582,6 +629,44 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                             )}
                           </button>
 
+                          {/* AI Chat & Fix Button */}
+                          <button
+                            type="button"
+                            onClick={() => setActiveChatQuestion(item)}
+                            className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-violet-600/30 to-indigo-600/30 hover:from-violet-600/50 hover:to-indigo-600/50 border border-violet-500/30 text-violet-300 hover:text-white rounded-lg text-xs font-semibold transition-all shadow-sm"
+                            title="Chat with AI to fix, modify, re-calculate, or improve this question"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-violet-400" />
+                            <span>AI Chat</span>
+                          </button>
+
+                          {/* Individual Card Edit vs KaTeX Preview Toggle */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = isCardEditing(item.id);
+                              setCardMode(prev => ({ ...prev, [item.id]: cur ? 'preview' : 'edit' }));
+                            }}
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
+                              isCardEditing(item.id)
+                                ? 'bg-blue-500/15 border-blue-500/30 text-blue-300'
+                                : 'bg-white/[0.04] border-white/[0.08] text-slate-300 hover:text-white'
+                            }`}
+                            title={isCardEditing(item.id) ? 'Switch to rendered KaTeX preview' : 'Edit raw source'}
+                          >
+                            {isCardEditing(item.id) ? (
+                              <>
+                                <Eye className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Preview</span>
+                              </>
+                            ) : (
+                              <>
+                                <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                                <span>Edit</span>
+                              </>
+                            )}
+                          </button>
+
                           <button
                             onClick={() => handleDeleteItem(item.id)}
                             className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
@@ -628,7 +713,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                         </div>
                       )}
 
-                      {/* Bilingual Side-by-Side Editor & Preview */}
+                      {/* Bilingual Side-by-Side Editor & KaTeX Preview */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                         {/* Left: Hindi Side */}
                         <div className="flex flex-col gap-2.5 bg-white/[0.02] p-3 rounded-xl border border-white/[0.04]">
@@ -637,59 +722,103 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
                               Hindi Version (question_hi)
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono">HTML & LaTeX</span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {isCardEditing(item.id) ? 'Edit Mode' : 'KaTeX Rendered'}
+                            </span>
                           </div>
 
-                          {/* Question Text Area */}
-                          <textarea
-                            rows={3}
-                            value={item.question_hi}
-                            onChange={(e) => handleUpdateItem(item.id, { question_hi: e.target.value })}
-                            placeholder="<p>यहाँ हिंदी प्रश्न लिखें...</p>"
-                            className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-[#FF6B2B]/60 custom-scrollbar"
-                          />
+                          {isCardEditing(item.id) ? (
+                            <textarea
+                              rows={3}
+                              value={item.question_hi}
+                              onChange={(e) => handleUpdateItem(item.id, { question_hi: e.target.value })}
+                              placeholder="<p>यहाँ हिंदी प्रश्न लिखें...</p>"
+                              className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-[#FF6B2B]/60 custom-scrollbar"
+                            />
+                          ) : (
+                            <div className="p-3 bg-black/40 rounded-xl border border-white/[0.06] text-slate-100 min-h-[52px]">
+                              <LatexRenderer content={item.question_hi || '<p>प्रश्न खाली है</p>'} className="text-slate-100 text-xs sm:text-sm leading-relaxed" />
+                            </div>
+                          )}
 
                           {/* Hindi Options 1 to 4 */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {(['option1_hi', 'option2_hi', 'option3_hi', 'option4_hi'] as const).map((key, optIdx) => {
                               const label = String.fromCharCode(65 + optIdx);
+                              const optNum = String(optIdx + 1);
+                              const isCorrect = item.answer === label || item.answer === optNum || item.answer?.includes(label) || item.answer?.includes(optNum);
                               const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
                               const isBlank = !valClean || valClean.toLowerCase() === 'blank';
 
+                              if (isCardEditing(item.id)) {
+                                return (
+                                  <div 
+                                    key={key} 
+                                    className={`flex items-center gap-1.5 p-1.5 rounded-lg border transition-all ${
+                                      isBlank 
+                                        ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-300' 
+                                        : 'bg-black/30 border-white/[0.06]'
+                                    }`}
+                                  >
+                                    <span className={`text-[10px] font-bold w-4 text-center font-mono ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
+                                    <input
+                                      type="text"
+                                      value={item[key] || ''}
+                                      onChange={(e) => handleUpdateItem(item.id, { [key]: e.target.value })}
+                                      placeholder={isBlank ? `⚠️ Blank (${label}) - Click AI Auto-Fill` : `विकल्प ${label}`}
+                                      className={`bg-transparent text-xs focus:outline-none flex-1 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
+                                    />
+                                  </div>
+                                );
+                              }
+
                               return (
-                                <div 
-                                  key={key} 
-                                  className={`flex items-center gap-1.5 p-1.5 rounded-lg border transition-all ${
-                                    isBlank 
-                                      ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-300' 
-                                      : 'bg-black/30 border-white/[0.06]'
+                                <div
+                                  key={key}
+                                  className={`flex items-start gap-2 p-2 rounded-lg border text-xs transition-all ${
+                                    isCorrect
+                                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-200'
+                                      : isBlank
+                                      ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-300'
+                                      : 'bg-black/30 border-white/[0.06] text-slate-300'
                                   }`}
                                 >
-                                  <span className={`text-[10px] font-bold w-4 text-center font-mono ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
-                                  <input
-                                    type="text"
-                                    value={item[key] || ''}
-                                    onChange={(e) => handleUpdateItem(item.id, { [key]: e.target.value })}
-                                    placeholder={isBlank ? `⚠️ Blank (${label}) - Click AI Auto-Fill` : `विकल्प ${label}`}
-                                    className={`bg-transparent text-xs focus:outline-none flex-1 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
-                                  />
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold shrink-0 mt-0.5 ${
+                                    isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-[#FF884D]'
+                                  }`}>
+                                    {label}
+                                  </span>
+                                  <div className="flex-1 min-w-0">
+                                    {!isBlank ? (
+                                      <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                    ) : (
+                                      <span className="text-amber-400/90 italic text-[11px]">Blank Option (Click Auto-Fill)</span>
+                                    )}
+                                  </div>
+                                  {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
                                 </div>
                               );
                             })}
                           </div>
 
-                          {/* Hindi Solution (Detailed) */}
+                          {/* Hindi Solution */}
                           <div className="flex flex-col gap-1 mt-1">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">
+                            <span className="text-[10px] font-bold text-amber-400/80 uppercase">
                               Detailed Solution (solution_hi):
                             </span>
-                            <textarea
-                              rows={3}
-                              value={item.solution_hi}
-                              onChange={(e) => handleUpdateItem(item.id, { solution_hi: e.target.value })}
-                              placeholder="<p>विस्तृत विवरण व गणना...</p>"
-                              className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-emerald-300 focus:outline-none focus:border-emerald-500/60 custom-scrollbar"
-                            />
+                            {isCardEditing(item.id) ? (
+                              <textarea
+                                rows={3}
+                                value={item.solution_hi}
+                                onChange={(e) => handleUpdateItem(item.id, { solution_hi: e.target.value })}
+                                placeholder="<p>विस्तृत विवरण व गणना...</p>"
+                                className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-emerald-300 focus:outline-none focus:border-emerald-500/60 custom-scrollbar"
+                              />
+                            ) : (
+                              <div className="p-3 bg-amber-500/[0.03] border border-amber-500/20 rounded-xl">
+                                <LatexRenderer content={item.solution_hi || '<p>हल उपलब्ध नहीं है</p>'} className="text-amber-100/90 text-xs leading-relaxed" />
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -700,59 +829,103 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               <span className="w-2 h-2 rounded-full bg-blue-400"></span>
                               English Version (question_en)
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono">HTML & LaTeX</span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {isCardEditing(item.id) ? 'Edit Mode' : 'KaTeX Rendered'}
+                            </span>
                           </div>
 
-                          {/* English Question Text Area */}
-                          <textarea
-                            rows={3}
-                            value={item.question_en}
-                            onChange={(e) => handleUpdateItem(item.id, { question_en: e.target.value })}
-                            placeholder="<p>Write English question here...</p>"
-                            className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-[#FF6B2B]/60 custom-scrollbar"
-                          />
+                          {isCardEditing(item.id) ? (
+                            <textarea
+                              rows={3}
+                              value={item.question_en}
+                              onChange={(e) => handleUpdateItem(item.id, { question_en: e.target.value })}
+                              placeholder="<p>Write English question here...</p>"
+                              className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-[#FF6B2B]/60 custom-scrollbar"
+                            />
+                          ) : (
+                            <div className="p-3 bg-black/40 rounded-xl border border-white/[0.06] text-slate-100 min-h-[52px]">
+                              <LatexRenderer content={item.question_en || '<p>Question is empty</p>'} className="text-slate-100 text-xs sm:text-sm leading-relaxed" />
+                            </div>
+                          )}
 
                           {/* English Options 1 to 4 */}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             {(['option1_en', 'option2_en', 'option3_en', 'option4_en'] as const).map((key, optIdx) => {
                               const label = String.fromCharCode(65 + optIdx);
+                              const optNum = String(optIdx + 1);
+                              const isCorrect = item.answer === label || item.answer === optNum || item.answer?.includes(label) || item.answer?.includes(optNum);
                               const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
                               const isBlank = !valClean || valClean.toLowerCase() === 'blank';
 
+                              if (isCardEditing(item.id)) {
+                                return (
+                                  <div 
+                                    key={key} 
+                                    className={`flex items-center gap-1.5 p-1.5 rounded-lg border transition-all ${
+                                      isBlank 
+                                        ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-300' 
+                                        : 'bg-black/30 border-white/[0.06]'
+                                    }`}
+                                  >
+                                    <span className={`text-[10px] font-bold w-4 text-center font-mono ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
+                                    <input
+                                      type="text"
+                                      value={item[key] || ''}
+                                      onChange={(e) => handleUpdateItem(item.id, { [key]: e.target.value })}
+                                      placeholder={isBlank ? `⚠️ Blank (${label}) - Click AI Auto-Fill` : `Option ${label}`}
+                                      className={`bg-transparent text-xs focus:outline-none flex-1 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
+                                    />
+                                  </div>
+                                );
+                              }
+
                               return (
-                                <div 
-                                  key={key} 
-                                  className={`flex items-center gap-1.5 p-1.5 rounded-lg border transition-all ${
-                                    isBlank 
-                                      ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-300' 
-                                      : 'bg-black/30 border-white/[0.06]'
+                                <div
+                                  key={key}
+                                  className={`flex items-start gap-2 p-2 rounded-lg border text-xs transition-all ${
+                                    isCorrect
+                                      ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-200'
+                                      : isBlank
+                                      ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-300'
+                                      : 'bg-black/30 border-white/[0.06] text-slate-300'
                                   }`}
                                 >
-                                  <span className={`text-[10px] font-bold w-4 text-center font-mono ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
-                                  <input
-                                    type="text"
-                                    value={item[key] || ''}
-                                    onChange={(e) => handleUpdateItem(item.id, { [key]: e.target.value })}
-                                    placeholder={isBlank ? `⚠️ Blank (${label}) - Click AI Auto-Fill` : `Option ${label}`}
-                                    className={`bg-transparent text-xs focus:outline-none flex-1 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
-                                  />
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold shrink-0 mt-0.5 ${
+                                    isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-[#FF884D]'
+                                  }`}>
+                                    {label}
+                                  </span>
+                                  <div className="flex-1 min-w-0">
+                                    {!isBlank ? (
+                                      <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                    ) : (
+                                      <span className="text-amber-400/90 italic text-[11px]">Blank Option (Click Auto-Fill)</span>
+                                    )}
+                                  </div>
+                                  {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
                                 </div>
                               );
                             })}
                           </div>
 
-                          {/* English Solution (Detailed) */}
+                          {/* English Solution */}
                           <div className="flex flex-col gap-1 mt-1">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase">
+                            <span className="text-[10px] font-bold text-teal-400/80 uppercase">
                               Detailed Solution (solution_en):
                             </span>
-                            <textarea
-                              rows={3}
-                              value={item.solution_en}
-                              onChange={(e) => handleUpdateItem(item.id, { solution_en: e.target.value })}
-                              placeholder="<p>Step-by-step derivation & formulas...</p>"
-                              className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-teal-300 focus:outline-none focus:border-teal-500/60 custom-scrollbar"
-                            />
+                            {isCardEditing(item.id) ? (
+                              <textarea
+                                rows={3}
+                                value={item.solution_en}
+                                onChange={(e) => handleUpdateItem(item.id, { solution_en: e.target.value })}
+                                placeholder="<p>Step-by-step derivation & formulas...</p>"
+                                className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-teal-300 focus:outline-none focus:border-teal-500/60 custom-scrollbar"
+                              />
+                            ) : (
+                              <div className="p-3 bg-teal-500/[0.03] border border-teal-500/20 rounded-xl">
+                                <LatexRenderer content={item.solution_en || '<p>No explanation available</p>'} className="text-teal-100/90 text-xs leading-relaxed" />
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -786,6 +959,30 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
           </div>
         </motion.div>
       </div>
+
+      {/* Individual Question AI Chat Modal */}
+      <MocktestAiChatModal
+        isOpen={activeChatQuestion !== null}
+        onClose={() => setActiveChatQuestion(null)}
+        item={activeChatQuestion}
+        onUpdateItem={(updated) => {
+          handleUpdateItem(updated.id, updated);
+          setActiveChatQuestion(updated);
+        }}
+      />
+
+      {/* Add New Question Modal (Paste Screenshot / Prompt / Image) */}
+      <MocktestAddQuestionModal
+        isOpen={showAddQuestionModal}
+        onClose={() => setShowAddQuestionModal(false)}
+        totalPages={1}
+        defaultPageNumber={1}
+        nextQuestionNumber={items.length + 1}
+        setName={setName}
+        onAddQuestion={(newItem) => {
+          setItems(prev => [...prev, newItem]);
+        }}
+      />
     </AnimatePresence>
   );
 };

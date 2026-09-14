@@ -3,13 +3,15 @@ import {
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
-  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText
+  ZoomIn, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
+import { MocktestAiChatModal } from './MocktestAiChatModal';
+import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
 import { 
   MockTestMcqItem, 
   DifficultyLevel 
@@ -69,13 +71,81 @@ interface PageQueueItem {
 /**
  * LaTeX and Math-safe content renderer using KaTeX
  */
-const LatexRenderer: React.FC<{ content: string; className?: string }> = ({ content, className }) => {
+/**
+ * LaTeX and Math-safe content renderer using KaTeX and GFM Markdown
+ */
+export const LatexRenderer: React.FC<{ content: string; className?: string; inline?: boolean }> = ({ 
+  content, 
+  className,
+  inline = false
+}) => {
   if (!content) return null;
-  // Clean outer paragraph tags for markdown while preserving newlines
-  const clean = content
+
+  let clean = content;
+
+  // 1. Standardize MathJax \( ... \) and \[ ... \] to $ and $$ for remarkMath
+  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
+  clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+
+  // 2. Convert HTML tables to Markdown tables for remarkGfm
+  clean = clean.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_match, tableContent) => {
+    const rows: string[][] = [];
+    const rowMatches = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+    for (const rowHtml of rowMatches) {
+      const cells: string[] = [];
+      const cellMatches = rowHtml.match(/<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>/gi) || [];
+      for (const c of cellMatches) {
+        const inner = c.replace(/<(?:th|td)[^>]*>|<\/(?:th|td)>/gi, '').replace(/\n/g, ' ').trim();
+        cells.push(inner || '-');
+      }
+      if (cells.length > 0) rows.push(cells);
+    }
+    if (rows.length === 0) return '';
+    const maxCols = Math.max(...rows.map(r => r.length));
+    const paddedRows = rows.map(r => {
+      const full = [...r];
+      while (full.length < maxCols) full.push('-');
+      return '| ' + full.join(' | ') + ' |';
+    });
+    const headerDivider = '| ' + Array(maxCols).fill('---').join(' | ') + ' |';
+    return '\n\n' + paddedRows[0] + '\n' + headerDivider + '\n' + paddedRows.slice(1).join('\n') + '\n\n';
+  });
+
+  // 3. Convert HTML lists
+  clean = clean.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, '* $1\n');
+  clean = clean.replace(/<\/?(?:ul|ol)[^>]*>/gi, '\n');
+
+  // 4. Convert formatting tags to Markdown
+  clean = clean
+    .replace(/<hr\s*\/?>/gi, '\n\n---\n\n')
+    .replace(/<div[^>]*>/gi, '')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<(?:b|strong)[^>]*>(.*?)<\/(?:b|strong)>/gi, '**$1**')
+    .replace(/<(?:i|em)[^>]*>(.*?)<\/(?:i|em)>/gi, '*$1*')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
     .replace(/^<p>/i, '')
     .replace(/<\/p>$/i, '')
-    .replace(/<br\s*\/?>/gi, '\n');
+    .trim();
+
+  // 5. Auto-wrap naked fractions like \frac{...}{...} if missing $
+  clean = clean.replace(/(?<!\$)(?:\\frac\s*\{[^{}]+\}\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
+
+  if (inline) {
+    return (
+      <span className={`inline-flex items-center text-xs leading-normal ${className || ''}`}>
+        <ReactMarkdown
+          remarkPlugins={[remarkMath, remarkGfm]}
+          rehypePlugins={[rehypeKatex]}
+          components={{
+            p: ({ children }) => <span className="inline">{children}</span>
+          }}
+        >
+          {clean}
+        </ReactMarkdown>
+      </span>
+    );
+  }
 
   return (
     <div className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
@@ -134,6 +204,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   // Inline editing & Image Zoom modal
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
+  const [activeChatQuestion, setActiveChatQuestion] = useState<MockTestMcqItem | null>(null);
+  const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
+  const [addQuestionTargetPage, setAddQuestionTargetPage] = useState<number>(1);
 
   // Modals & Bridge status
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
@@ -1177,6 +1250,37 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     }));
   };
 
+  // Insert question created via AI Quick Add / Screenshot paste
+  const handleInsertNewQuestion = (newItem: MockTestMcqItem, targetPageNumber: number) => {
+    const targetPage = pages.find(p => p.pageNumber === targetPageNumber) || pages[0];
+    const resolvedItem: MockTestMcqItem = {
+      ...newItem,
+      pageNumber: targetPageNumber,
+      pageId: targetPage?.id,
+      source_pages: String(targetPageNumber),
+      set_name: setName
+    };
+
+    setExtractedMcqs(prev => [...prev, resolvedItem]);
+
+    if (targetPage) {
+      setPages(prev => prev.map(p => {
+        if (p.id === targetPage.id) {
+          const nextItems = [...(p.items || []), resolvedItem];
+          return {
+            ...p,
+            items: nextItems,
+            mcqCount: nextItems.length,
+            status: p.status === 'pending' || p.status === 'error' ? 'ready' : p.status
+          };
+        }
+        return p;
+      }));
+    }
+
+    setLiveStatusText(`✓ Q#${resolvedItem.question_r} successfully added to Page ${targetPageNumber}!`);
+  };
+
   // Single Question AI Repair
   const handleAiRepairSingle = async (item: MockTestMcqItem) => {
     setRepairingId(item.id);
@@ -1390,6 +1494,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                 className="hidden"
               />
             </div>
+
+            {/* Quick Add Question via AI / Paste Screenshot */}
+            <button
+              type="button"
+              onClick={() => {
+                setAddQuestionTargetPage(pages.find(p => p.status === 'ready')?.pageNumber || 1);
+                setShowAddQuestionModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition-all shadow-md shadow-violet-600/20 shrink-0"
+              title="Add new extra question via text, AI instruction, or paste screenshot (Ctrl+V)"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Question (Paste / AI)</span>
+            </button>
           </div>
         </div>
 
@@ -2259,11 +2377,15 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                 )}
                                 <button
                                   type="button"
-                                  onClick={() => handleAddQuestionToPage(page)}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-semibold transition-all"
+                                  onClick={() => {
+                                    setAddQuestionTargetPage(page.pageNumber);
+                                    setShowAddQuestionModal(true);
+                                  }}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/40 text-violet-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm"
+                                  title="Add question to this page via text prompt or paste screenshot (Ctrl+V)"
                                 >
-                                  <Plus className="w-3.5 h-3.5 text-amber-400" />
-                                  <span>Add Question</span>
+                                  <Plus className="w-3.5 h-3.5 text-violet-400" />
+                                  <span>AI Add / Paste</span>
                                 </button>
                               </div>
                             </>
@@ -2295,19 +2417,58 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                       )}
 
                       {page.status === 'error' && (
-                        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 space-y-2">
+                        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 space-y-3">
                           <div className="flex items-center gap-2 font-bold text-xs">
-                            <AlertCircle className="w-4 h-4 text-rose-400" />
+                            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
                             <span>Page Extraction Error</span>
                           </div>
-                          <p className="text-xs text-rose-200/90">{page.errorMessage || 'Failed to extract this page.'}</p>
-                          <button
-                            type="button"
-                            onClick={() => handleRetryPage(page, idx)}
-                            className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs"
-                          >
-                            Retry Extraction
-                          </button>
+                          <p className="text-xs text-rose-200/90 leading-relaxed">{page.errorMessage || 'Failed to extract this page.'}</p>
+                          
+                          {page.errorMessage?.includes('timed out') ? (
+                            <div className="p-2.5 rounded-lg bg-black/40 border border-amber-500/30 text-amber-200 text-xs space-y-1.5">
+                              <p className="font-semibold text-amber-300 flex items-center gap-1.5">
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                <span>AI Browser Tab Timeout (Chrome Extension Bridge)</span>
+                              </p>
+                              <p className="text-[11px] text-slate-300">
+                                1. Agar Chrome me AI tab (Gemini/ChatGPT/DeepSeek) ne likhna pura kar liya hai, to <strong>"Recapture"</strong> dabayein.<br/>
+                                2. Ya fir bina extension/timeout ke fast server processing ke liye <strong>"Direct API"</strong> se extract karein.
+                              </p>
+                            </div>
+                          ) : null}
+
+                          <div className="flex items-center gap-2 flex-wrap pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleRecaptureFromAiTab(page)}
+                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-sm"
+                              title="Read response from open AI tab in Chrome"
+                            >
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>Recapture from AI Tab</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAiEngine('api');
+                                setTimeout(() => handleRetryPage(page, idx, 'exact'), 50);
+                              }}
+                              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold rounded-lg text-xs flex items-center gap-1.5 shadow-sm"
+                              title="Switch to direct server Gemini API (fast, no browser tab needed)"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              <span>Switch to Direct API & Retry</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRetryPage(page, idx)}
+                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs"
+                            >
+                              Retry Extraction
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -2315,13 +2476,26 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                         <div className="py-12 text-center text-slate-500 space-y-2">
                           <AlertCircle className="w-7 h-7 mx-auto text-slate-600" />
                           <p className="text-xs font-semibold">No questions found on Page {page.pageNumber}</p>
-                          <button
-                            type="button"
-                            onClick={() => handleAddQuestionToPage(page)}
-                            className="px-3 py-1 text-xs text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/10"
-                          >
-                            + Add Question Manually
-                          </button>
+                          <div className="flex items-center justify-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddQuestionTargetPage(page.pageNumber);
+                                setShowAddQuestionModal(true);
+                              }}
+                              className="px-3 py-1.5 text-xs font-bold bg-violet-600/25 hover:bg-violet-600/40 border border-violet-500/40 text-violet-300 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+                            >
+                              <Plus className="w-3.5 h-3.5 text-violet-400" />
+                              <span>+ Add via AI / Paste Screenshot</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAddQuestionToPage(page)}
+                              className="px-3 py-1.5 text-xs text-slate-400 border border-white/[0.1] rounded-lg hover:bg-white/[0.06] transition-all"
+                            >
+                              + Blank
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -2387,6 +2561,14 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                     <span className="text-[11px] text-slate-400">
                                       Diff: <strong className="text-white capitalize">{item.difficulty_level}</strong>
                                     </span>
+
+                                    {/* Passage Attached Indicator */}
+                                    {(item.passage_hi || (item.figure_notes && item.figure_notes.toLowerCase().includes('passage')) || /गद्यांश|काव्यांश|पद्यांश|निर्देश/i.test(item.question_hi)) && (
+                                      <span className="flex items-center gap-1 bg-amber-500/15 border border-amber-500/40 text-amber-300 font-extrabold px-2 py-0.5 rounded-lg text-[10px] shadow-sm" title="This question has a Reading Comprehension / गद्यांश passage attached">
+                                        <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
+                                        <span>📖 गद्यांश (Passage)</span>
+                                      </span>
+                                    )}
                                   </div>
 
                                   <div className="flex items-center gap-2">
@@ -2459,6 +2641,17 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                         <Sparkles className="w-3 h-3 text-violet-400" />
                                       )}
                                       <span className="hidden sm:inline">Similar Variant</span>
+                                    </button>
+
+                                    {/* AI Chat & Fix Button */}
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveChatQuestion(item)}
+                                      className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-indigo-600/25 to-violet-600/25 hover:from-indigo-600/40 hover:to-violet-600/40 border border-indigo-500/40 text-indigo-300 hover:text-white rounded text-xs font-bold transition-all shadow-sm"
+                                      title="Chat with AI to fix, modify, re-calculate, or improve this question"
+                                    >
+                                      <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+                                      <span className="hidden sm:inline">AI Chat</span>
                                     </button>
 
                                     {/* Edit Toggle Button */}
@@ -2632,9 +2825,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                                 className="w-full bg-transparent text-xs text-white focus:outline-none"
                                               />
                                             ) : (
-                                              <span className="flex-1 truncate" title={item[key]}>
+                                              <span className="flex-1 min-w-0" title={item[key]}>
                                                 {!isBlank ? (
-                                                  item[key]
+                                                  <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
                                                 ) : (
                                                   <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
                                                     <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
@@ -2720,9 +2913,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                                 className="w-full bg-transparent text-xs text-white focus:outline-none"
                                               />
                                             ) : (
-                                              <span className="flex-1 truncate" title={item[key]}>
+                                              <span className="flex-1 min-w-0" title={item[key]}>
                                                 {!isBlank ? (
-                                                  item[key]
+                                                  <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
                                                 ) : (
                                                   <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
                                                     <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
@@ -3007,6 +3200,28 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         isOpen={showConnectModal}
         onClose={() => setShowConnectModal(false)}
         onConnected={() => setShowConnectModal(false)}
+      />
+
+      {/* Individual Question AI Chat Modal */}
+      <MocktestAiChatModal
+        isOpen={activeChatQuestion !== null}
+        onClose={() => setActiveChatQuestion(null)}
+        item={activeChatQuestion}
+        onUpdateItem={(updated) => {
+          updateItem(updated.id, updated);
+          setActiveChatQuestion(updated);
+        }}
+      />
+
+      {/* AI Quick Add & Screenshot Paste Question Modal */}
+      <MocktestAddQuestionModal
+        isOpen={showAddQuestionModal}
+        onClose={() => setShowAddQuestionModal(false)}
+        totalPages={pages.length}
+        defaultPageNumber={addQuestionTargetPage}
+        nextQuestionNumber={extractedMcqs.length + 1}
+        setName={setName}
+        onAddQuestion={handleInsertNewQuestion}
       />
     </div>
   );

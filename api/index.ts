@@ -1477,6 +1477,28 @@ function cleanServerMocktestText(text: string): string {
   return res.trim();
 }
 
+function stripServerOptionLetterReferences(text: string): string {
+  if (!text) return '';
+  let res = text;
+  // 1. Hindi: Strip option letter references like 'सही विकल्प A है।', 'अतः विकल्प B सही है।'
+  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:|स्पष्टतः)\s*,?\s*)?(?:सही\s*)?(?:उत्तर\s*)?विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:ही\s*)?(?:सही|उचित|सत्य|अभिष्ट|अभीष्ट|उपयुक्त)?\s*(?:उत्तर|विकल्प)?\s*(?:है|होगा|होता है)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:|स्पष्टतः)\s*,?\s*)?सही\s*(?:उत्तर|विकल्प)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:है|होगा)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार)\s*,?\s*)?विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*सही\s*(?:है|उत्तर है)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/सही\s*उत्तर\s*विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*है\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/सही\s*विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*है\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:)\s*,?\s*)?सही\s*(?:उत्तर|विकल्प)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:है|होगा)\s*[।\.]\s*/gi, '');
+
+  // 2. English: Strip option letter references like 'Option A is correct', 'Hence option (B)'
+  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:the\s*)?(?:correct\s*)?(?:option|choice|answer)\s*(?:is\s*)?(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:is\s*(?:the\s*)?(?:correct|right)(?:\s*(?:answer|option|choice))?)?\s*[\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:option|choice)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*is\s*(?:the\s*)?(?:correct|right)(?:\s*(?:answer|option|choice))?\s*[\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/The\s*correct\s*option\s*is\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/Correct\s*answer\s*is\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]?\s*(?=<\/p>|$)/gi, '');
+  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:the\s*)?(?:correct\s*)?(?:option|choice|answer)\s*(?:is\s*)?(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]\s*/gi, '');
+
+  res = res.replace(/\s+<\/p>/gi, '</p>').trim();
+  return res;
+}
+
 function stripServerSolutionPrefix(text: string): string {
   if (!text) return '';
   let res = text.trim();
@@ -1484,24 +1506,128 @@ function stripServerSolutionPrefix(text: string): string {
   res = res.replace(/^(<p>\s*)(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '$1');
   res = res.replace(/^(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '');
   res = res.replace(/^<p>\s+/, '<p>');
+  res = stripServerOptionLetterReferences(res);
   return res.trim();
 }
 
 function safeParseAiJson(rawJson: string): any {
-  const cleaned = (rawJson || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-  const safeJsonStr = cleaned
-    .replace(/(?<!\\)\\frac/g, '\\\\frac')
-    .replace(/(?<!\\)\\times/g, '\\\\times')
-    .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
-    .replace(/(?<!\\)\\text/g, '\\\\text')
-    .replace(/(?<!\\)\\div/g, '\\\\div')
-    .replace(/(?<!\\)\\pm/g, '\\\\pm')
-    .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
-    .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
-    .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
-    .replace(/(?<!\\)\\neq/g, '\\\\neq')
-    .replace(/(?<!\\)\\approx/g, '\\\\approx');
-  return JSON.parse(safeJsonStr);
+  if (!rawJson || !rawJson.trim()) return [];
+
+  const text = rawJson.trim();
+  const chunksToScan: string[] = [];
+
+  // 1. Collect all markdown code fences
+  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fenceRe.exec(text)) !== null) {
+    if (match[1] && match[1].trim().length > 5) {
+      chunksToScan.push(match[1].trim());
+    }
+  }
+
+  if (chunksToScan.length === 0) {
+    const unclosedMatch = text.match(/```(?:json)?\s*([\s\S]+)$/i);
+    if (unclosedMatch && unclosedMatch[1].trim().length > 5) {
+      chunksToScan.push(unclosedMatch[1].trim());
+    } else {
+      chunksToScan.push(text);
+    }
+  }
+
+  const collected: any[] = [];
+  const seenSigs = new Set<string>();
+
+  const addParsed = (item: any) => {
+    if (!item) return;
+    if (Array.isArray(item)) {
+      item.forEach(addParsed);
+      return;
+    }
+    if (typeof item === 'object') {
+      const sig = String(item.question_hi || item.question_en || item.question || item.question_r || JSON.stringify(item)).slice(0, 60);
+      if (!seenSigs.has(sig)) {
+        seenSigs.add(sig);
+        collected.push(item);
+      }
+    }
+  };
+
+  for (const chunk of chunksToScan) {
+    const safeChunk = chunk
+      .replace(/(?<!\\)\\frac/g, '\\\\frac')
+      .replace(/(?<!\\)\\times/g, '\\\\times')
+      .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
+      .replace(/(?<!\\)\\text/g, '\\\\text')
+      .replace(/(?<!\\)\\div/g, '\\\\div')
+      .replace(/(?<!\\)\\pm/g, '\\\\pm')
+      .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
+      .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
+      .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
+      .replace(/(?<!\\)\\neq/g, '\\\\neq')
+      .replace(/(?<!\\)\\approx/g, '\\\\approx');
+
+    try {
+      const p = JSON.parse(safeChunk);
+      addParsed(p);
+      continue;
+    } catch (_) {}
+
+    // Extract balanced arrays and objects from chunk
+    let startArr = -1;
+    let bDepth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = 0; i < safeChunk.length; i++) {
+      const ch = safeChunk[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (!inStr) {
+        if (ch === '[') {
+          if (bDepth === 0) startArr = i;
+          bDepth++;
+        } else if (ch === ']') {
+          bDepth--;
+          if (bDepth === 0 && startArr >= 0) {
+            try {
+              const p = JSON.parse(safeChunk.slice(startArr, i + 1));
+              addParsed(p);
+            } catch (_) {}
+            startArr = -1;
+          }
+        }
+      }
+    }
+
+    // Extract standalone balanced { ... } objects
+    let braceDepth = 0;
+    let startObj = -1;
+    let inStr2 = false;
+    let esc2 = false;
+    for (let i = 0; i < safeChunk.length; i++) {
+      const ch = safeChunk[i];
+      if (esc2) { esc2 = false; continue; }
+      if (ch === '\\') { esc2 = true; continue; }
+      if (ch === '"') { inStr2 = !inStr2; continue; }
+      if (!inStr2) {
+        if (ch === '{') {
+          if (braceDepth === 0) startObj = i;
+          braceDepth++;
+        } else if (ch === '}') {
+          braceDepth--;
+          if (braceDepth === 0 && startObj >= 0) {
+            try {
+              const p = JSON.parse(safeChunk.slice(startObj, i + 1));
+              addParsed(p);
+            } catch (_) {}
+            startObj = -1;
+          }
+        }
+      }
+    }
+  }
+
+  return collected;
 }
 
 app.post('/api/mocktest-solve', async (req, res) => {
@@ -1536,11 +1662,11 @@ CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
      * State given data clearly: "दिया गया है / Given that:" (e.g. A की चाल = 40 km/h...).
      * State the key formula in clean Unicode (e.g. समय = दूरी / चालों का अंतर).
      * Show step-by-step intermediate calculation without skipping steps so even weaker students understand clearly (e.g. (160/6) / 10 = 16/6 घंटा = 16/6 × 60 मिनट = 160 मिनट).
-     * Conclude with the final computed value matching the correct option.
+     * Conclude with the final computed numerical value.
    - For REASONING / LOGIC (Puzzles, Coding-Decoding, Series, Syllogism):
      * State the core logic rule directly ("जिस प्रकार...", reverse letter positions, difference pattern).
-     * Show the step-by-step pattern verification for each term or option (e.g. K (+3) → N (-8) → F).
-     * Conclude why the answer option is uniquely correct.
+     * Show the step-by-step pattern verification for each term or concept (e.g. K (+3) → N (-8) → F).
+     * State the derived correct answer term/value directly.
    - For GENERAL KNOWLEDGE / HISTORY / POLITY / GEOGRAPHY / STATIC GK:
      * Direct Factual Context: State why the answer is correct with date, year, treaty, person, place, or Article.
      * High-Yield Connected Exam Facts: Provide 3–4 essential connected facts, treaty conditions, or mini-list (e.g. Treaty terms 1, 2, 3, 4; or 8°, 9°, 10° Channels list; or Doab rivers list; or relevant Articles/Amendments).
@@ -1550,7 +1676,7 @@ CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
      * Mention practical remedies (concave lens) or related discoveries/scientists with years.
    - For LANGUAGE (Hindi & English Grammar, Vocab, Error Spotting):
      * State the grammatical rule, tense, voice, idiom meaning, or vocabulary usage clearly.
-     * Show why the selected option fits and why common wrong options are grammatically invalid.
+     * Show why the selected concept fits and why common errors occur.
 
 2. ACCESSIBLE TO WEAKER STUDENTS (कमजोर छात्र भी समझ सकें):
    - Use simple, lucid, and direct explanation.
@@ -1564,11 +1690,18 @@ CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
    - DO NOT start with 'हल:', '<b>हल:</b>', 'उत्तर:', 'Solution:', '<b>Solution:</b>', or 'Explanation:' because the portal UI automatically displays a Solution header! Start directly with the derivation or explanation text in <p>...</p>.
    - NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 
-5. PURE UNICODE & CLEAN HTML (NO LATEX, NO DOLLAR SIGNS):
-   - Output all symbols in clean Unicode: '×' (multiplication), '÷' (division), '−' (minus), '≤', '≥', '≠', '°' (degree), '√x', '²', '(a) / (b)'.
-   - NEVER output LaTeX commands (\\frac, \\times, \\div, \\sqrt, \\circ) or dollar delimiters ($...$ or $$...$$).
-   - NEVER wrap plain numbers, percentages (40%), or rupee amounts (₹4,800) in dollar signs.
-   - Wrap solutions in semantic HTML (<p>...</p>).
+5. STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
+   - In online test series and CBT mock test portals, OPTIONS ARE SHUFFLED DYNAMICALLY (Option A for one student can be Option C for another)!
+   - Therefore, YOU MUST ABSOLUTELY NEVER mention option letters or option numbers in the solution!
+   - NEVER WRITE: "सही विकल्प A है", "अतः विकल्प (B) सही है", "विकल्प C सही उत्तर है", "Option A is correct", "Hence option (B) is right", or "The correct option is C"!
+   - ALWAYS state the ACTUAL NAME, TERM, CONCEPT, or CALCULATED VALUE directly (e.g., "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था" or "अतः समय = 160 मिनट प्राप्त होता है"). NEVER write the option letter!
+
+5. MATHEMATICAL FORMULAS & CLEAN HTML (STRICT KATEX / LATEX STANDARD):
+   - Wrap all mathematical expressions, formulas, variables, equations, fractions, square roots, and units in standard LaTeX delimiters ($...$ for inline math, $$...$$ for display equations).
+   - Fractions MUST use standard LaTeX $\frac{numerator}{denominator}$. Powers MUST use $x^2$, roots MUST use $\sqrt{x}$.
+   - Operators and Greek symbols MUST use standard LaTeX: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\degree$, $\infty$.
+   - DO NOT wrap Indian Rupee currency in dollar signs: write '₹4,800' or 'Rs. 500'.
+   - Wrap solutions in clean semantic HTML (<p>...</p>). Use <b>...</b> for emphasis and <table>...</table> for tabular steps.
 
 6. Output ONLY valid JSON:
 {
@@ -1951,6 +2084,7 @@ CRITICAL MISSION - REFERENCE-ONLY MODE (DO NOT REPRODUCE VERBATIM QUESTIONS):
   2. GENERATE A BRAND NEW, UNIQUE PRACTICE MCQ based on that underlying topic/concept:
      * For Math / Quant / Science: Create a fresh problem testing the same mathematical theorem or formula, but with COMPLETELY DIFFERENT numbers, variables, values, and scenarios. Ensure the values calculate cleanly.
      * For GK / GS / History / Polity / Geography: Test the same historical period, constitutional article/concept, geographical feature, or scientific phenomenon with a FRESH, DISTINCT QUESTION.
+     * For Current Affairs / Contemporary GK: STRICT 1-YEAR WINDOW ONLY! Any question based on current affairs, government schemes, awards, sports, summits, appointments, or budget MUST STRICTLY use researched, verified events and data from the LAST 1 YEAR ONLY (within the last 12 months)! NEVER use outdated 2-5 year old data.
      * For Reasoning / Logic: Create a new puzzle, series, syllogism, or coding-decoding problem following the identical logic/pattern but with NEW letters, words, or arrangements.
      * For English / Hindi Language: Test the same grammatical concept or vocabulary standard using DIFFERENT sentences and context.
   3. Formulate 4 completely fresh, plausible options (A, B, C, D) with authentic distractors.
@@ -1962,20 +2096,20 @@ ${carryOverPrompt}
 
 Extract into a strict JSON array of objects with these exact 34 fields:
 1. question_r: Sequence number (1, 2, 3...)
-2. question_hi: Brand new question in Hindi wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
-3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p>
-4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p>
-5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
-6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
+2. question_hi: Brand new question in Hindi wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
+3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) adhering strictly to the YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
-9. question_en: Brand new question in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
-10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
-11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
-12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
-13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
+8. solution_hi: DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math adhering strictly to the YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
+9. question_en: Brand new question in English wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
+10. option1_en: Option 1 (A) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+11. option2_en: Option 2 (B) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+12. option3_en: Option 3 (C) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+13. option4_en: Option 4 (D) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) adhering strictly to the YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
+15. solution_en: DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math adhering strictly to the YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
 16. answer: Correct answer identifier: Single choice "A", "B", "C", "D".
 17. set_name: "${setName}"
 18. difficulty_level: "Easy", "Medium", or "Hard"
@@ -1998,9 +2132,17 @@ Extract into a strict JSON array of objects with these exact 34 fields:
 
 RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा पैटर्न):
 - STRICT RULE: DO NOT duplicate the reference questions! Create fresh, original questions.
+- CRITICAL CURRENT AFFAIRS RULE (STRICT LAST 1-YEAR DATA ONLY):
+  * For any question on Current Affairs, Government Schemes, Union Budget, Appointments, Sports Championships, or Summits:
+  * YOU MUST STRICTLY USE RESEARCHED, FACTUALLY ACCURATE DATA FROM THE LAST 1 YEAR ONLY (within the last 12 months)!
+  * Outdated 2-5 year old events or obsolete data are STRICTLY FORBIDDEN!
+- STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
+  * In online test series and mock portals, options are SHUFFLED dynamically.
+  * NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in the solution!
+  * State the facts, formulas, or calculated values directly! (e.g. "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था।", "अतः समय = 160 मिनट।").
 - Both Hindi and English fields MUST be fully populated.
 - DYNAMIC SOLUTION PATTERN:
-  * For Math/Numericals: State given data ("दिया गया है / Given that:"), write formula in Unicode, show complete step-by-step intermediate calculation without skipping steps so weaker students understand clearly, conclude with final value.
+  * For Math/Numericals: State given data ("दिया गया है / Given that:"), write formula in standard LaTeX math ($...$), show complete step-by-step intermediate calculation without skipping steps so weaker students understand clearly, conclude with final value.
   * For Reasoning: State underlying logic/rule, test step-by-step for each term/option, conclude why option is uniquely correct.
   * For GK/Polity/History/Geography: State direct factual context (date, treaty, person, place, or Article) + 3–4 high-yield connected exam facts or mini-list.
   * For Science: State scientific law/cause + practical remedies or discoverers.
@@ -2008,7 +2150,11 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
 - ACCESSIBLE TO WEAKER STUDENTS: Simple, clear, and direct language.
 - BALANCED MEDIUM LENGTH: 3 to 6 focused lines or 3-5 structured steps/points.
 - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'. DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'.
-- NO LATEX, NO DOLLAR SIGNS: Output all mathematical symbols directly in clean Unicode and HTML (e.g. '×', '÷', '−', '≤', '≥', '≠', '°', '√x', '(a) / (b)', '&gt;', '&lt;'). NEVER output LaTeX commands (\\frac, \\times) or dollar delimiters ($...$ or $$...$$).
+- MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
+  * Enclose all math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
+  * Fractions: Always write as $\frac{numerator}{denominator}$. Powers: $x^2$, $10^{-5}$. Roots: $\sqrt{x}$, $\sqrt[3]{27}$.
+  * Operators and Greek symbols: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\degree$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\infty$.
+  * DO NOT wrap currency in dollar signs (write '₹4,800' or 'Rs. 500'). Wrap all questions, options, and explanations in semantic HTML <p>...</p>.
 - Respond ONLY with the JSON array.`;
     } else {
       promptText = `You are a professional Exam Paper Digitizer and MockTest Content Architect.
@@ -2016,20 +2162,20 @@ Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), 
 
 Extract into a strict JSON array of objects with these exact 34 fields:
 1. question_r: Sequence number (1, 2, 3...)
-2. question_hi: Question in Hindi wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
-3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p>
-4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p>
-5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p>
-6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p>
+2. question_hi: Question in Hindi wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
+3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
 7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: DYNAMIC STEP-BY-STEP SOLUTION in Hindi in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). DO NOT prefix with 'हल:', '<b>हल:</b>', or 'उत्तर:'! DO NOT include filler labels like 'Key Point:'!
-9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with standard Unicode math (NO LaTeX commands, NO dollar signs!).
-10. option1_en: Option 1 (A) in English wrapped in <p>...</p>
-11. option2_en: Option 2 (B) in English wrapped in <p>...</p>
-12. option3_en: Option 3 (C) in English wrapped in <p>...</p>
-13. option4_en: Option 4 (D) in English wrapped in <p>...</p>
+8. solution_hi: DYNAMIC STEP-BY-STEP SOLUTION in Hindi in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). DO NOT prefix with 'हल:', '<b>हल:</b>', or 'उत्तर:'! DO NOT include filler labels like 'Key Point:'!
+9. question_en: Question in English wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
+10. option1_en: Option 1 (A) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+11. option2_en: Option 2 (B) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+12. option3_en: Option 3 (C) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
+13. option4_en: Option 4 (D) in English wrapped in <p>...</p> (with KaTeX $...$ if mathematical formula).
 14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: DYNAMIC STEP-BY-STEP SOLUTION in English in clean HTML (<p>...</p>) following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). DO NOT prefix with 'Solution:', '<b>Solution:</b>', or 'Explanation:'! DO NOT include filler labels like 'Key Point:'!
+15. solution_en: DYNAMIC STEP-BY-STEP SOLUTION in English in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). DO NOT prefix with 'Solution:', '<b>Solution:</b>', or 'Explanation:'! DO NOT include filler labels like 'Key Point:'!
 16. answer: Correct answer: Single choice "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
 17. set_name: "${setName}"
 18. difficulty_level: "Easy", "Medium", or "Hard"
@@ -2053,18 +2199,40 @@ Extract into a strict JSON array of objects with these exact 34 fields:
 34. duplicate_statistics: "Unique within this shift; duplicate check completed."
 
 RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा पैटर्न):
+- CRITICAL GADYANSH / READING COMPREHENSION RULE (गद्यांश / काव्यांश / निर्देश):
+  * If this page contains a reading comprehension passage, poem, story, or case study (e.g. "निम्नलिखित गद्यांश को पढ़कर पूछे गए प्रश्नों के उत्तर दीजिए: (प्र. 66-70)"):
+  * YOU MUST NEVER DROP OR OMIT THE PASSAGE! The full passage text MUST be stored and preserved.
+  * Every question belonging to that passage set (e.g. Q.66 to Q.70) MUST include the complete passage text prepended to its question text:
+    In question_hi:
+    <p><strong>निर्देश (प्र. 66-70): निम्नलिखित गद्यांश को पढ़कर पूछे गए प्रश्नों के उत्तर दीजिए:</strong></p>
+    <p>[Full verbatim Hindi passage text...]</p>
+    <hr>
+    <p>[Question text]</p>
+    
+    In question_en:
+    <p><strong>Directions (Q. 66-70): Read the following passage and answer the questions:</strong></p>
+    <p>[Full English translated passage text...]</p>
+    <hr>
+    <p>[Question text]</p>
+  * Also set "figure_notes" to "गद्यांश / Passage: Q.66-70"
 - STRICT NEGATIVE RULE: DO NOT include previous-year exam shift citations, tags, dates, or publisher labels in question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]", "(Shift-1)" MUST BE OMITTED). The question text must be purely the question statement itself!
 - If question is in one language only, translate and generate counterpart fields so BOTH Hindi and English are populated.
 - DYNAMIC SOLUTION PATTERN:
-  * Math/Quant: State given data ("दिया गया है / Given that:"), formula in clean Unicode, complete step-by-step intermediate calculation without skipping steps so weaker students understand easily, conclude with final value.
+  * Math/Quant: State given data ("दिया गया है / Given that:"), write formula in standard LaTeX math ($...$), complete step-by-step intermediate calculation without skipping steps so weaker students understand easily, conclude with final value.
   * Reasoning: State logic/rule, step-by-step verification for each term/option, conclude why option is uniquely correct.
   * GK/Polity/History/Geography: State factual context (date/treaty/place/Article) + 3–4 high-yield connected exam facts or mini-list.
   * Science: State scientific law/reaction/mechanism + practical remedies or discoverers with years.
   * Language: State grammatical rule or usage clearly.
-- ACCESSIBLE TO WEAKER STUDENTS: Use simple, clear, step-by-step explanation.
-- BALANCED MEDIUM LENGTH: 3 to 6 focused lines or 3-5 structured steps/points.
+- STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
+  * In online test series and mock portals, options are SHUFFLED dynamically (Option A for one student can be Option C for another).
+  * NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in the solution!
+  * State the concepts, facts, dates, names, formulas, and values directly! (e.g. "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था।", "अतः समय = 160 मिनट।"). NEVER mention the option letter!
 - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', '<b>हल:</b>', 'Solution:', '<b>Solution:</b>', or 'Explanation:'! The test portal UI renders its own Solution header. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-- NO LATEX, NO DOLLAR SIGNS: Output all mathematical symbols directly in clean Unicode and HTML (e.g. '×', '÷', '−', '≤', '≥', '≠', '°', '√x', '(a) / (b)', '&gt;', '&lt;'). NEVER output LaTeX commands (\\frac, \\times, \\sqrt, \\circ) or dollar sign delimiters ($...$ or $$...$$)! NEVER enclose plain numbers, percentages (40%), or rupee amounts (₹4,800) in dollar signs.
+- MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
+  * Enclose all math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
+  * Fractions: Always write as $\frac{numerator}{denominator}$. Powers: $x^2$, $10^{-5}$. Roots: $\sqrt{x}$, $\sqrt[3]{27}$.
+  * Operators and Greek symbols: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\degree$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\infty$.
+  * DO NOT wrap currency in dollar signs (write '₹4,800' or 'Rs. 500'). Wrap all questions, options, and explanations in semantic HTML <p>...</p>. Use <b>...</b> for emphasis and clean HTML tables <table>...</table> for matching lists or comparison charts!
 - Respond ONLY with the JSON array.`;
     }
 
@@ -2125,7 +2293,76 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
 
     const parsed = safeParseAiJson(rawJson);
     const rawItems = Array.isArray(parsed) ? parsed : [];
-    const items = rawItems.map((item: any) => ({
+
+    // Server-side Gadyansh / Passage detector and distributor:
+    // If AI outputs standalone passage object or passage_hi fields, attach to respective questions.
+    let currentPassageHi = '';
+    let currentPassageEn = '';
+    let currentPassageRange = '';
+    let activeUntilQNum = 0;
+    const distributedItems: any[] = [];
+
+    for (let i = 0; i < rawItems.length; i++) {
+      const it = rawItems[i];
+      const qHi = String(it.question_hi || it.question || '');
+      const qEn = String(it.question_en || '');
+      const hasOpts = Boolean(it.option1_hi || it.option2_hi || it.option1_en || it.option2_en);
+
+      // Check if standalone passage block
+      const isPassageKw = /(?:गद्यांश|काव्यांश|पद्यांश|निर्देश|अनुच्छेद|passage|comprehension)/i.test(qHi);
+      const isStandalone = !hasOpts && isPassageKw && qHi.length > 50;
+
+      if (isStandalone) {
+        const rangeMatch = qHi.match(/(?:प्र(?:\.|श्न)?|Q(?:uestion)?\.?)\s*(\d+)\s*(?:-|से|to)\s*(\d+)/i);
+        if (rangeMatch) {
+          activeUntilQNum = parseInt(rangeMatch[2], 10);
+          currentPassageRange = `Q.${rangeMatch[1]}-${rangeMatch[2]}`;
+        } else {
+          activeUntilQNum = (it.question_r || (i + 1)) + 5;
+          currentPassageRange = 'Passage Set';
+        }
+        currentPassageHi = qHi;
+        currentPassageEn = qEn || qHi;
+        continue;
+      }
+
+      if (it.passage_hi || it.gadyansh || it.passage) {
+        currentPassageHi = it.passage_hi || it.gadyansh || it.passage;
+        currentPassageEn = it.passage_en || currentPassageHi;
+      }
+
+      const qNum = parseInt(it.question_r, 10) || 0;
+      const inRange = activeUntilQNum > 0 && qNum > 0 ? qNum <= activeUntilQNum : Boolean(currentPassageHi);
+
+      let finalQHi = qHi;
+      let finalQEn = qEn;
+
+      if (currentPassageHi && inRange) {
+        const snippet = currentPassageHi.slice(0, 25);
+        if (!finalQHi.includes(snippet)) {
+          finalQHi = `<p>${currentPassageHi.replace(/\n+/g, '</p><p>')}</p><hr><p>${finalQHi.replace(/^<p>/i, '').replace(/<\/p>$/i, '')}</p>`;
+        }
+        if (currentPassageEn) {
+          const snippetEn = currentPassageEn.slice(0, 25);
+          if (!finalQEn.includes(snippetEn)) {
+            finalQEn = `<p>${currentPassageEn.replace(/\n+/g, '</p><p>')}</p><hr><p>${finalQEn.replace(/^<p>/i, '').replace(/<\/p>$/i, '')}</p>`;
+          }
+        }
+        it.passage_hi = currentPassageHi;
+        it.passage_en = currentPassageEn;
+        if (!it.figure_notes) {
+          it.figure_notes = currentPassageRange ? `गद्यांश / Passage: ${currentPassageRange}` : 'गद्यांश / Passage';
+        }
+      }
+
+      distributedItems.push({
+        ...it,
+        question_hi: finalQHi,
+        question_en: finalQEn
+      });
+    }
+
+    const items = distributedItems.map((item: any) => ({
       ...item,
       question_hi: cleanServerMocktestText(item.question_hi),
       question_en: cleanServerMocktestText(item.question_en),
@@ -2173,6 +2410,7 @@ GENERATE A BRAND NEW, UNIQUE SIMILAR MULTIPLE CHOICE QUESTION testing the same c
 - DO NOT copy or reproduce the reference question! Create a FRESH, ORIGINAL VARIANT.
 - For Math/Science: Change numerical values, scenarios, variables, or what is being solved. Ensure formulas calculate accurately.
 - For GK/Polity/History: Test the same subject area, constitutional article, or era with a distinct new question.
+- For Current Affairs / Contemporary GK: STRICT 1-YEAR WINDOW ONLY! Any question based on current affairs, government schemes, awards, sports, summits, appointments, or budget MUST STRICTLY use researched, verified events and data from the LAST 1 YEAR ONLY (within the last 12 months)! NEVER use outdated 2-5 year old data.
 - For Reasoning/Language: Keep the same logical rule with new entities, numbers, or sentences.
 - Formulate 4 completely fresh, plausible options (A, B, C, D).
 - Compute and verify the single correct answer ("A", "B", "C", or "D").
@@ -2185,6 +2423,7 @@ GENERATE A BRAND NEW, UNIQUE SIMILAR MULTIPLE CHOICE QUESTION testing the same c
   * Accessible to weaker students: simple and clear steps.
   * Balanced medium length: 3 to 6 focused lines or 3-5 structured steps/points.
   * NO solution prefix labels ('हल:', 'Solution:') and NO filler labels ('Key Point:', 'Detailed Explanation:').
+  * STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in the solution. State the facts, formulas, or calculated values directly!
 - Use pure Unicode math and clean HTML (NO LaTeX, NO dollar signs!).
 
 Output ONLY a JSON object matching this structure:
@@ -2300,9 +2539,10 @@ STRICT EDITORIAL GUIDELINES:
    - Ensure clean, natural Devanagari Hindi (question_hi) and English (question_en).
    - If Hindi or English counterpart is missing or malformed, provide an accurate translation so both languages are fully populated.
 
-3. PRESERVE NUMBERS & ANSWERS (PURE UNICODE & CLEAN HTML - NO LATEX):
+3. STANDARDIZE MATHEMATICAL FORMULAS (KATEX / LATEX STANDARD):
    - DO NOT alter mathematical numerical values, variables, or the correct answer.
-   - NO LATEX, NO DOLLAR SIGNS: NEVER introduce or retain LaTeX commands (like \\frac, \\times, \\div, \\sqrt, \\circ) or dollar delimiters ($...$). Convert all math into clean Unicode symbols ('×', '÷', '−', '≤', '≥', '≠', '°', '√') and write fractions as '(a) / (b)' or 'a / b'.
+   - Enclose all mathematical expressions, fractions, powers, roots, variables, and formulas in standard LaTeX delimiters ($...$ for inline math, $$...$$ for display equations).
+   - Ensure fractions use $\frac{num}{den}$, powers use $x^2$, roots use $\sqrt{x}$.
    - Plain numbers, percentages (40%), and currency (₹4,800) MUST NOT be enclosed in dollar signs.
 
 4. SEMANTIC HTML & NO SOLUTION LABELS:
@@ -2372,6 +2612,340 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
   } catch (error: any) {
     console.warn("MockTest proofread failed:", error?.message || error);
     res.status(500).json({ error: error.message || "Proofread failed" });
+  }
+});
+
+app.post('/api/mocktest-ai-chat', async (req, res) => {
+  try {
+    const { item, userPrompt, history = [] } = req.body;
+    if (!item || !userPrompt) {
+      return res.status(400).json({ error: "Missing item or userPrompt in request body" });
+    }
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    // Format previous conversation history if present
+    let conversationHistoryText = '';
+    if (Array.isArray(history) && history.length > 0) {
+      conversationHistoryText = `\nPREVIOUS CONVERSATION HISTORY:\n` +
+        history.map(m => `${m.role === 'user' ? 'User' : 'AI Assistant'}: ${m.text}`).join('\n') + '\n';
+    }
+
+    const chatPrompt = `You are an elite Competitive Exam Content Architect, Master Pedagogical Author, LaTeX/Unicode Specialist, and AI Co-Pilot for MockTest Creators.
+The user is having an interactive chat with you to inspect, modify, refine, or fix an INDIVIDUAL Multiple-Choice Question (MCQ).
+
+CURRENT QUESTION STATE:
+- Sequence: Q#${item.question_r || 1}
+- Subject: ${item.subject || 'General'}
+- Level: ${item.subject_level || ''}
+- Question (Hindi): ${item.question_hi || ''}
+- Question (English): ${item.question_en || ''}
+- Option A (Hindi): ${item.option1_hi || ''}
+- Option B (Hindi): ${item.option2_hi || ''}
+- Option C (Hindi): ${item.option3_hi || ''}
+- Option D (Hindi): ${item.option4_hi || ''}
+- Option E (Hindi): ${item.option5_hi || ''}
+- Option A (English): ${item.option1_en || ''}
+- Option B (English): ${item.option2_en || ''}
+- Option C (English): ${item.option3_en || ''}
+- Option D (English): ${item.option4_en || ''}
+- Option E (English): ${item.option5_en || ''}
+- Correct Answer: ${item.answer || ''}
+- Solution (Hindi): ${item.solution_hi || ''}
+- Solution (English): ${item.solution_en || ''}
+- Difficulty: ${item.difficulty_level || 'medium'}
+${conversationHistoryText}
+USER INSTRUCTION / REQUEST:
+"${userPrompt}"
+
+YOUR MISSION:
+1. Carefully analyze what the user wants to adjust, fix, or improve for this question.
+   - If user asks to change the answer: update "answer", adjust options if needed, and rewrite "solution_hi" & "solution_en" step-by-step to match the new answer.
+   - If user asks to improve solution/explanation: provide a structured, step-by-step pedagogical derivation following the YCT Exam pattern (जैसा प्रश्न वैसा पैटर्न) with given data, formula, and step-by-step intermediate calculation.
+   - If user asks to improve language/translation: ensure accurate, natural Hindi & English exam phrasing.
+   - If user asks about Current Affairs: STRICT 1-YEAR WINDOW ONLY! Ensure all dates, schemes, winners, ministers, or statistics are verified from the LAST 1 YEAR ONLY (within 12 months).
+   - If user asks to simplify or make harder: adjust question wording and distractors accordingly.
+2. STRICT RULES TO ENFORCE:
+   - STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in "solution_hi" or "solution_en"! State facts, formulas, or calculated values directly!
+   - MATHEMATICAL FORMULAS & CLEAN HTML: Enclose math formulas, variables, equations, fractions, and roots in standard LaTeX delimiters ($...$ for inline, $$...$$ for display). Wrap text in semantic HTML (<p>...</p>). DO NOT wrap currency in dollar signs.
+   - NO filler headers like 'Key Point:', 'Detailed Explanation:', 'हल:', 'Solution:'.
+3. Generate a friendly, concise, and helpful "reply" in the user's language (Hindi or English) explaining exactly what you changed or improved.
+
+OUTPUT FORMAT:
+Respond with ONLY a strict JSON object:
+{
+  "updatedItem": {
+    "question_hi": "<p>...</p>",
+    "question_en": "<p>...</p>",
+    "option1_hi": "<p>...</p>",
+    "option2_hi": "<p>...</p>",
+    "option3_hi": "<p>...</p>",
+    "option4_hi": "<p>...</p>",
+    "option5_hi": "<p>...</p>",
+    "option1_en": "<p>...</p>",
+    "option2_en": "<p>...</p>",
+    "option3_en": "<p>...</p>",
+    "option4_en": "<p>...</p>",
+    "option5_en": "<p>...</p>",
+    "answer": "A",
+    "solution_hi": "<p>...</p>",
+    "solution_en": "<p>...</p>",
+    "subject": "${item.subject || 'General'}",
+    "difficulty_level": "easy | medium | hard"
+  },
+  "reply": "Concise summary of changes made"
+}`;
+
+    const executeChat = async (client: any) => {
+      try {
+        const response = await client.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [{ text: chatPrompt }],
+          config: {
+            temperature: 0.25,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      } catch (err: any) {
+        const response = await client.models.generateContent({
+          model: 'gemini-flash-lite-latest',
+          contents: [{ text: chatPrompt }],
+          config: {
+            temperature: 0.25,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      }
+    };
+
+    const rawJson = await runAIAction(executeChat, userKey);
+    const parsed = safeParseAiJson(rawJson);
+    const updated = parsed.updatedItem || parsed;
+    const reply = parsed.reply || "प्रश्न को आपके निर्देशानुसार सफलतापूर्वक अपडेट कर दिया गया है।";
+
+    // Deep sanitize fields
+    const sanitizedUpdatedItem = {
+      ...item,
+      ...updated,
+      question_hi: cleanServerMocktestText(updated.question_hi || item.question_hi),
+      question_en: cleanServerMocktestText(updated.question_en || item.question_en),
+      option1_hi: cleanServerMocktestText(updated.option1_hi || item.option1_hi),
+      option2_hi: cleanServerMocktestText(updated.option2_hi || item.option2_hi),
+      option3_hi: cleanServerMocktestText(updated.option3_hi || item.option3_hi),
+      option4_hi: cleanServerMocktestText(updated.option4_hi || item.option4_hi),
+      option5_hi: cleanServerMocktestText(updated.option5_hi || item.option5_hi),
+      option1_en: cleanServerMocktestText(updated.option1_en || item.option1_en),
+      option2_en: cleanServerMocktestText(updated.option2_en || item.option2_en),
+      option3_en: cleanServerMocktestText(updated.option3_en || item.option3_en),
+      option4_en: cleanServerMocktestText(updated.option4_en || item.option4_en),
+      option5_en: cleanServerMocktestText(updated.option5_en || item.option5_en),
+      solution_hi: stripServerSolutionPrefix(cleanServerMocktestText(updated.solution_hi || item.solution_hi)),
+      solution_en: stripServerSolutionPrefix(cleanServerMocktestText(updated.solution_en || item.solution_en)),
+      answer: (updated.answer || item.answer || '').trim()
+    };
+
+    res.json({
+      updatedItem: sanitizedUpdatedItem,
+      reply
+    });
+  } catch (error: any) {
+    console.warn("MockTest AI chat failed:", error?.message || error);
+    res.status(500).json({ error: error.message || "AI Chat failed" });
+  }
+});
+
+app.post('/api/mocktest-add-question', async (req, res) => {
+  try {
+    const { 
+      text = '', 
+      base64Image = '', 
+      setName = 'Mock Test Paper', 
+      targetPageNumber = 1, 
+      nextQuestionNumber = 1, 
+      difficulty = 'medium',
+      instruction = ''
+    } = req.body;
+
+    if (!text.trim() && !base64Image) {
+      return res.status(400).json({ error: "Please provide either question text, an instruction, or an image/screenshot." });
+    }
+
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    let cleanBase64 = '';
+    if (base64Image) {
+      cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '').trim();
+    }
+
+    const prompt = `You are an elite Competitive Exam Paper Architect and MCQ Digitizer.
+The user wants to add a NEW Multiple-Choice Question (MCQ) to their test paper.
+
+INPUT PROVIDED:
+- Text / Question Prompt: ${text.trim() || '(No raw text provided; please extract from the attached screenshot/image)'}
+- Custom Instructions: ${instruction.trim() || 'Ensure complete, high-quality bilingual MCQ with authentic options and step-by-step solution'}
+- Sequence Number: Q#${nextQuestionNumber}
+- Target Page: Page ${targetPageNumber}
+- Difficulty Level: ${difficulty}
+
+YOUR MISSION:
+1. Parse the input (whether image screenshot, raw unformatted text, or prompt) and build a complete, professional exam MCQ:
+   - If a screenshot/image is provided: extract the question, all 4 options, and figure/diagram context with high fidelity.
+   - If raw text is provided: format it into clear, well-structured Hindi and English question stems and options.
+   - If an instruction/topic is provided (e.g. "Create a question on..."): formulate an authentic, exam-standard question with realistic distractors.
+2. BOTH Hindi and English fields MUST be fully populated!
+3. Accurately deduce and verify the SINGLE CORRECT ANSWER ("A", "B", "C", or "D").
+4. Formulate an EXAM-ORIENTED, STEP-BY-STEP PEDAGOGICAL SOLUTION in BOTH Hindi (<p>...</p>) and English (<p>...</p>) following the YCT Exam Pattern (जैसा प्रश्न वैसा पैटर्न):
+   - Math/Numericals: State given data ("दिया गया है / Given that:"), clean Unicode formula, complete step-by-step intermediate calculation without skipping steps so weaker students understand easily, conclude with final value.
+   - Reasoning: Core rule/logic, step-by-step verification, conclusion.
+   - GK/Polity/History/Geography: Direct factual context + 3-4 connected high-yield exam facts or mini-list.
+   - Science: Scientific law/reaction/mechanism + practical remedies.
+   - Language: Grammar rule/meaning + usage.
+5. STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
+   - Options shuffle dynamically in mock test portals!
+   - YOU MUST NEVER mention option letters (A, B, C, D) or option numbers in solution_hi or solution_en! (e.g. NEVER write "सही विकल्प A है" or "Option B is correct").
+   - State the factual name, term, formula, or calculated value directly! (e.g. "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था।" or "अतः समय = 160 मिनट होगा।").
+6. CRITICAL CURRENT AFFAIRS RULE (STRICT LAST 1-YEAR WINDOW ONLY):
+   - If the question belongs to Current Affairs, contemporary government schemes, national initiatives, sports tournaments, awards, summits, appointments, union budget, or recent GK:
+   - The data, events, facts, schemes, and statistics MUST STRICTLY BE FROM THE LAST 1 YEAR ONLY (within the last 12 months)! Outdated 2-5 year old data is strictly forbidden.
+7. MATHEMATICAL & SCIENTIFIC FORMULAS:
+   - Enclose all math expressions, formulas, variables, equations, fractions, and roots in standard LaTeX delimiters ($...$ for inline, $$...$$ for display).
+   - Wrap all text in clean semantic HTML (<p>...</p>). Use <b>...</b> for emphasis and <table>...</table> for tabular steps.
+   - DO NOT wrap Indian Rupee currency in dollar signs (write '₹4,800').
+
+OUTPUT FORMAT:
+Respond with ONLY a strict JSON object:
+{
+  "item": {
+    "question_r": ${nextQuestionNumber},
+    "question_type": "MCQ",
+    "question_hi": "<p>...</p>",
+    "question_en": "<p>...</p>",
+    "option1_hi": "<p>...</p>",
+    "option2_hi": "<p>...</p>",
+    "option3_hi": "<p>...</p>",
+    "option4_hi": "<p>...</p>",
+    "option5_hi": "",
+    "option1_en": "<p>...</p>",
+    "option2_en": "<p>...</p>",
+    "option3_en": "<p>...</p>",
+    "option4_en": "<p>...</p>",
+    "option5_en": "",
+    "answer": "A",
+    "solution_hi": "<p>...</p>",
+    "solution_en": "<p>...</p>",
+    "subject": "Current Affairs | Mathematics | Reasoning | General Science | Polity | History | Geography | English | Hindi",
+    "subject_level": "RRB Level 01 Stage I 2025",
+    "difficulty_level": "${difficulty}",
+    "source_pages": "${targetPageNumber}",
+    "source_question_reference": "Q.${nextQuestionNumber} (Added)",
+    "correction_notes": "Added via AI Quick Add / Paste"
+  },
+  "summary": "Short 1-line summary in Hindi explaining the question added"
+}`;
+
+    const executeAdd = async (client: any) => {
+      const contents: any[] = [];
+      if (cleanBase64) {
+        contents.push({
+          inlineData: {
+            mimeType: 'image/png',
+            data: cleanBase64
+          }
+        });
+      }
+      contents.push({ text: prompt });
+
+      try {
+        const response = await client.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents,
+          config: {
+            temperature: 0.25,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      } catch (err: any) {
+        const response = await client.models.generateContent({
+          model: 'gemini-flash-lite-latest',
+          contents,
+          config: {
+            temperature: 0.25,
+            responseMimeType: "application/json"
+          }
+        });
+        let responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return responseText;
+      }
+    };
+
+    const rawJson = await runAIAction(executeAdd, userKey);
+    const parsed = safeParseAiJson(rawJson);
+    const rawItem = parsed.item || parsed;
+    const summary = parsed.summary || "नया प्रश्न सफलतापूर्वक तैयार कर लिया गया है।";
+
+    const sanitizedItem = {
+      id: `mt_ai_added_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      pageNumber: Number(targetPageNumber) || 1,
+      question_r: Number(nextQuestionNumber) || 1,
+      question_type: rawItem.question_type || 'MCQ',
+      question_hi: cleanServerMocktestText(rawItem.question_hi || ''),
+      question_en: cleanServerMocktestText(rawItem.question_en || ''),
+      option1_hi: cleanServerMocktestText(rawItem.option1_hi || ''),
+      option2_hi: cleanServerMocktestText(rawItem.option2_hi || ''),
+      option3_hi: cleanServerMocktestText(rawItem.option3_hi || ''),
+      option4_hi: cleanServerMocktestText(rawItem.option4_hi || ''),
+      option5_hi: cleanServerMocktestText(rawItem.option5_hi || ''),
+      option1_en: cleanServerMocktestText(rawItem.option1_en || ''),
+      option2_en: cleanServerMocktestText(rawItem.option2_en || ''),
+      option3_en: cleanServerMocktestText(rawItem.option3_en || ''),
+      option4_en: cleanServerMocktestText(rawItem.option4_en || ''),
+      option5_en: cleanServerMocktestText(rawItem.option5_en || ''),
+      solution_hi: stripServerSolutionPrefix(cleanServerMocktestText(rawItem.solution_hi || '')),
+      solution_en: stripServerSolutionPrefix(cleanServerMocktestText(rawItem.solution_en || '')),
+      answer: (rawItem.answer || 'A').trim().toUpperCase(),
+      set_name: setName,
+      difficulty_level: rawItem.difficulty_level || difficulty || 'medium',
+      test_date: '',
+      subject: (rawItem.subject || 'Current Affairs').trim(),
+      subject_level: rawItem.subject_level || '',
+      figure_notes: rawItem.figure_notes || '',
+      correction_notes: rawItem.correction_notes || 'Added via AI Quick Add / Paste',
+      source_pdf: '',
+      source_pages: String(targetPageNumber),
+      source_question_reference: rawItem.source_question_reference || `Q.${nextQuestionNumber} (Added)`,
+      latex_check: 'checked',
+      html_check: 'checked',
+      answer_check: 'checked',
+      solution_check: 'checked',
+      hash_figure: '',
+      manually_review: 'checked',
+      duplicate_statistics: 'Unique added question'
+    };
+
+    res.json({
+      item: sanitizedItem,
+      summary
+    });
+  } catch (error: any) {
+    console.warn("MockTest Add Question failed:", error?.message || error);
+    res.status(500).json({ error: error.message || "Failed to add question with AI" });
   }
 });
 

@@ -445,108 +445,121 @@ export async function captureFromStudyAiBridge(
 export function parseExtensionOutputToElements(raw: string): ExtractedElement[] {
   if (!raw) return [];
 
-  let text = raw.trim();
+  const text = raw.trim();
+  const chunksToScan: string[] = [];
 
-  // Extract from markdown code fence \`\`\`json ... \`\`\`
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch) {
-    text = fenceMatch[1].trim();
-  }
-
-  // Find array [ ... ]
-  const startIdx = text.indexOf('[');
-  const endIdx = text.lastIndexOf(']');
-
-  if (startIdx >= 0 && endIdx > startIdx) {
-    const jsonStr = text.slice(startIdx, endIdx + 1);
-    try {
-      const parsed = JSON.parse(jsonStr);
-      if (Array.isArray(parsed)) {
-        return parsed.map((item: any, idx: number) => {
-          // If item has content directly
-          if (item.content) {
-            return {
-              id: `el_ext_${Date.now()}_${idx}`,
-              type: item.type || 'text',
-              content: item.content,
-              bbox: item.bbox,
-            };
-          }
-
-          // If item is structured question: { question, options, answer }
-          if (item.question) {
-            let combined = item.question.trim();
-            if (Array.isArray(item.options) && item.options.length > 0) {
-              combined += '\n' + item.options.map((opt: string) => opt.trim()).join('\n');
-            }
-            if (item.answer) {
-              const cleanAns = String(item.answer).replace(/^(Answer|Ans)\s*[:\-]\s*/i, '').trim();
-              combined += `\nAnswer: ${cleanAns}`;
-            }
-
-            return {
-              id: `el_ext_${Date.now()}_${idx}`,
-              type: 'text' as const,
-              content: combined,
-            };
-          }
-
-          // If item is bilingual MockTest item: { question_hi, question_en, ... }
-          if (item.question_hi || item.question_en) {
-            const q = (item.question_hi || item.question_en || '').trim();
-            const opts = [
-              item.option1_hi || item.option1_en,
-              item.option2_hi || item.option2_en,
-              item.option3_hi || item.option3_en,
-              item.option4_hi || item.option4_en
-            ].filter(Boolean);
-            let combined = q;
-            if (opts.length) combined += '\n' + opts.join('\n');
-            if (item.answer) combined += `\nAnswer: ${item.answer}`;
-
-            return {
-              id: `el_ext_${Date.now()}_${idx}`,
-              type: 'text' as const,
-              content: combined,
-            };
-          }
-
-          // Fallback object to string
-          return {
-            id: `el_ext_${Date.now()}_${idx}`,
-            type: 'text' as const,
-            content: typeof item === 'string' ? item : JSON.stringify(item),
-          };
-        });
-      }
-    } catch (e) {
-      // JSON parse failed, continue to fallback
+  // Extract from all markdown code fences
+  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fenceRe.exec(text)) !== null) {
+    if (match[1] && match[1].trim().length > 5) {
+      chunksToScan.push(match[1].trim());
     }
   }
 
-  // Single object check { question: ... } or { content: ... }
-  const objStart = text.indexOf('{');
-  const objEnd = text.lastIndexOf('}');
-  if (objStart >= 0 && objEnd > objStart) {
+  if (chunksToScan.length === 0) {
+    const unclosedMatch = text.match(/```(?:json)?\s*([\s\S]+)$/i);
+    if (unclosedMatch && unclosedMatch[1].trim().length > 5) {
+      chunksToScan.push(unclosedMatch[1].trim());
+    } else {
+      chunksToScan.push(text);
+    }
+  }
+
+  const allItems: any[] = [];
+  for (const chunk of chunksToScan) {
+    const startIdx = chunk.indexOf('[');
+    const endIdx = chunk.lastIndexOf(']');
+
+    if (startIdx >= 0 && endIdx > startIdx) {
+      const jsonStr = chunk.slice(startIdx, endIdx + 1);
+      try {
+        const parsed = JSON.parse(jsonStr);
+        if (Array.isArray(parsed)) {
+          allItems.push(...parsed);
+          continue;
+        }
+      } catch (_) {}
+    }
+
+    // Try parsing whole chunk
     try {
-      const parsed = JSON.parse(text.slice(objStart, objEnd + 1));
-      if (parsed.question || parsed.content) {
-        let combined = parsed.content || parsed.question;
-        if (Array.isArray(parsed.options)) {
-          combined += '\n' + parsed.options.join('\n');
-        }
-        if (parsed.answer) {
-          combined += `\nAnswer: ${parsed.answer}`;
-        }
-        return [
-          {
-            id: `el_ext_${Date.now()}_0`,
-            type: 'text',
-            content: combined,
-          },
-        ];
+      const parsed = JSON.parse(chunk);
+      if (Array.isArray(parsed)) {
+        allItems.push(...parsed);
+        continue;
+      } else if (parsed && typeof parsed === 'object') {
+        allItems.push(parsed);
+        continue;
       }
-    } catch {}
+    } catch (_) {}
+  }
+
+  if (allItems.length > 0) {
+    return allItems.map((item: any, idx: number) => {
+      // If item has content directly
+      if (item.content) {
+        return {
+          id: `el_ext_${Date.now()}_${idx}`,
+          type: item.type || 'text',
+          content: item.content,
+          bbox: item.bbox,
+        };
+      }
+
+      // If item is structured question: { question, options, answer, solution }
+      if (item.question) {
+        let combined = item.question.trim();
+        if (Array.isArray(item.options) && item.options.length > 0) {
+          combined += '\n' + item.options.map((opt: string) => opt.trim()).join('\n');
+        }
+        if (item.answer) {
+          const cleanAns = String(item.answer).replace(/^(Answer|Ans)\s*[:\-]\s*/i, '').trim();
+          combined += `\nAnswer: ${cleanAns}`;
+        }
+        const sol = item.solution || item.explanation || item.sol || item.solution_hi || item.solution_en;
+        if (sol) {
+          combined += `\nSolution: ${sol}`;
+        }
+
+        return {
+          id: `el_ext_${Date.now()}_${idx}`,
+          type: 'text' as const,
+          content: combined,
+        };
+      }
+
+      // If item is bilingual MockTest item: { question_hi, question_en, solution_hi, ... }
+      if (item.question_hi || item.question_en) {
+        const q = (item.question_hi || item.question_en || '').trim();
+        const opts = [
+          item.option1_hi || item.option1_en,
+          item.option2_hi || item.option2_en,
+          item.option3_hi || item.option3_en,
+          item.option4_hi || item.option4_en
+        ].filter(Boolean);
+        let combined = q;
+        if (opts.length) combined += '\n' + opts.join('\n');
+        if (item.answer) combined += `\nAnswer: ${item.answer}`;
+        const sol = item.solution_hi || item.solution_en || item.solution || item.explanation;
+        if (sol) {
+          combined += `\nSolution: ${sol}`;
+        }
+
+        return {
+          id: `el_ext_${Date.now()}_${idx}`,
+          type: 'text' as const,
+          content: combined,
+        };
+      }
+
+      // Fallback object to string
+      return {
+        id: `el_ext_${Date.now()}_${idx}`,
+        type: 'text' as const,
+        content: typeof item === 'string' ? item : JSON.stringify(item),
+      };
+    });
   }
 
   // Pure text fallback

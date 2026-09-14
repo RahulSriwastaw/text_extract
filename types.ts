@@ -99,6 +99,8 @@ export interface MockTestMcqItem {
   hash_figure?: string;
   manually_review?: string;
   duplicate_statistics?: string;
+  passage_hi?: string;
+  passage_en?: string;
   pageNumber?: number;
   pageId?: string;
 }

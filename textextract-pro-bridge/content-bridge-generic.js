@@ -471,35 +471,61 @@
       .replace(/(^|\n)\s*json\s*\n\s*(\[)/gi, "$1$2")
       .replace(/^json\s*/i, "")
       .trim();
-    const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fence) raw = fence[1].trim();
-    else {
-      const open = raw.match(/```(?:json)?\s*([\s\S]+)$/i);
-      if (open) raw = open[1].trim();
+
+    const candidates = [];
+    const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
+    let m;
+    while ((m = fenceRe.exec(raw)) !== null) {
+      if (m[1] && m[1].trim()) candidates.push(m[1].trim());
     }
-    const a0 = raw.indexOf("[");
-    if (a0 >= 0) raw = raw.slice(a0);
-    const repaired = repairJsonStringNewlines(raw);
-    const a1 = repaired.lastIndexOf("]");
-    if (repaired.startsWith("[") && a1 > 0) {
-      const slice = repaired.slice(0, a1 + 1);
-      const parsed = tryParseJsonLoose(slice);
-      // Accept both standard {question} format and MockTest {question_hi/question_en/question_r} format
-      const isValidMcqObj = (x) =>
-        x && (x.question != null || x.question_hi != null || x.question_en != null ||
-               x.question_r != null || x.type != null || x.content != null);
-      if (Array.isArray(parsed) && parsed.some(isValidMcqObj)) {
-        return parsed.filter(isValidMcqObj);
+    if (!candidates.length) {
+      const open = raw.match(/```(?:json)?\s*([\s\S]+)$/i);
+      if (open) candidates.push(open[1].trim());
+      else candidates.push(raw);
+    }
+
+    const isValidMcqObj = (x) =>
+      x && (x.question != null || x.question_hi != null || x.question_en != null ||
+            x.question_r != null || x.type != null || x.content != null);
+
+    const allQuestions = [];
+    const seenSignatures = new Set();
+
+    for (const chunk of candidates) {
+      const a0 = chunk.indexOf("[");
+      const working = a0 >= 0 ? chunk.slice(a0) : chunk;
+      const repaired = repairJsonStringNewlines(working);
+      const a1 = repaired.lastIndexOf("]");
+      if (repaired.startsWith("[") && a1 > 0) {
+        const slice = repaired.slice(0, a1 + 1);
+        const parsed = tryParseJsonLoose(slice);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (isValidMcqObj(item)) {
+              const sig = (item.question_hi || item.question_en || item.question || item.content || item.question_r || JSON.stringify(item)).slice(0, 60);
+              if (!seenSignatures.has(sig)) {
+                seenSignatures.add(sig);
+                allQuestions.push(item);
+              }
+            }
+          }
+        }
+      }
+
+      const objs = extractBalancedObjects(repaired);
+      for (const o of objs) {
+        const p = tryParseJsonLoose(o);
+        if (p && isValidMcqObj(p)) {
+          const sig = (p.question_hi || p.question_en || p.question || p.content || p.question_r || JSON.stringify(p)).slice(0, 60);
+          if (!seenSignatures.has(sig)) {
+            seenSignatures.add(sig);
+            allQuestions.push(p);
+          }
+        }
       }
     }
-    const objs = extractBalancedObjects(repaired);
-    const out = [];
-    for (const o of objs) {
-      const p = tryParseJsonLoose(o);
-      if (p && (p.question != null || p.question_hi != null || p.question_en != null ||
-                p.question_r != null || p.type != null || p.content != null)) out.push(p);
-    }
-    return out;
+
+    return allQuestions;
   }
 
   function extractJsonCandidate(text) {
@@ -600,21 +626,28 @@
       for (const n of deepQueryAll(sel)) push(n.innerText || n.textContent || "");
     }
 
-    // Check direct code blocks in reverse (newest turn first)
-    for (let i = chunks.length - 1; i >= 0; i--) {
-      const c = chunks[i];
-      if (/"question(?:_[a-z]+)?"\s*:/i.test(c)) {
+    // Gather questions from ALL code blocks and chunks, never skip any chunk
+    const allQs = [];
+    const seenSigs = new Set();
+    for (const c of chunks) {
+      if (/"question(?:_[a-z]+)?"\s*:/i.test(c) || /"options"\s*:/i.test(c)) {
         const qs = extractQuestionsFromText(c);
-        if (qs.length) return c;
+        for (const q of qs) {
+          const sig = (q.question_hi || q.question_en || q.question || q.content || q.question_r || JSON.stringify(q)).slice(0, 60);
+          if (!seenSigs.has(sig)) {
+            seenSigs.add(sig);
+            allQs.push(q);
+          }
+        }
       }
     }
+    if (allQs.length > 0) {
+      return "```json\n" + JSON.stringify(allQs, null, 2) + "\n```";
+    }
 
-    // Prefer chunk with question JSON
+    // Fallback: join all chunks with questions
     const withQs = chunks.filter((c) => /"question(?:_[a-z]+)?"\s*:/i.test(c));
     if (withQs.length) {
-      withQs.sort((a, b) => b.length - a.length);
-      const best = withQs[0];
-      if (extractQuestionsFromText(best).length) return best;
       return withQs.join("\n\n");
     }
 

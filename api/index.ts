@@ -1353,6 +1353,7 @@ function cleanServerMocktestText(text: string): string {
   if (!text) return '';
   let res = text;
   res = stripServerExamTagsAndJunk(res);
+
   // Strip AI coach filler
   res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Important Exam Point\s*:\s*(?:<\/strong>|<\/b>)?[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
   // Strip scaffolding headers
@@ -1365,117 +1366,55 @@ function cleanServerMocktestText(text: string): string {
   res = res.replace(/[\x09\b]imes/g, '\\times');
   res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
 
+  // Fix double-escaped backslashes (\\frac -> \frac, \\sqrt -> \sqrt)
+  res = res.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
+
+  // Standardize MathJax inline \( ... \) and display \[ ... \] into KaTeX $ and $$
+  res = res.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
+  res = res.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+
+  // Protect Indian Rupee currency from math dollars
+  res = res.replace(/\$\s*=\s*₹/g, '= ₹');
+  res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
+  res = res.replace(/\$\s*₹/g, '₹');
+  res = res.replace(/₹\s*\$/g, '₹');
+  res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
+
+  // Auto-wrap naked LaTeX fractions \frac{num}{den} if not inside $...$
+  res = res.replace(/(?<!\$)(?:\\frac\s*\{[^{}]+\}\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
+
+  // Auto-wrap naked LaTeX square roots \sqrt{...} if not inside $...$
+  res = res.replace(/(?<!\$)(?:\\sqrt(?:\s*\[[^\]]+\])?\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
+
+  // Convert Unicode roots to KaTeX
+  res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt[3]{$1}$$');
+  res = res.replace(/√\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt{$1}$$');
+
+  // Convert Unicode vulgar fractions to clean LaTeX
+  res = res.replace(/½/g, '$$\\frac{1}{2}$$');
+  res = res.replace(/¼/g, '$$\\frac{1}{4}$$');
+  res = res.replace(/¾/g, '$$\\frac{3}{4}$$');
+  res = res.replace(/⅓/g, '$$\\frac{1}{3}$$');
+  res = res.replace(/⅔/g, '$$\\frac{2}{3}$$');
+
+  // Degree symbol inside math
+  res = res.replace(/(\d+)\s*\^\\circ/g, '$$$1^\\circ$$');
+
+  // Consolidate adjacent $ math blocks
+  res = res.replace(/\$\s*([+\-*=×÷<≤>≥≠])\s*\$/g, ' $1 ');
+  res = res.replace(/\$\s*\$/g, ' ');
+
   // Fix broken br tags
   res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
   res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
 
-  // 1. Convert LaTeX fractions \frac{num}{den} to (num) / (den) or num / den
-  for (let i = 0; i < 4; i++) {
-    res = res.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_m, num, den) => {
-      const cleanNum = num.trim();
-      const cleanDen = den.trim();
-      const numWrap = /[\s+\-*\/=]|\\times|\\div|×|÷|−|\+/.test(cleanNum) && !cleanNum.startsWith('(') && !cleanNum.startsWith('|')
-        ? `(${cleanNum})`
-        : cleanNum;
-      const denWrap = /[\s+\-*\/=]|\\times|\\div|×|÷|−|\+/.test(cleanDen) && !cleanDen.startsWith('(')
-        ? `(${cleanDen})`
-        : cleanDen;
-      return `${numWrap} / ${denWrap}`;
-    });
-  }
-  res = res.replace(/\\frac\s*\{?([^}\s]+)\}?\s*\{?([^}\s]+)\}?/g, '$1 / $2');
-
-  // 2. Convert roots
-  res = res.replace(/\\sqrt\[3\]\s*\{([^{}]+)\}/g, '∛($1)');
-  res = res.replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)');
-  res = res.replace(/\\sqrt\s*([a-zA-Z0-9]+)/g, '√$1');
-
-  // 3. Convert standard math operators to clean Unicode
-  res = res.replace(/\\times\b/g, '×');
-  res = res.replace(/\\div\b/g, '÷');
-  res = res.replace(/\\pm\b/g, '±');
-  res = res.replace(/\\mp\b/g, '∓');
-  res = res.replace(/\\cdot\b/g, '·');
-  res = res.replace(/\\leq?\b/g, '≤');
-  res = res.replace(/\\geq?\b/g, '≥');
-  res = res.replace(/\\neq?\b/g, '≠');
-  res = res.replace(/\\approx\b/g, '≈');
-  res = res.replace(/\\equiv\b/g, '≡');
-  res = res.replace(/\\propto\b/g, '∝');
-  res = res.replace(/\\infty\b/g, '∞');
-
-  // 4. Degree symbol
-  res = res.replace(/(?:\^\\circ|\^\{\\circ\}|\\circ)\b/g, '°');
-  res = res.replace(/(\d+)\s*\^\\circ/g, '$1°');
-  res = res.replace(/(\d+)\s*°/g, '$1°');
-
-  // 5. Greek letters
-  res = res.replace(/\\alpha\b/g, 'α');
-  res = res.replace(/\\beta\b/g, 'β');
-  res = res.replace(/\\theta\b/g, 'θ');
-  res = res.replace(/\\pi\b/g, 'π');
-  res = res.replace(/\\Delta\b/g, 'Δ');
-  res = res.replace(/\\sigma\b/g, 'σ');
-  res = res.replace(/\\lambda\b/g, 'λ');
-  res = res.replace(/\\omega\b/g, 'ω');
-  res = res.replace(/\\mu\b/g, 'μ');
-
-  // 6. Superscripts & Subscripts
-  res = res.replace(/\^2\b/g, '²');
-  res = res.replace(/\^3\b/g, '³');
-  res = res.replace(/\^\{2\}/g, '²');
-  res = res.replace(/\^\{3\}/g, '³');
-  res = res.replace(/\^\{([^{}]+)\}/g, '<sup>$1</sup>');
-  res = res.replace(/_\{([^{}]+)\}/g, '<sub>$1</sub>');
-  res = res.replace(/\^([0-9a-zA-Z])/g, '<sup>$1</sup>');
-  res = res.replace(/_([0-9a-zA-Z])/g, '<sub>$1</sub>');
-
-  // 7. LaTeX formatting wrappers
-  res = res.replace(/\\text(?:bf|it|rm)?\s*\{([^{}]+)\}/g, '$1');
-  res = res.replace(/\\math(?:bf|it|rm|sf|tt)?\s*\{([^{}]+)\}/g, '$1');
-  res = res.replace(/\\left\s*([|(\[{])/g, '$1');
-  res = res.replace(/\\right\s*([|)\]}])/g, '$1');
-  res = res.replace(/\\left\./g, '');
-  res = res.replace(/\\right\./g, '');
-
-  // 8. Logic and set symbols
-  res = res.replace(/\\wedge\b/g, '∧');
-  res = res.replace(/\\vee\b/g, '∨');
-  res = res.replace(/\\rightarrow\b/g, '→');
-  res = res.replace(/\\Rightarrow\b/g, '⇒');
-  res = res.replace(/\\cap\b/g, '∩');
-  res = res.replace(/\\cup\b/g, '∪');
-  res = res.replace(/\\subset\b/g, '⊂');
-  res = res.replace(/\\in\b/g, '∈');
-
-  // 9. Percentage & currency
-  res = res.replace(/(\d+(?:\.\d+)?)\\\%/g, '$1%');
-  res = res.replace(/\$\s*=\s*/g, '= ');
-  res = res.replace(/=\s*\$\s*₹/g, '= ₹');
-  res = res.replace(/\$\s*₹/g, '₹');
-  res = res.replace(/₹\s*\$/g, '₹');
-  res = res.replace(/(₹\s*\d+(?:,\d+)*(?:\.\d+)?)\$/g, '$1');
-
-  // 10. COMPLETE STRIPPING OF ALL $ AND $$ DELIMITERS!
-  res = res.replace(/\$\$/g, '');
-  res = res.replace(/(?<!\\)\$/g, '');
-  res = res.replace(/\\\$/g, '$');
-
-  // 11. Spacing artifacts
-  res = res.replace(/\\[,;!\s]/g, ' ');
-  res = res.replace(/\\quad\b/g, ' ');
-  res = res.replace(/\\qquad\b/g, '  ');
-
-  // 12. Minus sign
-  res = res.replace(/(\w|\))\s*-\s*(\w|\()/g, '$1 − $2');
-
-  // 13. Paragraph & whitespace cleanup
+  // Clean consecutive <br> and paragraph starts
   res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
   res = res.replace(/<p>\s*<br\s*\/?>/gi, '<p>');
   res = res.replace(/[ \t]{2,}/g, ' ');
-  res = res.replace(/\s*[\/\\]\s*$/g, '');
   return res.trim();
 }
+
 
 function stripServerOptionLetterReferences(text: string): string {
   if (!text) return '';
@@ -1630,6 +1569,51 @@ function safeParseAiJson(rawJson: string): any {
   return collected;
 }
 
+function safeParseAiJsonObject(rawJson: string): any {
+  if (!rawJson || !rawJson.trim()) return {};
+  const text = rawJson.trim();
+
+  // 1. Direct parse after stripping markdown fences
+  const cleanFence = text
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    const obj = JSON.parse(cleanFence);
+    if (Array.isArray(obj)) return obj[0] || {};
+    if (typeof obj === 'object' && obj !== null) return obj;
+  } catch (_) {}
+
+  // 2. Escape single-backslash LaTeX commands
+  const safeChunk = cleanFence
+    .replace(/(?<!\\)\\frac/g, '\\\\frac')
+    .replace(/(?<!\\)\\times/g, '\\\\times')
+    .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
+    .replace(/(?<!\\)\\text/g, '\\\\text')
+    .replace(/(?<!\\)\\div/g, '\\\\div')
+    .replace(/(?<!\\)\\pm/g, '\\\\pm')
+    .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
+    .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
+    .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
+    .replace(/(?<!\\)\\neq/g, '\\\\neq')
+    .replace(/(?<!\\)\\approx/g, '\\\\approx');
+
+  try {
+    const obj = JSON.parse(safeChunk);
+    if (Array.isArray(obj)) return obj[0] || {};
+    if (typeof obj === 'object' && obj !== null) return obj;
+  } catch (_) {}
+
+  // 3. Fallback to safeParseAiJson
+  const list = safeParseAiJson(rawJson);
+  if (Array.isArray(list) && list.length > 0) {
+    return list[0];
+  }
+  return typeof list === 'object' && list !== null ? list : {};
+}
+
+
 app.post('/api/mocktest-solve', async (req, res) => {
   try {
     const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option1_en, option2_en, option3_en, option4_en, answer, question_type } = req.body;
@@ -1746,7 +1730,7 @@ CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
 
     const rawJson = await runAIAction(executeSolve, userKey);
 
-    const parsed = safeParseAiJson(rawJson);
+    const parsed = safeParseAiJsonObject(rawJson);
     res.json({
       solution_hi: stripServerSolutionPrefix(cleanServerMocktestText(parsed.solution_hi || '')),
       solution_en: stripServerSolutionPrefix(cleanServerMocktestText(parsed.solution_en || '')),
@@ -1867,7 +1851,7 @@ Respond ONLY with a valid JSON object:
 
     const rawJson = await runAIAction(executeRepair, userKey);
 
-    const parsed = safeParseAiJson(rawJson);
+    const parsed = safeParseAiJsonObject(rawJson);
     if (parsed && typeof parsed === 'object') {
       if (parsed.question_hi) parsed.question_hi = cleanServerMocktestText(parsed.question_hi);
       if (parsed.question_en) parsed.question_en = cleanServerMocktestText(parsed.question_en);
@@ -2004,7 +1988,7 @@ INSPECTION INSTRUCTIONS:
     };
 
     const rawJson = await runAIAction(executeReverify, userKey);
-    const parsed = safeParseAiJson(rawJson);
+    const parsed = safeParseAiJsonObject(rawJson);
     const rec = parsed?.recovered_fields || {};
     const cleanedRecovered: any = {};
     for (const k of Object.keys(rec)) {
@@ -2480,7 +2464,7 @@ Output ONLY a JSON object matching this structure:
     };
 
     const rawJson = await runAIAction(executeGenerate, userKey);
-    const parsed = safeParseAiJson(rawJson);
+    const parsed = safeParseAiJsonObject(rawJson);
     res.json({
       item: {
         ...item,
@@ -2728,8 +2712,8 @@ Respond with ONLY a strict JSON object:
     };
 
     const rawJson = await runAIAction(executeChat, userKey);
-    const parsed = safeParseAiJson(rawJson);
-    const updated = parsed.updatedItem || parsed;
+    const parsed = safeParseAiJsonObject(rawJson);
+    const updated = (parsed.updatedItem && typeof parsed.updatedItem === "object") ? parsed.updatedItem : parsed;
     const reply = parsed.reply || "प्रश्न को आपके निर्देशानुसार सफलतापूर्वक अपडेट कर दिया गया है।";
 
     // Deep sanitize fields
@@ -2896,9 +2880,9 @@ Respond with ONLY a strict JSON object:
     };
 
     const rawJson = await runAIAction(executeAdd, userKey);
-    const parsed = safeParseAiJson(rawJson);
-    const rawItem = parsed.item || parsed;
-    const summary = parsed.summary || "नया प्रश्न सफलतापूर्वक तैयार कर लिया गया है।";
+    const parsedObj = safeParseAiJsonObject(rawJson);
+    const rawItem = (parsedObj.item && typeof parsedObj.item === "object") ? parsedObj.item : parsedObj;
+    const summary = parsedObj.summary || (rawItem !== parsedObj ? rawItem.summary : "") || "नया प्रश्न सफलतापूर्वक तैयार कर लिया गया है।";
 
     const sanitizedItem = {
       id: `mt_ai_added_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,

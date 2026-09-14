@@ -22,6 +22,7 @@ import {
   Layers
 } from 'lucide-react';
 import { MockTestMcqItem, DifficultyLevel } from '../types';
+import { LatexRenderer } from './MocktestExtractor';
 import { 
   addMockTestQuestionWithAi, 
   chatFixMockTestItemWithAi,
@@ -38,27 +39,9 @@ interface MocktestAddQuestionModalProps {
   onAddQuestion: (newItem: MockTestMcqItem, targetPageNumber: number) => void;
 }
 
-const LatexContent: React.FC<{ content: string; className?: string }> = ({ content, className }) => {
+const LatexContent: React.FC<{ content: string; className?: string; inline?: boolean }> = ({ content, className, inline }) => {
   if (!content) return null;
-  const clean = content
-    .replace(/<hr\s*\/?>/gi, '\n\n---\n\n')
-    .replace(/<div[^>]*>/gi, '')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<(?:b|strong)[^>]*>(.*?)<\/(?:b|strong)>/gi, '**$1**')
-    .replace(/<(?:i|em)[^>]*>(.*?)<\/(?:i|em)>/gi, '*$1*')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/^<p>/i, '')
-    .replace(/<\/p>$/i, '')
-    .trim();
-
-  return (
-    <div className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
-      <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-        {clean}
-      </ReactMarkdown>
-    </div>
-  );
+  return <LatexRenderer content={content} className={className} inline={inline} />;
 };
 
 export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> = ({
@@ -159,6 +142,9 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
         difficulty: selectedDifficulty
       });
 
+      if (!res.item || (!res.item.question_hi && !res.item.question_en)) {
+        throw new Error('AI ने प्रश्न तैयार नहीं किया या उत्तर खाली रहा। कृपया पुनः प्रयास करें।');
+      }
       setGeneratedItem(res.item);
       setAiSummary(res.summary);
     } catch (err: any) {

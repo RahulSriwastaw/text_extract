@@ -201,6 +201,23 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
   // 6. Auto-wrap naked fractions like \frac{...}{...} if missing $
   clean = clean.replace(/(?<!\$)(?:\\frac\s*\{[^{}]+\}\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
 
+  // 7. Auto-wrap naked \text{...} sequences outside $...$
+  // e.g. \text{Distance} = \text{Speed} \times \text{Time} → rendered as math
+  clean = clean.replace(/(?<!\$)((?:\\text\{[^{}]*\}[\s=+\-×÷*\\]*)+)(?!\$)/g, (m) => {
+    const t = m.trim();
+    return t ? `$${t}$` : m;
+  });
+  // Also wrap isolated naked LaTeX operator sequences (e.g. "= \times 5")
+  clean = clean.replace(/(?<!\$)((?:\\(?:times|div|cdot|pm|mp|leq|geq|neq|approx|equiv)\b[\s0-9a-zA-Z]*)+)(?!\$)/g, (m) => {
+    const t = m.trim();
+    return t ? `$${t}$` : m;
+  });
+
+  // 8. Fix orphaned $ signs near ₹ currency (e.g. "₹x.He sold it...25x$" → clean)
+  clean = clean.replace(/₹\s*\$/g, '₹');
+  clean = clean.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
+  clean = clean.replace(/([a-zA-Z0-9,])\$(\s|$)/g, '$1$2');
+
   const customTableComponents = {
     table: ({ children }: any) => (
       <div className="my-3 overflow-x-auto w-full rounded-xl border border-white/[0.15] bg-black/50 shadow-md">

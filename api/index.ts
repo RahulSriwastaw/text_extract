@@ -1447,7 +1447,45 @@ function cleanServerMocktestText(text: string): string {
   // Auto-wrap naked LaTeX square roots \sqrt{...} if not inside $...$
   res = res.replace(/(?<!\$)(?:\\sqrt(?:\s*\[[^\]]+\])?\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
 
-  // Convert Unicode roots to KaTeX
+  // ─── FIX: Auto-wrap naked \text{...} commands outside $...$ ─────────────────
+  // e.g. \text{दूरी (Distance)} = \text{चाल (Speed)} → wrap the whole expression
+  // Strategy: find sequences of naked LaTeX operators/commands and wrap them
+  res = res.replace(
+    /(?<!\$)((?:\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{[^{}]*\}|\\(?:times|div|cdot|pm|mp|leq|geq|neq|approx|equiv|ne|le|ge|ll|gg|subset|supset|in|notin|sum|prod|int|partial|nabla|infty|ldots|cdots|forall|exists|Delta|Sigma|Pi|Omega|alpha|beta|gamma|theta|pi|lambda|mu|sigma|phi|psi|rho|eta|xi|zeta|varepsilon|varphi)\b|[a-zA-Z0-9_\^{}\\+\-\*\/\(\)\[\]=\.,\s])+)(?!\$)/g,
+    (match) => {
+      // Only wrap if it contains actual LaTeX commands (has backslash commands)
+      if (!/\\(?:text|times|div|cdot|frac|sqrt|pm|mathrm|mathbf|operatorname)/.test(match)) return match;
+      const trimmed = match.trim();
+      if (!trimmed) return match;
+      // Don't re-wrap if already inside $
+      return `$${trimmed}$`;
+    }
+  );
+
+  // Simpler targeted fix: any \text{...} sequence outside $...$ gets wrapped
+  // This catches cases the above regex might miss
+  res = res.replace(/(?<!\$)((?:\\text\{[^{}]*\}[\s=+\-×÷*]*)+)(?!\$)/g, (m) => {
+    const t = m.trim();
+    return t ? `$${t}$` : m;
+  });
+
+  // ─── FIX: Orphaned $ signs near currency ₹ and variable patterns ────────────
+  // Problem: AI writes "₹x. He sold it...25x$" — the $ is meant to close math
+  // but there's no matching opener, causing garbled text.
+  // Step 1: Remove $ signs that immediately follow ₹ (e.g. ₹$200 → ₹200)
+  res = res.replace(/₹\s*\$/g, '₹');
+  // Step 2: Remove trailing orphan $ at end of a word/number (e.g. "100x$" → "100x" when not math)
+  // Only strip if the $ is preceded by alphanumeric (not a math closing)
+  res = res.replace(/([a-zA-Z0-9,])\$(\s|<|$)/g, '$1$2');
+  // Step 3: Remove $ that is immediately followed by a space or punctuation (not math)
+  res = res.replace(/\$\s+([^0-9a-zA-Z\\({])/g, ' $1');
+  // Step 4: Existing currency protections (preserve)
+  res = res.replace(/\$\s*=\s*₹/g, '= ₹');
+  res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
+  res = res.replace(/\$\s*₹/g, '₹');
+  res = res.replace(/₹\s*\$/g, '₹');
+  res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
+
   res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt[3]{$1}$$');
   res = res.replace(/√\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt{$1}$$');
 
@@ -2129,10 +2167,11 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
 - BALANCED MEDIUM LENGTH: 3 to 6 focused lines or 3-5 structured steps/points.
 - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'. DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'.
 - MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
-  * Enclose all math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
+  * Enclose ALL math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
   * Fractions: Always write as $\frac{numerator}{denominator}$. Powers: $x^2$, $10^{-5}$. Roots: $\sqrt{x}$, $\sqrt[3]{27}$.
   * Operators and Greek symbols: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\degree$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\infty$.
-  * DO NOT wrap currency in dollar signs (write '₹4,800' or 'Rs. 500'). Wrap all questions, options, and explanations in semantic HTML <p>...</p>.
+  * CRITICAL: \text{...} MUST ALWAYS be inside $...$. WRONG: \text{Distance} = \text{Speed} \times \text{Time}. CORRECT: $\text{Distance} = \text{Speed} \times \text{Time}$.
+  * CRITICAL CURRENCY RULE: NEVER use $ (dollar sign) to wrap ₹ amounts or algebraic cost variables. Write '₹4,800', 'Rs. 500', '₹(Cost)' or 'cost = ₹x'. NEVER write '₹x$' or '$₹4800$' or '$x$' directly after ₹.
 - Respond ONLY with the JSON array.`;
     } else {
       promptText = `You are a professional Exam Paper Digitizer and MockTest Content Architect.
@@ -2207,10 +2246,12 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
   * State the concepts, facts, dates, names, formulas, and values directly! (e.g. "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था।", "अतः समय = 160 मिनट।"). NEVER mention the option letter!
 - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', '<b>हल:</b>', 'Solution:', '<b>Solution:</b>', or 'Explanation:'! The test portal UI renders its own Solution header. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
 - MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
-  * Enclose all math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
+  * Enclose ALL math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
   * Fractions: Always write as $\frac{numerator}{denominator}$. Powers: $x^2$, $10^{-5}$. Roots: $\sqrt{x}$, $\sqrt[3]{27}$.
   * Operators and Greek symbols: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\degree$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\infty$.
-  * DO NOT wrap currency in dollar signs (write '₹4,800' or 'Rs. 500'). Wrap all questions, options, and explanations in semantic HTML <p>...</p>. Use <b>...</b> for emphasis and clean HTML tables <table>...</table> for matching lists or comparison charts!
+  * CRITICAL: \text{...} MUST ALWAYS be inside $...$. WRONG: \text{Distance} = \text{Speed} \times \text{Time}. CORRECT: $\text{Distance} = \text{Speed} \times \text{Time}$.
+  * CRITICAL CURRENCY RULE: NEVER use $ (dollar sign) to wrap ₹ amounts or algebraic cost variables. Write '₹4,800', 'Rs. 500', '₹(Cost)' or 'let cost = x'. NEVER write '₹x$' or '$₹4800$'. If a question mentions 'an article for ₹x', write it as plain text: 'an article for ₹x' — do NOT write '₹$x$'.
+  * DO NOT wrap currency in dollar signs. Wrap all questions, options, and explanations in semantic HTML <p>...</p>. Use <b>...</b> for emphasis and clean HTML tables <table>...</table> for matching lists or comparison charts!
 - Respond ONLY with the JSON array.`;
     }
 

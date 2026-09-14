@@ -1441,50 +1441,42 @@ function cleanServerMocktestText(text: string): string {
   res = res.replace(/₹\s*\$/g, '₹');
   res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
 
-  // Auto-wrap naked LaTeX fractions \frac{num}{den} if not inside $...$
-  res = res.replace(/(?<!\$)(?:\\frac\s*\{[^{}]+\}\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
+  // Simplify simple number options wrapped in $: e.g. "$420$ litres" or "$420$ लीटर"
+  res = res.replace(/<p>\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)<\/p>/gi, '<p>$1 $2</p>');
+  res = res.replace(/^\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)$/gi, '$1 $2');
 
-  // Auto-wrap naked LaTeX square roots \sqrt{...} if not inside $...$
-  res = res.replace(/(?<!\$)(?:\\sqrt(?:\s*\[[^\]]+\])?\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
+  // Fix unclosed single $ at start of option like "$420 litres" or "$420 लीटर"
+  if (/^\s*<p>\s*\$\s*(\d+[\s\S]*)<\/p>\s*$/i.test(res) && (res.match(/\$/g) || []).length === 1) {
+    res = res.replace(/<p>\s*\$\s*/i, '<p>');
+  }
+  if (/^\s*\$\s*(\d+[\s\S]*)$/i.test(res) && (res.match(/\$/g) || []).length === 1) {
+    res = res.replace(/^\s*\$\s*/, '');
+  }
 
-  // ─── FIX: Auto-wrap naked \text{...} commands outside $...$ ─────────────────
-  // e.g. \text{दूरी (Distance)} = \text{चाल (Speed)} → wrap the whole expression
-  // Strategy: find sequences of naked LaTeX operators/commands and wrap them
-  res = res.replace(
-    /(?<!\$)((?:\\(?:text|mathrm|mathbf|mathit|operatorname)\s*\{[^{}]*\}|\\(?:times|div|cdot|pm|mp|leq|geq|neq|approx|equiv|ne|le|ge|ll|gg|subset|supset|in|notin|sum|prod|int|partial|nabla|infty|ldots|cdots|forall|exists|Delta|Sigma|Pi|Omega|alpha|beta|gamma|theta|pi|lambda|mu|sigma|phi|psi|rho|eta|xi|zeta|varepsilon|varphi)\b|[a-zA-Z0-9_\^{}\\+\-\*\/\(\)\[\]=\.,\s])+)(?!\$)/g,
-    (match) => {
-      // Only wrap if it contains actual LaTeX commands (has backslash commands)
-      if (!/\\(?:text|times|div|cdot|frac|sqrt|pm|mathrm|mathbf|operatorname)/.test(match)) return match;
-      const trimmed = match.trim();
-      if (!trimmed) return match;
-      // Don't re-wrap if already inside $
-      return `$${trimmed}$`;
-    }
-  );
-
-  // Simpler targeted fix: any \text{...} sequence outside $...$ gets wrapped
-  // This catches cases the above regex might miss
-  res = res.replace(/(?<!\$)((?:\\text\{[^{}]*\}[\s=+\-×÷*]*)+)(?!\$)/g, (m) => {
-    const t = m.trim();
-    return t ? `$${t}$` : m;
-  });
-
-  // ─── FIX: Orphaned $ signs near currency ₹ and variable patterns ────────────
-  // Problem: AI writes "₹x. He sold it...25x$" — the $ is meant to close math
-  // but there's no matching opener, causing garbled text.
-  // Step 1: Remove $ signs that immediately follow ₹ (e.g. ₹$200 → ₹200)
-  res = res.replace(/₹\s*\$/g, '₹');
-  // Step 2: Remove trailing orphan $ at end of a word/number (e.g. "100x$" → "100x" when not math)
-  // Only strip if the $ is preceded by alphanumeric (not a math closing)
-  res = res.replace(/([a-zA-Z0-9,])\$(\s|<|$)/g, '$1$2');
-  // Step 3: Remove $ that is immediately followed by a space or punctuation (not math)
-  res = res.replace(/\$\s+([^0-9a-zA-Z\\({])/g, ' $1');
-  // Step 4: Existing currency protections (preserve)
-  res = res.replace(/\$\s*=\s*₹/g, '= ₹');
-  res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
-  res = res.replace(/\$\s*₹/g, '₹');
-  res = res.replace(/₹\s*\$/g, '₹');
-  res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
+  // Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
+  const parts = res.split('$');
+  for (let i = 0; i < parts.length; i += 2) {
+    let part = parts[i];
+    // Naked \frac{num}{den} outside $...$ -> wrap in $...$
+    part = part.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '$\\frac{$1}{$2}$');
+    // Naked \sqrt{...} outside $...$ -> wrap in $...$
+    part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, '$\\sqrt{$1}$');
+    // Naked \text{...} outside $...$ is plain text: unwrap it cleanly with space
+    part = part.replace(/\\text\s*\{([^{}]+)\}/g, ' $1 ');
+    // Naked LaTeX operators outside $...$ -> convert to clean Unicode
+    part = part.replace(/\\times\b/g, '×');
+    part = part.replace(/\\div\b/g, '÷');
+    part = part.replace(/\\pm\b/g, '±');
+    part = part.replace(/\\leq?\b/g, '≤');
+    part = part.replace(/\\geq?\b/g, '≥');
+    part = part.replace(/\\neq?\b/g, '≠');
+    part = part.replace(/\\approx\b/g, '≈');
+    part = part.replace(/\\Rightarrow\b/g, '⇒');
+    part = part.replace(/\\rightarrow\b/g, '→');
+    part = part.replace(/\\degree\b/g, '°');
+    parts[i] = part;
+  }
+  res = parts.join('$');
 
   res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt[3]{$1}$$');
   res = res.replace(/√\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt{$1}$$');
@@ -1713,6 +1705,31 @@ function safeParseAiJsonObject(rawJson: string): any {
 }
 
 
+const STRICT_MATH_AND_TEXT_PROMPT_RULES = `
+- MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX STANDARD):
+  * Enclose ALL math formulas, equations, variables, algebra, fractions, and square roots in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
+  * Fractions MUST use \\frac{numerator}{denominator} (e.g. $\\frac{4}{3}$).
+  * Powers: $x^2$, $10^{-5}$. Roots: $\\sqrt{x}$, $\\sqrt[3]{27}$.
+  * Operators & symbols: $\\times$, $\\div$, $\\pm$, $\\le$, $\\ge$, $\\neq$, $\\approx$, $\\degree$, $\\alpha$, $\\beta$, $\\theta$, $\\pi$, $\\Delta$, $\\infty$.
+  * CRITICAL: NEVER output naked LaTeX commands like \\frac, \\sqrt, \\times, or \\text in plain text without enclosing them in $...$!
+  * CRITICAL: If you use \\text{...}, it MUST ALWAYS be inside $...$ with proper spacing: e.g. $\\text{Speed} = \\frac{\\text{Distance}}{\\text{Time}}$ or $45\\text{ litres}$.
+- WORD SPACING & PLAIN TEXT RULE (CRITICAL - NEVER CONCATENATE WORDS):
+  * ALWAYS maintain natural, clear spacing between words, numbers, and variables!
+  * NEVER glue words to numbers or variables!
+    - WRONG: "ratio of 7 : 2tomakeapaintmixture.Ifapainteruses315"
+    - CORRECT: "ratio of 7 : 2 to make a paint mixture. If a painter uses 315 litres"
+    - WRONG: "Letthequantityofbluepaintbe7x"
+    - CORRECT: "Let the quantity of blue paint be $7x$."
+    - WRONG: "2केअनुपातमैंमिलकर"
+    - CORRECT: "2 के अनुपात में मिलकर"
+- OPTIONS FORMATTING:
+  * For options that are plain numbers, percentages, or numbers with units (e.g. "420 litres", "405 लीटर", "15 days", "20%"):
+    DO NOT wrap them in dollar signs! Write clean plain text: <p>420 litres</p>, <p>405 लीटर</p>.
+  * Only use LaTeX $...$ in options if the option itself is a mathematical expression (e.g. "$\\frac{3}{4}$", "$\\sqrt{2}$", "$x^2 - 4$").
+- INDIAN RUPEE CURRENCY RULE (₹):
+  * Indian Rupee amounts MUST be written as plain text: '₹4,800', 'Rs. 500', '₹x'.
+  * NEVER wrap '₹' in dollar signs: NEVER write '$₹4,800$', '₹$4800$', or '₹x$'.`;
+
 app.post('/api/mocktest-solve', async (req, res) => {
   try {
     const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option1_en, option2_en, option3_en, option4_en, answer, question_type } = req.body;
@@ -1743,8 +1760,8 @@ CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
 1. DYNAMIC PATTERN ACCORDING TO QUESTION DISCIPLINE (जैसा प्रश्न वैसा पैटर्न):
    - For MATHEMATICS / NUMERICALS / QUANT:
      * State given data clearly: "दिया गया है / Given that:" (e.g. A की चाल = 40 km/h...).
-     * State the key formula in clean Unicode (e.g. समय = दूरी / चालों का अंतर).
-     * Show step-by-step intermediate calculation without skipping steps so even weaker students understand clearly (e.g. (160/6) / 10 = 16/6 घंटा = 16/6 × 60 मिनट = 160 मिनट).
+     * State the key formula in clean LaTeX math ($...$).
+     * Show step-by-step intermediate calculation without skipping steps so even weaker students understand clearly.
      * Conclude with the final computed numerical value.
    - For REASONING / LOGIC (Puzzles, Coding-Decoding, Series, Syllogism):
      * State the core logic rule directly ("जिस प्रकार...", reverse letter positions, difference pattern).
@@ -1752,41 +1769,21 @@ CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
      * State the derived correct answer term/value directly.
    - For GENERAL KNOWLEDGE / HISTORY / POLITY / GEOGRAPHY / STATIC GK:
      * Direct Factual Context: State why the answer is correct with date, year, treaty, person, place, or Article.
-     * High-Yield Connected Exam Facts: Provide 3–4 essential connected facts, treaty conditions, or mini-list (e.g. Treaty terms 1, 2, 3, 4; or 8°, 9°, 10° Channels list; or Doab rivers list; or relevant Articles/Amendments).
-     * Purely high-scoring exam facts that frequently appear in exams.
+     * High-Yield Connected Exam Facts: Provide 3–4 essential connected facts, treaty conditions, or mini-list.
    - For GENERAL SCIENCE (Physics, Chemistry, Biology):
-     * Explain the scientific principle/reaction/mechanism directly (e.g. H2S causes brass to discolor; or in Myopia, image forms in front of retina).
+     * Explain the scientific principle/reaction/mechanism directly.
      * Mention practical remedies (concave lens) or related discoveries/scientists with years.
    - For LANGUAGE (Hindi & English Grammar, Vocab, Error Spotting):
      * State the grammatical rule, tense, voice, idiom meaning, or vocabulary usage clearly.
-     * Show why the selected concept fits and why common errors occur.
 
-2. ACCESSIBLE TO WEAKER STUDENTS (कमजोर छात्र भी समझ सकें):
-   - Use simple, lucid, and direct explanation.
-   - Every intermediate calculation step and logical link must be clearly stated.
+2. ACCESSIBLE TO WEAKER STUDENTS: Use simple, lucid, and direct explanation.
+3. BALANCED MEDIUM LENGTH: 3 to 6 focused lines or 3-5 structured steps/points.
+4. STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'. DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:'.
+5. STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A है" or "Option A is correct". State facts, formulas, or calculated values directly!
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
+- Wrap solutions in clean semantic HTML (<p>...</p>). Use <b>...</b> for emphasis and <table>...</table> for tabular steps.
 
-3. BALANCED MEDIUM LENGTH (न ज्यादा लंबा, न ज्यादा छोटा):
-   - Neither too brief (not a 1-line answer) nor overly long (not an essay).
-   - Keep each solution at a balanced MEDIUM length (typically 3 to 6 focused lines or 3-5 structured steps/points).
-
-4. STRICT NO-PREFIX & NO-FILLER RULE:
-   - DO NOT start with 'हल:', '<b>हल:</b>', 'उत्तर:', 'Solution:', '<b>Solution:</b>', or 'Explanation:' because the portal UI automatically displays a Solution header! Start directly with the derivation or explanation text in <p>...</p>.
-   - NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-
-5. STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
-   - In online test series and CBT mock test portals, OPTIONS ARE SHUFFLED DYNAMICALLY (Option A for one student can be Option C for another)!
-   - Therefore, YOU MUST ABSOLUTELY NEVER mention option letters or option numbers in the solution!
-   - NEVER WRITE: "सही विकल्प A है", "अतः विकल्प (B) सही है", "विकल्प C सही उत्तर है", "Option A is correct", "Hence option (B) is right", or "The correct option is C"!
-   - ALWAYS state the ACTUAL NAME, TERM, CONCEPT, or CALCULATED VALUE directly (e.g., "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था" or "अतः समय = 160 मिनट प्राप्त होता है"). NEVER write the option letter!
-
-5. MATHEMATICAL FORMULAS & CLEAN HTML (STRICT KATEX / LATEX STANDARD):
-   - Wrap all mathematical expressions, formulas, variables, equations, fractions, square roots, and units in standard LaTeX delimiters ($...$ for inline math, $$...$$ for display equations).
-   - Fractions MUST use standard LaTeX $\frac{numerator}{denominator}$. Powers MUST use $x^2$, roots MUST use $\sqrt{x}$.
-   - Operators and Greek symbols MUST use standard LaTeX: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\degree$, $\infty$.
-   - DO NOT wrap Indian Rupee currency in dollar signs: write '₹4,800' or 'Rs. 500'.
-   - Wrap solutions in clean semantic HTML (<p>...</p>). Use <b>...</b> for emphasis and <table>...</table> for tabular steps.
-
-6. Output ONLY valid JSON:
+Output ONLY valid JSON:
 {
   "solution_hi": "<p>दिया गया है...</p>",
   "solution_en": "<p>Given that...</p>",
@@ -1861,15 +1858,17 @@ MANDATORY TASKS TO EXECUTE:
    - CRITICAL: Letter puzzles, word arrangements, alphabetical order questions (e.g. words like ION, EBB, PET, GET or letter counting between letters) MUST BE "Reasoning", NEVER "Chemistry" or other subjects!
 5. DYNAMIC STEP-BY-STEP SOLUTION (YCT EXAM PUBLICATION PATTERN - जैसा प्रश्न वैसा पैटर्न):
    - PATTERN BY DISCIPLINE:
-     * MATHEMATICS / NUMERICALS: State given data ("दिया गया है / Given that:"), write the formula in clean Unicode, show full step-by-step intermediate calculations without skipping steps so weaker students understand clearly, and conclude with the calculated value matching the correct option.
-     * REASONING / LOGIC: State the underlying rule/logic ("जिस प्रकार...", reverse positions, difference), show the pattern test step-by-step for each term/option, and conclude why the option is uniquely correct.
-     * GK / HISTORY / POLITY / GEOGRAPHY / STATIC GK: State the direct factual context (date, treaty, person, place, or Article) followed by 3–4 high-yield connected exam facts or mini-list (e.g. treaty terms, channel degrees, river doabs, constitutional articles).
-     * GENERAL SCIENCE: State the scientific principle/reaction/mechanism directly and provide practical remedies or related discoverers/inventions with years.
-     * LANGUAGE: State grammar rule, tense, voice, idiom meaning, or vocabulary usage clearly and show why distractors fail.
+     * MATHEMATICS / NUMERICALS: State given data ("दिया गया है / Given that:"), write formula in standard LaTeX math ($...$), show full step-by-step intermediate calculations without skipping steps, and conclude with the calculated value.
+     * REASONING / LOGIC: State the underlying rule/logic, show pattern test step-by-step for each term/option, and conclude why the option is uniquely correct.
+     * GK / HISTORY / POLITY / GEOGRAPHY / STATIC GK: State direct factual context followed by 3–4 high-yield connected exam facts or mini-list.
+     * GENERAL SCIENCE: State scientific principle/reaction/mechanism directly and provide practical remedies or related discoverers.
+     * LANGUAGE: State grammar rule, meaning, or usage clearly.
    - ACCESSIBLE TO WEAKER STUDENTS: Use simple, lucid language. Explain each intermediate step clearly.
-   - BALANCED MEDIUM LENGTH: Neither 1-line nor an essay; keep it at a balanced medium length (typically 3 to 6 focused lines or 3-5 structured steps/points).
-   - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', '<b>हल:</b>', 'उत्तर:', 'Solution:', '<b>Solution:</b>', or 'Explanation:'! The portal UI renders its own Solution header. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-   - PURE UNICODE & CLEAN HTML: All math in clean Unicode ('×', '÷', '−', '≤', '≥', '≠', '°', '√x', '²', '(a) / (b)'). NEVER use LaTeX commands (\\frac, \\times) or dollar signs ($...$). Wrap in semantic HTML (<p>...</p>).
+   - BALANCED MEDIUM LENGTH: 3 to 6 focused lines or 3-5 structured steps/points.
+   - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'! NEVER include filler labels like 'Key Point:'!
+   - STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER mention option letters (A, B, C, D) in solution!
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
+   - Wrap all questions, options, and explanations in semantic HTML (<p>...</p>).
 6. DIFFICULTY LEVEL:
    - 'easy' | 'medium' | 'hard'.
 
@@ -1968,7 +1967,8 @@ INSPECTION INSTRUCTIONS:
 3. Extract ONLY the true missing fields.
 4. STRICT ACCURACY & TRUTHFULNESS:
    - If a missing field is NOT visible or cannot be found anywhere on the image(s), DO NOT invent fake data. Return empty string "" for that field.
-   - Format text with clean Unicode math (use '×', '÷', '−', '≤', '≥', '≠', '°', '√') and semantic HTML (<p>...). NEVER output LaTeX commands (\\frac, \\times) or dollar sign delimiters ($...$).
+   - Wrap fields in semantic HTML (<p>...</p>).
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
 5. Output ONLY valid JSON:
 {
   "recovered_fields": {
@@ -2166,12 +2166,8 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
 - ACCESSIBLE TO WEAKER STUDENTS: Simple, clear, and direct language.
 - BALANCED MEDIUM LENGTH: 3 to 6 focused lines or 3-5 structured steps/points.
 - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'. DO NOT include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'.
-- MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
-  * Enclose ALL math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
-  * Fractions: Always write as $\frac{numerator}{denominator}$. Powers: $x^2$, $10^{-5}$. Roots: $\sqrt{x}$, $\sqrt[3]{27}$.
-  * Operators and Greek symbols: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\degree$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\infty$.
-  * CRITICAL: \text{...} MUST ALWAYS be inside $...$. WRONG: \text{Distance} = \text{Speed} \times \text{Time}. CORRECT: $\text{Distance} = \text{Speed} \times \text{Time}$.
-  * CRITICAL CURRENCY RULE: NEVER use $ (dollar sign) to wrap ₹ amounts or algebraic cost variables. Write '₹4,800', 'Rs. 500', '₹(Cost)' or 'cost = ₹x'. NEVER write '₹x$' or '$₹4800$' or '$x$' directly after ₹.
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
+- Wrap all questions, options, and explanations in semantic HTML <p>...</p>.
 - Respond ONLY with the JSON array.`;
     } else {
       promptText = `You are a professional Exam Paper Digitizer and MockTest Content Architect.
@@ -2244,14 +2240,9 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
   * In online test series and mock portals, options are SHUFFLED dynamically (Option A for one student can be Option C for another).
   * NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in the solution!
   * State the concepts, facts, dates, names, formulas, and values directly! (e.g. "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था।", "अतः समय = 160 मिनट।"). NEVER mention the option letter!
-- STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', '<b>हल:</b>', 'Solution:', '<b>Solution:</b>', or 'Explanation:'! The test portal UI renders its own Solution header. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-- MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
-  * Enclose ALL math expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
-  * Fractions: Always write as $\frac{numerator}{denominator}$. Powers: $x^2$, $10^{-5}$. Roots: $\sqrt{x}$, $\sqrt[3]{27}$.
-  * Operators and Greek symbols: $\times$, $\div$, $\pm$, $\le$, $\ge$, $\neq$, $\approx$, $\degree$, $\alpha$, $\beta$, $\theta$, $\pi$, $\Delta$, $\infty$.
-  * CRITICAL: \text{...} MUST ALWAYS be inside $...$. WRONG: \text{Distance} = \text{Speed} \times \text{Time}. CORRECT: $\text{Distance} = \text{Speed} \times \text{Time}$.
-  * CRITICAL CURRENCY RULE: NEVER use $ (dollar sign) to wrap ₹ amounts or algebraic cost variables. Write '₹4,800', 'Rs. 500', '₹(Cost)' or 'let cost = x'. NEVER write '₹x$' or '$₹4800$'. If a question mentions 'an article for ₹x', write it as plain text: 'an article for ₹x' — do NOT write '₹$x$'.
-  * DO NOT wrap currency in dollar signs. Wrap all questions, options, and explanations in semantic HTML <p>...</p>. Use <b>...</b> for emphasis and clean HTML tables <table>...</table> for matching lists or comparison charts!
+- STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'! The test portal UI renders its own Solution header. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:'!
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
+- Wrap all questions, options, and explanations in semantic HTML <p>...</p>. Use <b>...</b> for emphasis and clean HTML tables <table>...</table> for matching lists or comparison charts!
 - Respond ONLY with the JSON array.`;
     }
 
@@ -2451,7 +2442,8 @@ GENERATE A BRAND NEW, UNIQUE SIMILAR MULTIPLE CHOICE QUESTION testing the same c
   * Balanced medium length: 3 to 6 focused lines or 3-5 structured steps/points.
   * NO solution prefix labels ('हल:', 'Solution:') and NO filler labels ('Key Point:', 'Detailed Explanation:').
   * STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in the solution. State the facts, formulas, or calculated values directly!
-- Use pure Unicode math and clean HTML (NO LaTeX, NO dollar signs!).
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
+- Wrap all questions, options, and explanations in semantic HTML (<p>...</p>).
 
 Output ONLY a JSON object matching this structure:
 {
@@ -2546,9 +2538,7 @@ STRICT EDITORIAL GUIDELINES:
 
 3. STANDARDIZE MATHEMATICAL FORMULAS (KATEX / LATEX STANDARD):
    - DO NOT alter mathematical numerical values, variables, or the correct answer.
-   - Enclose all mathematical expressions, fractions, powers, roots, variables, and formulas in standard LaTeX delimiters ($...$ for inline math, $$...$$ for display equations).
-   - Ensure fractions use $\frac{num}{den}$, powers use $x^2$, roots use $\sqrt{x}$.
-   - Plain numbers, percentages (40%), and currency (₹4,800) MUST NOT be enclosed in dollar signs.
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
 
 4. SEMANTIC HTML & NO SOLUTION LABELS:
    - Ensure question_hi and question_en are wrapped in <p>...</p>.
@@ -2649,8 +2639,9 @@ YOUR MISSION:
    - If user asks to simplify or make harder: adjust question wording and distractors accordingly.
 2. STRICT RULES TO ENFORCE:
    - STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in "solution_hi" or "solution_en"! State facts, formulas, or calculated values directly!
-   - MATHEMATICAL FORMULAS & CLEAN HTML: Enclose math formulas, variables, equations, fractions, and roots in standard LaTeX delimiters ($...$ for inline, $$...$$ for display). Wrap text in semantic HTML (<p>...</p>). DO NOT wrap currency in dollar signs.
    - NO filler headers like 'Key Point:', 'Detailed Explanation:', 'हल:', 'Solution:'.
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
+   - Wrap text in semantic HTML (<p>...</p>).
 3. Generate a friendly, concise, and helpful "reply" in the user's language (Hindi or English) explaining exactly what you changed or improved.
 
 OUTPUT FORMAT:
@@ -2778,10 +2769,8 @@ YOUR MISSION:
 6. CRITICAL CURRENT AFFAIRS RULE (STRICT LAST 1-YEAR WINDOW ONLY):
    - If the question belongs to Current Affairs, contemporary government schemes, national initiatives, sports tournaments, awards, summits, appointments, union budget, or recent GK:
    - The data, events, facts, schemes, and statistics MUST STRICTLY BE FROM THE LAST 1 YEAR ONLY (within the last 12 months)! Outdated 2-5 year old data is strictly forbidden.
-7. MATHEMATICAL & SCIENTIFIC FORMULAS:
-   - Enclose all math expressions, formulas, variables, equations, fractions, and roots in standard LaTeX delimiters ($...$ for inline, $$...$$ for display).
-   - Wrap all text in clean semantic HTML (<p>...</p>). Use <b>...</b> for emphasis and <table>...</table> for tabular steps.
-   - DO NOT wrap Indian Rupee currency in dollar signs (write '₹4,800').
+${STRICT_MATH_AND_TEXT_PROMPT_RULES}
+- Wrap all text in clean semantic HTML (<p>...</p>). Use <b>...</b> for emphasis and <table>...</table> for tabular steps.
 
 OUTPUT FORMAT:
 Respond with ONLY a strict JSON object:

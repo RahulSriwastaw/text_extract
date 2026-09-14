@@ -198,25 +198,48 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
   }
   clean = normalizedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
-  // 6. Auto-wrap naked fractions like \frac{...}{...} if missing $
-  clean = clean.replace(/(?<!\$)(?:\\frac\s*\{[^{}]+\}\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
+  // 6. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
+  const parts = clean.split('$');
+  for (let i = 0; i < parts.length; i += 2) {
+    let part = parts[i];
+    // Naked \frac{num}{den} outside $...$ -> wrap in $...$
+    part = part.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '$\\frac{$1}{$2}$');
+    // Naked \sqrt{...} outside $...$ -> wrap in $...$
+    part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, '$\\sqrt{$1}$');
+    // Naked \text{...} outside $...$ is plain text: unwrap it cleanly with space
+    part = part.replace(/\\text\s*\{([^{}]+)\}/g, ' $1 ');
+    // Naked LaTeX operators outside $...$ -> clean Unicode
+    part = part.replace(/\\times\b/g, '×');
+    part = part.replace(/\\div\b/g, '÷');
+    part = part.replace(/\\pm\b/g, '±');
+    part = part.replace(/\\leq?\b/g, '≤');
+    part = part.replace(/\\geq?\b/g, '≥');
+    part = part.replace(/\\neq?\b/g, '≠');
+    part = part.replace(/\\approx\b/g, '≈');
+    part = part.replace(/\\Rightarrow\b/g, '⇒');
+    part = part.replace(/\\rightarrow\b/g, '→');
+    part = part.replace(/\\degree\b/g, '°');
+    parts[i] = part;
+  }
+  clean = parts.join('$');
 
-  // 7. Auto-wrap naked \text{...} sequences outside $...$
-  // e.g. \text{Distance} = \text{Speed} \times \text{Time} → rendered as math
-  clean = clean.replace(/(?<!\$)((?:\\text\{[^{}]*\}[\s=+\-×÷*\\]*)+)(?!\$)/g, (m) => {
-    const t = m.trim();
-    return t ? `$${t}$` : m;
-  });
-  // Also wrap isolated naked LaTeX operator sequences (e.g. "= \times 5")
-  clean = clean.replace(/(?<!\$)((?:\\(?:times|div|cdot|pm|mp|leq|geq|neq|approx|equiv)\b[\s0-9a-zA-Z]*)+)(?!\$)/g, (m) => {
-    const t = m.trim();
-    return t ? `$${t}$` : m;
-  });
-
-  // 8. Fix orphaned $ signs near ₹ currency (e.g. "₹x.He sold it...25x$" → clean)
+  // 7. Protect Indian Rupee currency ₹ from math dollars
+  clean = clean.replace(/\$\s*=\s*₹/g, '= ₹');
+  clean = clean.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
+  clean = clean.replace(/\$\s*₹/g, '₹');
   clean = clean.replace(/₹\s*\$/g, '₹');
   clean = clean.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
-  clean = clean.replace(/([a-zA-Z0-9,])\$(\s|$)/g, '$1$2');
+
+  // 8. Simplify options or short text with stray $: e.g. "$420 litres" or "$405$ litres"
+  clean = clean.replace(/<p>\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)<\/p>/gi, '<p>$1 $2</p>');
+  clean = clean.replace(/^\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)$/gi, '$1 $2');
+  if (/^\s*<p>\s*\$\s*(\d+[\s\S]*)<\/p>\s*$/i.test(clean) && (clean.match(/\$/g) || []).length === 1) {
+    clean = clean.replace(/<p>\s*\$\s*/i, '<p>');
+  }
+  if (/^\s*\$\s*(\d+[\s\S]*)$/i.test(clean) && (clean.match(/\$/g) || []).length === 1) {
+    clean = clean.replace(/^\s*\$\s*/, '');
+  }
+  clean = clean.replace(/[ \t]{2,}/g, ' ');
 
   const customTableComponents = {
     table: ({ children }: any) => (

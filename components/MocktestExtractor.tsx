@@ -87,7 +87,7 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
   clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-  // 2. Convert HTML tables to Markdown tables for remarkGfm
+  // 2. Convert HTML tables to clean Markdown tables for remarkGfm
   clean = clean.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_match, tableContent) => {
     const rows: string[][] = [];
     const rowMatches = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
@@ -115,7 +115,7 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
   clean = clean.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, '* $1\n');
   clean = clean.replace(/<\/?(?:ul|ol)[^>]*>/gi, '\n');
 
-  // 4. Convert formatting tags to Markdown
+  // 4. Convert formatting tags to Markdown and clean ALL <p> & </p> to prevent stray tags
   clean = clean
     .replace(/<hr\s*\/?>/gi, '\n\n---\n\n')
     .replace(/<div[^>]*>/gi, '')
@@ -124,12 +124,73 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
     .replace(/<(?:i|em)[^>]*>(.*?)<\/(?:i|em)>/gi, '*$1*')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/^<p>/i, '')
-    .replace(/<\/p>$/i, '')
-    .trim();
+    .replace(/<\/?p[^>]*>/gi, '\n\n');
 
-  // 5. Auto-wrap naked fractions like \frac{...}{...} if missing $
+  // 5. Ensure ANY existing Markdown table block has blank lines before and after it
+  // (GFM spec strictly requires empty lines before tables so they don't merge into paragraphs)
+  const lines = clean.split('\n');
+  const normalizedLines: string[] = [];
+  let inTable = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const isTableLine = /^\s*\|.*\|\s*$/.test(l);
+
+    if (isTableLine) {
+      if (!inTable) {
+        if (normalizedLines.length > 0 && normalizedLines[normalizedLines.length - 1].trim() !== '') {
+          normalizedLines.push('');
+        }
+        inTable = true;
+      }
+      normalizedLines.push(l.trim());
+    } else {
+      if (inTable) {
+        inTable = false;
+        normalizedLines.push('');
+      }
+      normalizedLines.push(l);
+    }
+  }
+  clean = normalizedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+
+  // 6. Auto-wrap naked fractions like \frac{...}{...} if missing $
   clean = clean.replace(/(?<!\$)(?:\\frac\s*\{[^{}]+\}\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
+
+  const customTableComponents = {
+    table: ({ children }: any) => (
+      <div className="my-3 overflow-x-auto w-full rounded-xl border border-white/[0.15] bg-black/50 shadow-md">
+        <table className="w-full text-left text-xs border-collapse border-spacing-0">
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children }: any) => (
+      <thead className="bg-white/[0.08] border-b border-white/[0.15] text-amber-300 font-extrabold uppercase tracking-wider text-[11px]">
+        {children}
+      </thead>
+    ),
+    tbody: ({ children }: any) => (
+      <tbody className="divide-y divide-white/[0.06] text-slate-200">
+        {children}
+      </tbody>
+    ),
+    tr: ({ children }: any) => (
+      <tr className="hover:bg-white/[0.04] transition-colors">
+        {children}
+      </tr>
+    ),
+    th: ({ children }: any) => (
+      <th className="py-2 px-3 font-extrabold border-r border-white/[0.08] last:border-r-0 text-amber-300">
+        {children}
+      </th>
+    ),
+    td: ({ children }: any) => (
+      <td className="py-2 px-3 border-r border-white/[0.06] last:border-r-0 font-medium text-slate-200 leading-relaxed">
+        {children}
+      </td>
+    )
+  };
 
   if (inline) {
     return (
@@ -138,7 +199,8 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
           remarkPlugins={[remarkMath, remarkGfm]}
           rehypePlugins={[rehypeKatex]}
           components={{
-            p: ({ children }) => <span className="inline">{children}</span>
+            p: ({ children }) => <span className="inline">{children}</span>,
+            ...customTableComponents
           }}
         >
           {clean}
@@ -152,6 +214,7 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[rehypeKatex]}
+        components={customTableComponents}
       >
         {clean}
       </ReactMarkdown>

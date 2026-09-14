@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { MockTestMcqItem } from '../types';
 import { chatFixMockTestItemWithAi } from '../services/mocktestService';
+import { LatexRenderer } from './MocktestExtractor';
 
 interface ChatMessage {
   id: string;
@@ -36,27 +37,9 @@ interface MocktestAiChatModalProps {
   onUpdateItem: (updated: MockTestMcqItem) => void;
 }
 
-const LatexContent: React.FC<{ content: string; className?: string }> = ({ content, className }) => {
+const LatexContent: React.FC<{ content: string; className?: string; inline?: boolean }> = ({ content, className, inline }) => {
   if (!content) return null;
-  const clean = content
-    .replace(/<hr\s*\/?>/gi, '\n\n---\n\n')
-    .replace(/<div[^>]*>/gi, '')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<(?:b|strong)[^>]*>(.*?)<\/(?:b|strong)>/gi, '**$1**')
-    .replace(/<(?:i|em)[^>]*>(.*?)<\/(?:i|em)>/gi, '*$1*')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/^<p>/i, '')
-    .replace(/<\/p>$/i, '')
-    .trim();
-
-  return (
-    <div className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
-      <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-        {clean}
-      </ReactMarkdown>
-    </div>
-  );
+  return <LatexRenderer content={content} className={className} inline={inline} />;
 };
 
 export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({

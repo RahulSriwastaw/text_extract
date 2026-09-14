@@ -43,8 +43,31 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>
+    <!-- MathJax 3 – supports \( ... \) inline and \[ ... \] display math -->
+    <!-- Config must come BEFORE the MathJax script tag -->
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [['\\(', '\\)']],
+          displayMath: [['\\[', '\\]']],
+          packages: {'[+]': ['ams', 'boldsymbol']},
+          tags: 'none'
+        },
+        options: {
+          skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+          ignoreHtmlClass: 'katex|katex-mathml|katex-html|tex2jax_ignore|no-mathjax'
+        },
+        startup: {
+          typeset: false
+        }
+      };
+    </script>
+    <script id="MathJax-script" async
+      src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js">
+    </script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
 <link rel="stylesheet" href="/index.css">
+
 <!-- Google Identity Services for Chrome Google Account One-Tap & OAuth -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>

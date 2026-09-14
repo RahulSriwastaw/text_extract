@@ -68,17 +68,61 @@ interface PageQueueItem {
   pendingContext?: PendingMcqContext | null;
 }
 
+// ─── MathJax 3 Integration ────────────────────────────────────────────────────
+// Declare global MathJax type so TypeScript doesn't complain
+declare global {
+  interface Window {
+    MathJax?: {
+      typesetPromise: (elements?: HTMLElement[]) => Promise<void>;
+      typesetClear?: (elements?: HTMLElement[]) => void;
+      startup?: { promise: Promise<void> };
+    };
+  }
+}
+
 /**
- * LaTeX and Math-safe content renderer using KaTeX
+ * Hook: Calls MathJax.typesetPromise() whenever `deps` change.
+ * Pass a ref to typeset only that subtree, or omit to typeset the whole page.
  */
+export function useMathJax(ref?: React.RefObject<HTMLElement | null>, deps: any[] = []) {
+  useEffect(() => {
+    const triggerTypeset = async () => {
+      const mj = window.MathJax;
+      if (!mj?.typesetPromise) return;
+      try {
+        // Wait for MathJax startup to finish if it hasn't already
+        if (mj.startup?.promise) await mj.startup.promise;
+        const elements = ref?.current ? [ref.current] : undefined;
+        // Clear previous rendering on the element first to avoid duplication
+        if (mj.typesetClear && elements) mj.typesetClear(elements);
+        await mj.typesetPromise(elements);
+      } catch (e) {
+        // Silently ignore typeset errors (e.g., invalid LaTeX)
+        console.debug('[MathJax] typesetPromise error (non-fatal):', e);
+      }
+    };
+    // Small delay so React has finished painting the DOM
+    const timer = setTimeout(triggerTypeset, 50);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
 /**
- * LaTeX and Math-safe content renderer using KaTeX and GFM Markdown
+ * LaTeX and Math-safe content renderer using KaTeX + MathJax 3.
+ * Renders $...$ / $$...$$ via KaTeX (fast, offline).
+ * Also calls MathJax.typesetPromise() after render to handle any \(...\) / \[...\] that survived.
  */
-export const LatexRenderer: React.FC<{ content: string; className?: string; inline?: boolean }> = ({ 
-  content, 
+export const LatexRenderer: React.FC<{ content: string; className?: string; inline?: boolean }> = ({
+  content,
   className,
   inline = false
 }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  // Re-typeset with MathJax after every content change
+  useMathJax(containerRef, [content]);
+
   if (!content) return null;
 
   let clean = content;
@@ -194,7 +238,7 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
 
   if (inline) {
     return (
-      <span className={`inline-flex items-center text-xs leading-normal ${className || ''}`}>
+      <span ref={containerRef as React.RefObject<HTMLSpanElement>} className={`inline-flex items-center text-xs leading-normal ${className || ''}`}>
         <ReactMarkdown
           remarkPlugins={[remarkMath, remarkGfm]}
           rehypePlugins={[rehypeKatex]}
@@ -210,7 +254,7 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
   }
 
   return (
-    <div className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
+    <div ref={containerRef} className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[rehypeKatex]}

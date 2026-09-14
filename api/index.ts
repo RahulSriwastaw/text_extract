@@ -358,7 +358,13 @@ async function runAIAction(
                           errorStr.includes("SAFETY") ||
                           errorStr.includes("BLOCKED") ||
                           errorStr.includes("CANDIDATES") ||
-                          errorStr.includes("MAX_TOKENS");
+                          errorStr.includes("MAX_TOKENS") ||
+                          errorStr.includes("MODEL OUTPUT") ||
+                          errorStr.includes("OUTPUT TEXT") ||
+                          errorStr.includes("TOOL CALLS") ||
+                          errorStr.includes("FINISH_REASON") ||
+                          errorStr.includes("RECITATION") ||
+                          errorStr.includes("OTHER");
 
       if (isRetryable) {
         const errType = isQuotaError ? 'QUOTA' : (isServerOverloaded ? 'OVERLOAD' : 'TRANSIENT');
@@ -381,6 +387,61 @@ async function runAIAction(
   (finalError as any).status = 429;
   throw finalError;
 }
+
+/**
+ * Safely extracts the text from a Gemini generateContent response.
+ * Returns empty string if response has no content.
+ */
+const safeExtractResponseText = (response: any): string => {
+  if (response?.text && String(response.text).trim()) return String(response.text);
+  if (response?.candidates?.[0]?.content?.parts) {
+    const text = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+    if (text.trim()) return text;
+  }
+  return '';
+};
+
+/**
+ * Calls Gemini with primary model, falls back to secondary model if primary fails or returns empty output.
+ * Throws a retryable error if both models produce empty output, so runAIAction can retry with a different key.
+ */
+const callGeminiWithFallback = async (
+  client: any,
+  primaryModel: string,
+  fallbackModel: string,
+  contents: any[],
+  config: Record<string, any> = {},
+  label = 'AI call'
+): Promise<string> => {
+  // Try primary model
+  try {
+    const response = await client.models.generateContent({
+      model: primaryModel,
+      contents,
+      config
+    });
+    const text = safeExtractResponseText(response);
+    if (text) return text;
+    console.warn(`[${label}] ${primaryModel} returned empty output. Trying fallback ${fallbackModel}...`);
+  } catch (err: any) {
+    console.warn(`[${label}] ${primaryModel} failed (${err?.message}). Trying fallback ${fallbackModel}...`);
+  }
+
+  // Try fallback model (without responseMimeType to avoid empty output issues on lite models)
+  const fallbackConfig = { ...config };
+  delete fallbackConfig.responseMimeType;
+  const response = await client.models.generateContent({
+    model: fallbackModel,
+    contents,
+    config: fallbackConfig
+  });
+  const text = safeExtractResponseText(response);
+  if (!text) {
+    const finishReason = response?.candidates?.[0]?.finishReason || 'UNKNOWN';
+    throw new Error(`Model output was empty (finishReason: ${finishReason}). Both ${primaryModel} and ${fallbackModel} returned no content.`);
+  }
+  return text;
+};
 
 const cleanBilingualDuplicates = (text: string): string => {
   if (!text) return text;
@@ -1694,39 +1755,16 @@ CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
   "difficulty_level": "easy" | "medium" | "hard"
 }`;
 
-    const executeSolve = async (client: any) => {
-      let modelToUse = 'gemini-2.5-flash';
-      try {
-        const response = await client.models.generateContent({
-          model: modelToUse,
-          contents: [{ text: qPrompt }],
-          config: {
-            temperature: 0.15,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      } catch (err: any) {
-        // Fallback to flash-lite if 2.5 is unavailable
-        const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
-          contents: [{ text: qPrompt }],
-          config: {
-            temperature: 0.2,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      }
-    };
+    const executeSolve = async (client: any) =>
+      callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-flash-lite-latest',
+        [{ text: qPrompt }],
+        { temperature: 0.15, responseMimeType: 'application/json' },
+        'mocktest-solve'
+      );
+
 
     const rawJson = await runAIAction(executeSolve, userKey);
 
@@ -1816,38 +1854,16 @@ Respond ONLY with a valid JSON object:
   "solution_en": "<p>Given that...</p>"
 }`;
 
-    const executeRepair = async (client: any) => {
-      let modelToUse = 'gemini-2.5-flash';
-      try {
-        const response = await client.models.generateContent({
-          model: modelToUse,
-          contents: [{ text: repairPrompt }],
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      } catch (err: any) {
-        const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
-          contents: [{ text: repairPrompt }],
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      }
-    };
+    const executeRepair = async (client: any) =>
+      callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-flash-lite-latest',
+        [{ text: repairPrompt }],
+        { temperature: 0.1, responseMimeType: 'application/json' },
+        'mocktest-repair'
+      );
+
 
     const rawJson = await runAIAction(executeRepair, userKey);
 
@@ -1954,38 +1970,16 @@ INSPECTION INSTRUCTIONS:
         });
       }
       parts.push({ text: reverifyPrompt });
-
-      let modelToUse = 'gemini-2.5-flash';
-      try {
-        const response = await client.models.generateContent({
-          model: modelToUse,
-          contents: parts,
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      } catch (err: any) {
-        const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
-          contents: parts,
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      }
+      return callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-flash-lite-latest',
+        parts,
+        { temperature: 0.1, responseMimeType: 'application/json' },
+        'mocktest-reverify'
+      );
     };
+
 
     const rawJson = await runAIAction(executeReverify, userKey);
     const parsed = safeParseAiJsonObject(rawJson);
@@ -2221,6 +2215,16 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
     }
 
     const executeExtract = async (client: any) => {
+      // Helper: extract text from a Gemini response safely
+      const extractText = (resp: any): string => {
+        if (resp?.text && String(resp.text).trim()) return String(resp.text);
+        if (resp?.candidates?.[0]?.content?.parts) {
+          return resp.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+        return '';
+      };
+
+      // Primary: gemini-flash-lite-latest (no responseMimeType to avoid empty output issues)
       try {
         const response = await client.models.generateContent({
           model: 'gemini-flash-lite-latest',
@@ -2235,16 +2239,13 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
           ],
           config: {
             temperature: generateSimilar ? 0.35 : 0.1,
-            responseMimeType: "application/json"
           }
         });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
+        const responseText = extractText(response);
         if (responseText && responseText.trim()) {
           return responseText;
         }
+        console.warn(`[mocktest-extract] gemini-flash-lite-latest returned empty output. Falling back to gemini-2.5-flash...`);
       } catch (liteErr: any) {
         console.warn(`[mocktest-extract] gemini-flash-lite-latest failed (${liteErr?.message}). Falling back to gemini-2.5-flash...`);
       }
@@ -2266,12 +2267,13 @@ RULES & YCT SOLUTION GUIDELINES (जैसा प्रश्न वैसा �
           responseMimeType: "application/json"
         }
       });
-      let responseText = response?.text;
-      if (!responseText && response?.candidates?.[0]?.content?.parts) {
-        responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+      const responseText = extractText(response);
+      if (!responseText || !responseText.trim()) {
+        throw new Error('Model output was empty. Finish reason: ' + (response?.candidates?.[0]?.finishReason || 'UNKNOWN'));
       }
       return responseText;
     };
+
 
     const rawJson = await runAIAction(executeExtract, userKey);
 
@@ -2430,38 +2432,16 @@ Output ONLY a JSON object matching this structure:
   "source_question_reference": "Ref-Q.${item.question_r || '1'} (Variant)"
 }`;
 
-    const executeGenerate = async (client: any) => {
-      let modelToUse = 'gemini-2.5-flash';
-      try {
-        const response = await client.models.generateContent({
-          model: modelToUse,
-          contents: [{ text: prompt }],
-          config: {
-            temperature: 0.4,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      } catch (e) {
-        const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
-          contents: [{ text: prompt }],
-          config: {
-            temperature: 0.4,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      }
-    };
+    const executeGenerate = async (client: any) =>
+      callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-flash-lite-latest',
+        [{ text: prompt }],
+        { temperature: 0.4, responseMimeType: 'application/json' },
+        'mocktest-generate-similar'
+      );
+
 
     const rawJson = await runAIAction(executeGenerate, userKey);
     const parsed = safeParseAiJsonObject(rawJson);
@@ -2539,38 +2519,16 @@ ${JSON.stringify(items, null, 2)}
 OUTPUT:
 Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`\` block, preserving all schema fields.`;
 
-    const executeProofread = async (client: any) => {
-      let modelToUse = 'gemini-2.5-flash';
-      try {
-        const response = await client.models.generateContent({
-          model: modelToUse,
-          contents: [{ text: proofreadPrompt }],
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      } catch (err: any) {
-        const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
-          contents: [{ text: proofreadPrompt }],
-          config: {
-            temperature: 0.1,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      }
-    };
+    const executeProofread = async (client: any) =>
+      callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-flash-lite-latest',
+        [{ text: proofreadPrompt }],
+        { temperature: 0.1, responseMimeType: 'application/json' },
+        'mocktest-proofread'
+      );
+
 
     const rawJson = await runAIAction(executeProofread, userKey);
 
@@ -2679,37 +2637,16 @@ Respond with ONLY a strict JSON object:
   "reply": "Concise summary of changes made"
 }`;
 
-    const executeChat = async (client: any) => {
-      try {
-        const response = await client.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [{ text: chatPrompt }],
-          config: {
-            temperature: 0.25,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      } catch (err: any) {
-        const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
-          contents: [{ text: chatPrompt }],
-          config: {
-            temperature: 0.25,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      }
-    };
+    const executeChat = async (client: any) =>
+      callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-flash-lite-latest',
+        [{ text: chatPrompt }],
+        { temperature: 0.25, responseMimeType: 'application/json' },
+        'mocktest-ai-chat'
+      );
+
 
     const rawJson = await runAIAction(executeChat, userKey);
     const parsed = safeParseAiJsonObject(rawJson);
@@ -2847,37 +2784,16 @@ Respond with ONLY a strict JSON object:
         });
       }
       contents.push({ text: prompt });
-
-      try {
-        const response = await client.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents,
-          config: {
-            temperature: 0.25,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      } catch (err: any) {
-        const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
-          contents,
-          config: {
-            temperature: 0.25,
-            responseMimeType: "application/json"
-          }
-        });
-        let responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-        return responseText;
-      }
+      return callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-flash-lite-latest',
+        contents,
+        { temperature: 0.25, responseMimeType: 'application/json' },
+        'mocktest-add-question'
+      );
     };
+
 
     const rawJson = await runAIAction(executeAdd, userKey);
     const parsedObj = safeParseAiJsonObject(rawJson);

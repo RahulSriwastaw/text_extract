@@ -1517,13 +1517,18 @@ const STRICT_MATH_AND_TEXT_PROMPT_RULES = `
   * Operators & symbols: $\\times$, $\\div$, $\\pm$, $\\le$, $\\ge$, $\\neq$, $\\approx$, $\\degree$, $\\alpha$, $\\beta$, $\\theta$, $\\pi$, $\\Delta$, $\\infty$.
   * CRITICAL: NEVER output naked LaTeX commands like \\frac, \\sqrt, \\times, or \\text in plain text without enclosing them in $...$!
   * CRITICAL: If you use \\text{...}, it MUST ALWAYS be inside $...$ with proper spacing: e.g. $\\text{Speed} = \\frac{\\text{Distance}}{\\text{Time}}$ or $45\\text{ litres}$.
-- EQUALS SIGN & DELIMITER SEPARATION (CRITICAL):
-  * NEVER place dollar signs immediately before or around '='!
-    - WRONG: "पत्नी का वेतन $= 11x = 11 \\times 5000 =$ ₹55,000"
-    - WRONG: "salary $= 11x"
-    - CORRECT: "पत्नी का वेतन = $11x = 11 \\times 5000$ = ₹55,000"
+- EQUALS SIGN & CALCULATION STEPS (CRITICAL):
+  * In step-by-step calculations, each equation line starting with '=' MUST be fully wrapped in complete $$...$$ or $...$ delimiters!
+    - CORRECT: "$$= 224375 \\times \\left(1 + \\frac{4}{100}\\right)^2$$"
+    - CORRECT: "$$= 224375 \\times \\frac{26}{25} \\times \\frac{26}{25}$$"
+    - CORRECT: "$$= 359 \\times 676 = 242684$$"
+    - NEVER leave equation steps naked without $: e.g. NEVER write "= 224375\\times\\frac{26}{25}" without enclosing in $$...$$.
+    - NEVER output an unclosed single dollar like "= $224375". Always close your math delimiters!
+    - NEVER break a fraction or formula across HTML tags (e.g. "\\frac{4}</p><p>{100}" is strictly forbidden).
+  * For inline prose sentences with math:
     - CORRECT: "अतः $x = 5000$"
-  * Always keep prose and operators outside the math delimiters unless writing a complete display equation ($$...$$).
+    - CORRECT: "पत्नी का वेतन = $11x = 11 \\times 5000$ = ₹55,000"
+    - WRONG: "पत्नी का वेतन $= 11x"
 - REASONING ARROWS & SYMBOL SERIES RULE (CRITICAL):
   * For Coding-Decoding, Letter Puzzles, Series steps, or Mappings:
     ALWAYS use standard Unicode arrows: '→' or '⇒' (e.g. "FIST → 3962", "SOFT → 3562", "F → 3, I → 9", "3, 4, 5 → preceded by...").

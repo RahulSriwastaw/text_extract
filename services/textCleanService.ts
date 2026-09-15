@@ -223,39 +223,92 @@ export function cleanMocktestText(text: string): string {
   // or "= 224375 \times \left(1 + \frac{4}{100}\right)^2$"
   res = res.replace(/(=\s*)([^\n$<]*\\[a-zA-Z][^\n$<]*)\$/gm, (_m, eq, math) => `${eq}$${math.trim()}$`);
 
-  // 15. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
-  const parts = res.split('$');
-  for (let i = 0; i < parts.length; i += 2) {
-    let part = parts[i];
-    // Naked fraction or mixed fraction outside $...$ -> wrap cleanly in $...$
-    part = part.replace(/(?:(\d+)\s*)?\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_m, whole, n, d) => {
-      if (whole) {
-        return `$${whole}\\frac{${n}}{${d}}$`;
+  // 14e. Heal fractions or expressions split across HTML paragraphs or newlines
+  res = res.replace(/(\\frac\s*\{[^{}]*\}\s*)\s*<\/p>\s*<p>\s*(\{[^{}]*\})/gi, '$1$2');
+  res = res.replace(/(\\frac\s*\{[^{}]*)\s*<\/p>\s*<p>\s*([^{}]*\}\s*\{[^{}]*\})/gi, '$1$2');
+  res = res.replace(/(\\frac\s*\{[^{}]*\}\s*)\n+(\{[^{}]*\})/g, '$1$2');
+  res = res.replace(/(\\frac\s*\{[^{}]*)\n+([^{}]*\}\s*\{[^{}]*\})/g, '$1$2');
+
+  // 14f. Heal unclosed \left( that got split across </p><p> without \right
+  res = res.replace(/(\\left\([^\n<]*?)\s*<\/p>\s*<p>\s*([^\n<]*?\\right\))/gi, (m, l, r) => {
+    if (!l.includes('\\right')) {
+      return `${l} ${r}`;
+    }
+    return m;
+  });
+
+  // 14g. Line-by-line / paragraph-by-paragraph equation healing
+  const rawLines = res.split('\n');
+  for (let li = 0; li < rawLines.length; li++) {
+    let line = rawLines[li];
+    const hasPStart = /^\s*<p>/i.test(line);
+    const hasPEnd = /<\/p>\s*$/i.test(line);
+    let inner = line.replace(/^\s*<p>/i, '').replace(/<\/p>\s*$/i, '').trim();
+
+    // If line starts with `= $` or `= $ ` without closing $
+    // e.g. `= $359 \times 676` -> `$= 359 \times 676$`
+    if (/^=\s*\$\s*([^$]+)$/.test(inner)) {
+      inner = inner.replace(/^=\s*\$\s*([^$]+)$/, '$= $1$');
+    }
+
+    // If line has a single unclosed $ after `= $` or starts with `$` without closing
+    // e.g. `2 वर्ष बाद कस्बे की जनसंख्या = $224375 \times \left(1 + \frac{4}{100}\right)^2`
+    const dollarCount = (inner.match(/(?<!\\)\$/g) || []).length;
+    if (dollarCount === 1) {
+      if (/=\s*\$([^$]+)$/.test(inner)) {
+        inner = inner.replace(/(=\s*)\$([^$]+)$/, '$1$$$2$$');
+      } else if (/^\$([^$]+)$/.test(inner)) {
+        inner = `$${inner.replace(/^\$/, '')}$`;
       }
-      return `$\\frac{${n}}{${d}}$`;
-    });
-    // Naked \sqrt{...} outside $...$ -> wrap in $...$
-    part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, (_m, inner) => `$\\sqrt{${inner}}$`);
-    // Naked \left( ... \right) outside $...$ -> wrap in $...$
-    part = part.replace(/\\left\(([\s\S]*?)\\right\)(?:\^([0-9a-zA-Z]+|\{[^}]+\}))?/g, (_m, inner, exp) => {
-      return exp ? `$\\left(${inner}\\right)^${exp}$` : `$\\left(${inner}\\right)$`;
-    });
-    // Naked \text{...} outside $...$ is plain text: unwrap it cleanly with space
-    part = part.replace(/\\text\s*\{([^{}]+)\}/g, ' $1 ');
-    // Naked LaTeX operators outside $...$ -> clean Unicode
-    part = part.replace(/\\times\b/g, '×');
-    part = part.replace(/\\div\b/g, '÷');
-    part = part.replace(/\\pm\b/g, '±');
-    part = part.replace(/\\leq?\b/g, '≤');
-    part = part.replace(/\\geq?\b/g, '≥');
-    part = part.replace(/\\neq?\b/g, '≠');
-    part = part.replace(/\\approx\b/g, '≈');
-    part = part.replace(/\\Rightarrow\b/g, '⇒');
-    part = part.replace(/\\rightarrow\b/g, '→');
-    part = part.replace(/\\degree\b/g, '°');
-    parts[i] = part;
+    }
+
+    // If line starts with `= ` and contains LaTeX commands (\times, \frac, \left, etc.) but NO $ at all
+    // e.g. `= 224375\times\left( \frac{104}{100} \right)^2`
+    // or `= 224375\times\frac{26}{25} \times \frac{26}{25}`
+    if (/^=\s*[^$]*\\[a-zA-Z]/.test(inner) && !inner.includes('$')) {
+      inner = `$$${inner}$$`;
+    }
+
+    rawLines[li] = (hasPStart ? '<p>' : '') + inner + (hasPEnd ? '</p>' : '');
   }
-  res = parts.join('$');
+  res = rawLines.join('\n');
+
+  // 15. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ and $$...$$ math blocks)
+  const tokens = res.split(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g);
+  for (let i = 0; i < tokens.length; i++) {
+    const isMath = /^\$\$[\s\S]*?\$\$$/.test(tokens[i]) || /^\$[^\$\n]+?\$$/.test(tokens[i]);
+    if (!isMath) {
+      let part = tokens[i];
+      // Naked fraction or mixed fraction outside $...$ -> wrap cleanly in $...$
+      part = part.replace(/(?:(\d+)\s*)?\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_m, whole, n, d) => {
+        if (whole) {
+          return `$${whole}\\frac{${n}}{${d}}$`;
+        }
+        return `$\\frac{${n}}{${d}}$`;
+      });
+      // Naked \sqrt{...} outside $...$ -> wrap in $...$
+      part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, (_m, inner) => `$\\sqrt{${inner}}$`);
+      // Naked \left( ... \right) outside $...$ -> wrap in $...$
+      part = part.replace(/\\left\(([\s\S]*?)\\right\)(?:\^([0-9a-zA-Z]+|\{[^}]+\}))?/g, (_m, inner, exp) => {
+        return exp ? `$\\left(${inner}\\right)^${exp}$` : `$\\left(${inner}\\right)$`;
+      });
+      // Naked \text{...} outside $...$ is plain text: unwrap it cleanly with space
+      part = part.replace(/\\text\s*\{([^{}]+)\}/g, ' $1 ');
+      // Naked LaTeX operators outside $...$ -> clean Unicode
+      part = part.replace(/\\times\b/g, '×');
+      part = part.replace(/\\div\b/g, '÷');
+      part = part.replace(/\\pm\b/g, '±');
+      part = part.replace(/\\leq?\b/g, '≤');
+      part = part.replace(/\\geq?\b/g, '≥');
+      part = part.replace(/\\neq?\b/g, '≠');
+      part = part.replace(/\\approx\b/g, '≈');
+      part = part.replace(/\\Rightarrow\b/g, '⇒');
+      part = part.replace(/\\rightarrow\b/g, '→');
+      part = part.replace(/\\degree\b/g, '°');
+      tokens[i] = part;
+    }
+  }
+  res = tokens.join('');
 
   // 16. Convert Unicode roots to standard KaTeX
   res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, (_m, val) => `$\\sqrt[3]{${val}}$`);
@@ -271,9 +324,9 @@ export function cleanMocktestText(text: string): string {
   // 18. Degree symbol inside math
   res = res.replace(/(\d+)\s*\^\\circ/g, '$$$1^\\circ$$');
 
-  // 19. Consolidate adjacent $ math blocks
-  res = res.replace(/\$\s*([+\-*=×÷<≤>≥≠])\s*\$/g, ' $1 ');
-  res = res.replace(/\$\s*\$/g, ' ');
+  // 19. Consolidate adjacent $ math blocks (without destroying $$ display math)
+  res = res.replace(/(?<!\$)\$\s*([+\-*=×÷<≤>≥≠])\s*\$(?!\$)/g, ' $1 ');
+  res = res.replace(/(?<!\$)\$\s+\$(?!\$)/g, ' ');
 
   // 20. Fix dangling odd $ in series or plain text so KaTeX never crashes with red text
   const dollarCount = (res.match(/(?<!\\)\$/g) || []).length;

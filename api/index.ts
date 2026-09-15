@@ -17,15 +17,81 @@ try {
   process.loadEnvFile();
 } catch (e) {}
 
+export const getPrimaryModel = (): string => {
+  try {
+    process.loadEnvFile();
+  } catch (e) {}
+  if (process.env.GEMINI_MODEL && process.env.GEMINI_MODEL.trim()) {
+    return process.env.GEMINI_MODEL.trim();
+  }
+  const candidatePaths = [
+    path.join(process.cwd(), '.env'),
+    path.resolve('.env'),
+    'h:/Rahul Sriwastaw/Tools/Code/text_extract/.env'
+  ];
+  for (const envPath of candidatePaths) {
+    try {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf8');
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('GEMINI_MODEL=')) {
+            const m = trimmed.replace(/^GEMINI_MODEL=/, '').replace(/^["']|["']$/g, '').trim();
+            if (m) return m;
+          }
+        }
+      }
+    } catch (err) {}
+  }
+  return 'gemini-3-flash-preview';
+};
+
+export const getFallbackModel = (): string => {
+  try {
+    process.loadEnvFile();
+  } catch (e) {}
+  if (process.env.GEMINI_FALLBACK_MODEL && process.env.GEMINI_FALLBACK_MODEL.trim()) {
+    return process.env.GEMINI_FALLBACK_MODEL.trim();
+  }
+  const candidatePaths = [
+    path.join(process.cwd(), '.env'),
+    path.resolve('.env'),
+    'h:/Rahul Sriwastaw/Tools/Code/text_extract/.env'
+  ];
+  for (const envPath of candidatePaths) {
+    try {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf8');
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('GEMINI_FALLBACK_MODEL=')) {
+            const m = trimmed.replace(/^GEMINI_FALLBACK_MODEL=/, '').replace(/^["']|["']$/g, '').trim();
+            if (m) return m;
+          }
+        }
+      }
+    } catch (err) {}
+  }
+  return 'gemini-2.5-flash';
+};
+
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/config', (req, res) => {
   try {
     const { totalKeys } = getGeminiClient();
-    res.json({ totalKeys });
+    res.json({
+      totalKeys,
+      model: getPrimaryModel(),
+      fallbackModel: getFallbackModel()
+    });
   } catch (error) {
-    res.json({ totalKeys: 0 });
+    res.json({
+      totalKeys: 0,
+      model: getPrimaryModel(),
+      fallbackModel: getFallbackModel()
+    });
   }
 });
 
@@ -1118,17 +1184,17 @@ ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
 - Extract EVERY piece of text from the page, including headers, footers, page numbers, and small boilerplate text. Leave nothing out.`;
 
   const executeCall = async (client: any) => {
-    const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: [
-        {
-          inlineData: {
-            mimeType: 'image/png',
-            data: cleanBase64
-          }
-        },
-        {
-          text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
+    const primaryModel = getPrimaryModel();
+    const fallbackModel = getFallbackModel();
+    const contents = [
+      {
+        inlineData: {
+          mimeType: 'image/png',
+          data: cleanBase64
+        }
+      },
+      {
+        text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
 
 ${bilingualInstruction}
 ${mcqInstruction}
@@ -1151,7 +1217,7 @@ Use this as a reference to improve your accuracy, especially for math formulas a
    - ${numberingInstruction}
    - For multiple-choice options, ensure each option (a), (b), (c), (d) is on a separate line.
    - Preserve mathematical formulas and scientific notations accurately.
-   - **STRICT MATH RULE**: You MUST enclose ALL mathematical formulas, variables, equations, and expressions in double dollar signs like \`$$\` ... \`$$\` (e.g., \`$$x^2 + y^2 = r^2$$\`, \`$$(\sec A + \tan A) \times (1 - \sin A) \times \sec A$$\`).
+   - **STRICT MATH RULE**: You MUST enclose ALL mathematical formulas, variables, equations, and expressions in double dollar signs like \`$$\` ... \`$$\` (e.g., \`$$x^2 + y^2 = r^2$$\`, \`$$(\\sec A + \\tan A) \\times (1 - \\sin A) \\times \\sec A$$\`).
    - **NO DANGLING DOLLARS**: NEVER output a closing \`$$\` without a matching opening \`$$\`! Never output broken math like \`(sec A + tan A)... \\sec A$$\` or \`\\frac{16\\pi}{3} cm^2$$\`. Every math expression MUST start with \`$$\` and end with \`$$\`.
    - For trigonometric expressions, ALWAYS use standard LaTeX: \`\\sin A\`, \`\\cos A\`, \`\\tan A\`, \`\\sec A\`, \`\\csc A\`, \`\\cot A\` inside \`$$\`...\`$$\`.
    - For formulas with units of measurement (area, volume, etc.), wrap them properly: e.g. \`$$\\frac{16\\pi}{3}\\text{ cm}^2$$\`.
@@ -1183,22 +1249,44 @@ ${imageFormattingInstruction}
 Ensure the elements in the JSON array are ordered exactly as they should be read from top to bottom, left to right.
 `
         }
-      ],
-      config: {
+      ];
+
+      const generateConfig = {
         temperature: 0.1,
         responseMimeType: "application/json",
+      };
+
+      let responseText = '';
+      try {
+        const response = await client.models.generateContent({
+          model: primaryModel,
+          contents,
+          config: generateConfig
+        });
+        responseText = response?.text;
+        if (!responseText && response?.candidates?.[0]?.content?.parts) {
+          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+      } catch (primaryErr: any) {
+        console.warn(`[/api/extract] ${primaryModel} failed (${primaryErr?.message}). Trying fallback ${fallbackModel}...`);
       }
-    });
 
-    let responseText = response?.text;
-    if (!responseText && response?.candidates?.[0]?.content?.parts) {
-      responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-    }
+      if (!responseText || !responseText.trim()) {
+        console.warn(`[/api/extract] Retrying with fallback model ${fallbackModel}...`);
+        const fallbackResponse = await client.models.generateContent({
+          model: fallbackModel,
+          contents,
+          config: generateConfig
+        });
+        responseText = fallbackResponse?.text;
+        if (!responseText && fallbackResponse?.candidates?.[0]?.content?.parts) {
+          responseText = fallbackResponse.candidates[0].content.parts.map((p: any) => p.text || '').join('');
+        }
+      }
 
-    if (!responseText || !responseText.trim()) {
-      const finishReason = response?.candidates?.[0]?.finishReason;
-      throw new Error(`Empty response from Gemini API (finishReason: ${finishReason || 'none'})`);
-    }
+      if (!responseText || !responseText.trim()) {
+        throw new Error(`Empty response from Gemini API for both ${primaryModel} and ${fallbackModel}`);
+      }
 
     const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     // Escape unescaped LaTeX backslashes so JSON.parse doesn't interpret \f as formfeed, \t as tab, etc.
@@ -1323,18 +1411,38 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
   `;
 
   const executeProofread = async (client: any) => {
-    const response = await client.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-      config: {
-        temperature: 0.1,
-        responseMimeType: "application/json",
-      }
-    });
+    const primaryModel = getPrimaryModel();
+    const fallbackModel = getFallbackModel();
+    let responseText = '';
+    try {
+      const response = await client.models.generateContent({
+        model: primaryModel,
+        contents: prompt,
+        config: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+        }
+      });
+      responseText = response?.text || '';
+    } catch (primaryErr: any) {
+      console.warn(`[/api/proofread] ${primaryModel} failed (${primaryErr?.message}). Trying fallback ${fallbackModel}...`);
+    }
 
-    const responseText = response.text;
-    if (!responseText) {
-      throw new Error("Empty response from Gemini API");
+    if (!responseText || !responseText.trim()) {
+      console.warn(`[/api/proofread] Retrying with fallback model ${fallbackModel}...`);
+      const fallbackResponse = await client.models.generateContent({
+        model: fallbackModel,
+        contents: prompt,
+        config: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+        }
+      });
+      responseText = fallbackResponse?.text || '';
+    }
+
+    if (!responseText || !responseText.trim()) {
+      throw new Error(`Empty response from Gemini API for both ${primaryModel} and ${fallbackModel}`);
     }
 
     const cleanedText = responseText.replace(/^\`\`\`json\n?/, '').replace(/\n?\`\`\`$/, '').trim();
@@ -1505,8 +1613,8 @@ Output ONLY valid JSON:
     const executeSolve = async (client: any) =>
       callGeminiWithFallback(
         client,
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         [{ text: qPrompt }],
         { temperature: 0.15, responseMimeType: 'application/json' },
         'mocktest-solve'
@@ -1606,8 +1714,8 @@ Respond ONLY with a valid JSON object:
     const executeRepair = async (client: any) =>
       callGeminiWithFallback(
         client,
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         [{ text: repairPrompt }],
         { temperature: 0.1, responseMimeType: 'application/json' },
         'mocktest-repair'
@@ -1722,8 +1830,8 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
       parts.push({ text: reverifyPrompt });
       return callGeminiWithFallback(
         client,
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         parts,
         { temperature: 0.1, responseMimeType: 'application/json' },
         'mocktest-reverify'
@@ -1968,10 +2076,12 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
         return '';
       };
 
-      // Primary: gemini-3-flash-preview
+      // Primary model
+      const primaryModel = getPrimaryModel();
+      const fallbackModel = getFallbackModel();
       try {
         const response = await client.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: primaryModel,
           contents: [
             {
               inlineData: {
@@ -1989,14 +2099,14 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
         if (responseText && responseText.trim()) {
           return responseText;
         }
-        console.warn(`[mocktest-extract] gemini-3-flash-preview returned empty output. Falling back to gemini-2.5-flash...`);
+        console.warn(`[mocktest-extract] ${primaryModel} returned empty output. Falling back to ${fallbackModel}...`);
       } catch (liteErr: any) {
-        console.warn(`[mocktest-extract] gemini-3-flash-preview failed (${liteErr?.message}). Falling back to gemini-2.5-flash...`);
+        console.warn(`[mocktest-extract] ${primaryModel} failed (${liteErr?.message}). Falling back to ${fallbackModel}...`);
       }
 
-      // Fallback model: gemini-2.5-flash
+      // Fallback model
       const response = await client.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: fallbackModel,
         contents: [
           {
             inlineData: {
@@ -2180,8 +2290,8 @@ Output ONLY a JSON object matching this structure:
     const executeGenerate = async (client: any) =>
       callGeminiWithFallback(
         client,
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         [{ text: prompt }],
         { temperature: 0.4, responseMimeType: 'application/json' },
         'mocktest-generate-similar'
@@ -2265,8 +2375,8 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
     const executeProofread = async (client: any) =>
       callGeminiWithFallback(
         client,
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         [{ text: proofreadPrompt }],
         { temperature: 0.1, responseMimeType: 'application/json' },
         'mocktest-proofread'
@@ -2384,8 +2494,8 @@ Respond with ONLY a strict JSON object:
     const executeChat = async (client: any) =>
       callGeminiWithFallback(
         client,
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         [{ text: chatPrompt }],
         { temperature: 0.25, responseMimeType: 'application/json' },
         'mocktest-ai-chat'
@@ -2528,8 +2638,8 @@ Respond with ONLY a strict JSON object:
       contents.push({ text: prompt });
       return callGeminiWithFallback(
         client,
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         contents,
         { temperature: 0.25, responseMimeType: 'application/json' },
         'mocktest-add-question'

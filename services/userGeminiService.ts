@@ -9,7 +9,9 @@ import { getAiSettings, AiMessage } from './aiDbService';
 import { NumberingStyle, ExtractedElement } from '../types';
 import { pingStudyAiExtension, extractWithStudyAiBridge, getStoredAiProvider } from './studyAiBridgeService';
 
-const GEMINI_MODEL = 'gemini-3-flash-preview';
+const GEMINI_MODEL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_GEMINI_MODEL)
+  ? (import.meta as any).env.VITE_GEMINI_MODEL
+  : 'gemini-3-flash-preview';
 const API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 export interface QuestionContext {

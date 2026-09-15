@@ -42,6 +42,7 @@ import {
   generateSimilarQuestionItem,
   generateSimilarBatchFromItems
 } from '../services/mocktestService';
+import { cleanMocktestText } from '../services/textCleanService';
 import { 
   extractWithStudyAiBridge, 
   captureFromStudyAiBridge,
@@ -125,13 +126,14 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
 
   if (!content) return null;
 
-  let clean = content;
+  // 1. Run unified math, LaTeX, arrow, and symbol-series cleaner
+  let clean = cleanMocktestText(content);
 
-  // 1. Standardize MathJax \( ... \) and \[ ... \] to $ and $$ for remarkMath
+  // 2. Standardize MathJax \( ... \) and \[ ... \] to $ and $$ for remarkMath
   clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
   clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-  // 2. Convert HTML tables to clean Markdown tables for remarkGfm
+  // 3. Convert HTML tables to clean Markdown tables for remarkGfm
   clean = clean.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_match, tableContent) => {
     const rows: string[][] = [];
     const rowMatches = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
@@ -155,11 +157,11 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
     return '\n\n' + paddedRows[0] + '\n' + headerDivider + '\n' + paddedRows.slice(1).join('\n') + '\n\n';
   });
 
-  // 3. Convert HTML lists
+  // 4. Convert HTML lists
   clean = clean.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, '* $1\n');
   clean = clean.replace(/<\/?(?:ul|ol)[^>]*>/gi, '\n');
 
-  // 4. Convert formatting tags to Markdown and clean ALL <p> & </p> to prevent stray tags
+  // 5. Convert formatting tags to Markdown and clean ALL <p> & </p> to prevent stray tags
   clean = clean
     .replace(/<hr\s*\/?>/gi, '\n\n---\n\n')
     .replace(/<div[^>]*>/gi, '')
@@ -170,8 +172,7 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
     .replace(/<\/p>\s*<p>/gi, '\n\n')
     .replace(/<\/?p[^>]*>/gi, '\n\n');
 
-  // 5. Ensure ANY existing Markdown table block has blank lines before and after it
-  // (GFM spec strictly requires empty lines before tables so they don't merge into paragraphs)
+  // 6. Ensure ANY existing Markdown table block has blank lines before and after it
   const lines = clean.split('\n');
   const normalizedLines: string[] = [];
   let inTable = false;
@@ -197,70 +198,6 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
     }
   }
   clean = normalizedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-
-  // 6. Clean corrupted \r + ightarrow or literal "ightarrow" from JSON unescaping
-  // e.g. "FISTightarrow3962" -> "FIST → 3962", "3, 4, 5ightarrow" -> "3, 4, 5 → "
-  clean = clean.replace(/[\r\x0d]?\\?r?ightarrow\b/gi, ' → ');
-  clean = clean.replace(/([a-zA-Z0-9,])\s*ightarrow\s*([a-zA-Z0-9])/gi, '$1 → $2');
-  clean = clean.replace(/([a-zA-Z0-9,])\s*ightarrow\b/gi, '$1 → ');
-  clean = clean.replace(/\bightarrow\b/gi, '→');
-
-  // Standardize LaTeX arrows to clean Unicode arrows
-  clean = clean.replace(/\\rightarrow\b/g, ' → ');
-  clean = clean.replace(/\\Rightarrow\b/g, ' ⇒ ');
-  clean = clean.replace(/\\leftarrow\b/g, ' ← ');
-  clean = clean.replace(/\\Leftarrow\b/g, ' ⇐ ');
-  clean = clean.replace(/\\to\b/g, ' → ');
-
-  // Clean LaTeX spacing junk \! (negative thin space)
-  clean = clean.replace(/\\!/g, '');
-
-  // Convert symbol-series LaTeX commands to clean Unicode symbols (e.g. \bigwedge, \wedge -> ∧)
-  clean = clean.replace(/\\(?:big)?wedge\b/gi, '∧');
-  clean = clean.replace(/\\(?:big)?vee\b/gi, '∨');
-
-  // 7. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
-  const parts = clean.split('$');
-  for (let i = 0; i < parts.length; i += 2) {
-    let part = parts[i];
-    // Naked \frac{num}{den} outside $...$ -> wrap in $...$
-    part = part.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '$\\frac{$1}{$2}$');
-    // Naked \sqrt{...} outside $...$ -> wrap in $...$
-    part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, '$\\sqrt{$1}$');
-    // Naked \text{...} outside $...$ is plain text: unwrap it cleanly with space
-    part = part.replace(/\\text\s*\{([^{}]+)\}/g, ' $1 ');
-    // Naked LaTeX operators outside $...$ -> clean Unicode
-    part = part.replace(/\\times\b/g, '×');
-    part = part.replace(/\\div\b/g, '÷');
-    part = part.replace(/\\pm\b/g, '±');
-    part = part.replace(/\\leq?\b/g, '≤');
-    part = part.replace(/\\geq?\b/g, '≥');
-    part = part.replace(/\\neq?\b/g, '≠');
-    part = part.replace(/\\approx\b/g, '≈');
-    part = part.replace(/\\Rightarrow\b/g, '⇒');
-    part = part.replace(/\\rightarrow\b/g, '→');
-    part = part.replace(/\\degree\b/g, '°');
-    parts[i] = part;
-  }
-  clean = parts.join('$');
-
-  // 8. Protect Indian Rupee currency ₹ from math dollars
-  clean = clean.replace(/\$\s*=\s*₹/g, '= ₹');
-  clean = clean.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
-  clean = clean.replace(/\$\s*₹/g, '₹');
-  clean = clean.replace(/₹\s*\$/g, '₹');
-  clean = clean.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
-
-  // 9. Simplify options or short text with stray $: e.g. "$420 litres" or "$405$ litres"
-  clean = clean.replace(/<p>\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)<\/p>/gi, '<p>$1 $2</p>');
-  clean = clean.replace(/^\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)$/gi, '$1 $2');
-  if (/^\s*<p>\s*\$\s*(\d+[\s\S]*)<\/p>\s*$/i.test(clean) && (clean.match(/\$/g) || []).length === 1) {
-    clean = clean.replace(/<p>\s*\$\s*/i, '<p>');
-  }
-  if (/^\s*\$\s*(\d+[\s\S]*)$/i.test(clean) && (clean.match(/\$/g) || []).length === 1) {
-    clean = clean.replace(/^\s*\$\s*/, '');
-  }
-  clean = clean.replace(/[ \t]{2,}/g, ' ');
 
   const customTableComponents = {
     table: ({ children }: any) => (

@@ -363,189 +363,20 @@ export function ensureHtmlParagraph(text: string): string {
   return paras.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
 }
 
-// Regex definitions for previous year exam names, shifts, dates, and publisher watermarks
-const EXAM_KEYWORD_REGEX = '(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\\s\\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\\s\\-]*डी|टेक)';
-const SHIFT_KEYWORD_REGEX = '(?:Afternoon|Morning|Evening|Night|Shift[\\s\\-]*[I|II|III|IV|V|1|2|3|4|5]|Batch[\\s\\-]*\\d+|दोपहर|सुबह|शाम|रात|प्रथम[\\s\\-]*पाली|द्वितीय[\\s\\-]*पाली|तृतीय[\\s\\-]*पाली|पाली[\\s\\-]*\\d+)';
-const DATE_PATTERN_REGEX = '(?:\\d{1,2}[\\/\\.\\-]\\d{1,2}[\\/\\.\\-]\\d{2,4}|\\b(?:19|20)\\d{2}\\b)';
+import {
+  stripExamTagsAndJunk,
+  cleanMocktestText,
+  stripOptionLetterReferences,
+  stripSolutionPrefix
+} from './textCleanService';
 
-/**
- * Strips previous-year exam tags, shift dates, paper citations, and junk watermarks from question text and options.
- * Examples stripped:
- * - "RRB Tech. - (III) 23/12/2024 (Afternoon)"
- * - "NTPC CBT - I (GL) 17/06/2025 (Afternoon)"
- * - "[SSC CGL 14/07/2023 (Shift-1)]"
- * - "(RRB Group D 17-08-2022 Shift 2)"
- * - "आरआरबी टेक. - (III) 23/12/2024 (दोपहर)"
- */
-export function stripExamTagsAndJunk(text: string): string {
-  if (!text) return '';
-  let res = text;
+export {
+  stripExamTagsAndJunk,
+  cleanMocktestText,
+  stripOptionLetterReferences,
+  stripSolutionPrefix
+};
 
-  // 1. Bracketed tags like [SSC CGL 14/07/2023 (Shift-1)], [RRB NTPC 28.12.2020 (Shift-I)]
-  res = res.replace(/\[\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\]]*\]/gi, '');
-
-  // 2. Parenthesized tags like (RRB Group D 17-08-2022 Shift 2)
-  res = res.replace(/\(\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\)]*\)/gi, '');
-
-  // 3. Leading bracketed or parenthesized exam tags at the start of question or inside <p>
-  res = res.replace(/(?:^|<p>)\s*\[\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\]]*\]\s*/gi, (m) => m.startsWith('<p>') ? '<p>' : '');
-  res = res.replace(/(?:^|<p>)\s*\(\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\)]*\)\s*/gi, (m) => m.startsWith('<p>') ? '<p>' : '');
-
-  // 4. Trailing unbracketed exam tags (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT - I (GL) 17/06/2025 (Afternoon)")
-  const trailingPattern = new RegExp(
-    '(?:[\\s\\.\\,\\;\\-\\–\\—]|\\?|\\!)+(' + EXAM_KEYWORD_REGEX + '[\\s\\S]*?(?:' + DATE_PATTERN_REGEX + '|' + SHIFT_KEYWORD_REGEX + ')[\\s\\S]*?)(\\s*<\\/p>|$)',
-    'i'
-  );
-  res = res.replace(trailingPattern, (match, _tag, closing) => {
-    const preChar = match.trim().charAt(0);
-    const punct = (preChar === '?' || preChar === '!' || preChar === '.') ? preChar : '';
-    return punct + (closing || '');
-  });
-
-  // 5. Standalone trailing shift / date (e.g. "23/12/2024 (Afternoon)")
-  res = res.replace(new RegExp('(?:[\\s\\-\\–\\—]+)(' + DATE_PATTERN_REGEX + '\\s*\\(?' + SHIFT_KEYWORD_REGEX + '\\)?|\\(?' + SHIFT_KEYWORD_REGEX + '\\)?)(\\s*<\\/p>|$)', 'i'), '$2');
-
-  // 6. Clean publisher watermarks and book signatures
-  res = res.replace(/(?:Youth\s*Competition\s*Times|Pinnacle\s*Publication|Testbook\.com|Adda247|Exampur|Gradeup|Drishti\s*IAS|Kiran\s*Prakashan|Platform\s*Education|Rukmini\s*Prakashan)[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
-
-  // 7. Clean trailing whitespace before </p> and multiple spaces
-  res = res.replace(/\s+<\/p>/gi, '</p>').replace(/[ \t]{2,}/g, ' ');
-
-  return res.trim();
-}
-
-/**
- * Normalizes mathematical formulas into clean standard LaTeX/KaTeX ($...$ and $$...$$),
- * strips unwanted extraneous exam watermarks and labels, preserves semantic HTML (tables, bold, lists),
- * and ensures full compatibility with KaTeX, MathJax, and HTML rendering in mock test portals.
- */
-export function cleanMocktestText(text: string): string {
-  if (!text) return '';
-  let res = text;
-
-  // First, strip all extraneous exam tags, shifts, dates, and watermarks
-  res = stripExamTagsAndJunk(res);
-
-  // 1. Strip the filler "Important Exam Point: ..." entirely (AI exam coach filler)
-  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Important Exam Point\s*:\s*(?:<\/strong>|<\/b>)?[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
-
-  // 2. Strip English scaffolding labels: "Key Point:", "Detailed Explanation:", "Additional Information:"
-  res = res.replace(/(?:<strong>|<b>)?\s*Key Point\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
-  res = res.replace(/(?:<strong>|<b>)?\s*Detailed Explanation\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
-  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Additional Information\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '<br>');
-
-  // 3. Fix corrupted formfeed \x0c and tab \t LaTeX from improper JSON parsing
-  res = res.replace(/[\x0c\u21e1\u2191]rac/g, '\\frac');
-  res = res.replace(/[\x09\b]imes/g, '\\times');
-  res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
-
-  // 4. Fix double-escaped backslashes (e.g. \\frac -> \frac, \\sqrt -> \sqrt)
-  res = res.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
-
-  // 5. Standardize MathJax inline \( ... \) and display \[ ... \] delimiters into standard KaTeX $ and $$
-  res = res.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
-  res = res.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-
-  // 6. Fix currency incorrectly wrapped in math dollar signs:
-  // e.g. $= ₹2550$ -> = ₹2550, $₹2550$ -> ₹2550, ₹$2550 -> ₹2550
-  res = res.replace(/\$\s*=\s*₹/g, '= ₹');
-  res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
-  res = res.replace(/\$\s*₹/g, '₹');
-  res = res.replace(/₹\s*\$/g, '₹');
-  res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
-
-  // 7. Auto-wrap naked LaTeX fractions \frac{num}{den} if not inside $...$
-  res = res.replace(/(?<!\$)(?:\\frac\s*\{[^{}]+\}\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
-
-  // 8. Auto-wrap naked LaTeX square roots \sqrt{...} or \sqrt[n]{...} if not inside $...$
-  res = res.replace(/(?<!\$)(?:\\sqrt(?:\s*\[[^\]]+\])?\s*\{[^{}]+\})(?!\$)/g, '$$$0$$');
-
-  // 9. Convert Unicode roots to standard KaTeX:
-  // ∛0.008 -> $\sqrt[3]{0.008}$, √64 -> $\sqrt{64}$
-  res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt[3]{$1}$$');
-  res = res.replace(/√\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt{$1}$$');
-
-  // 10. Convert Unicode vulgar fractions to clean LaTeX:
-  res = res.replace(/½/g, '$$\\frac{1}{2}$$');
-  res = res.replace(/¼/g, '$$\\frac{1}{4}$$');
-  res = res.replace(/¾/g, '$$\\frac{3}{4}$$');
-  res = res.replace(/⅓/g, '$$\\frac{1}{3}$$');
-  res = res.replace(/⅔/g, '$$\\frac{2}{3}$$');
-
-  // 11. Fix degree symbol: 90° -> $90^\circ$ inside math
-  res = res.replace(/(\d+)\s*\^\\circ/g, '$$$1^\\circ$$');
-
-  // 12. Consolidate adjacent $ math blocks:
-  res = res.replace(/\$\s*([+\-*=×÷<≤>≥≠])\s*\$/g, ' $1 ');
-  res = res.replace(/\$\s*\$/g, ' ');
-
-  // 13. Fix broken < br > tags with spaces or escaped entities
-  res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
-  res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
-
-  // 14. Clean consecutive <br> and paragraph starts
-  res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
-  res = res.replace(/<p>\s*<br\s*\/?>/gi, '<p>');
-
-  // 15. Clean multiple whitespace while preserving semantic HTML
-  res = res.replace(/[ \t]{2,}/g, ' ');
-
-  return res.trim();
-}
-
-/**
- * Strips option letter/number references from solutions (e.g. 'सही विकल्प A है।', 'अतः विकल्प (B) सही उत्तर है।', 'The correct option is A.', 'Option B is correct.')
- * because options are shuffled dynamically in mock test portals and mentioning letters causes discrepancies.
- */
-export function stripOptionLetterReferences(text: string): string {
-  if (!text) return '';
-  let res = text;
-  // 1. Hindi: Strip option letter/number references
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:|स्पष्टतः)\s*,?\s*)?(?:सही\s*)?(?:उत्तर\s*)?विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:ही\s*)?(?:सही|उचित|सत्य|अभिष्ट|अभीष्ट|उपयुक्त)?\s*(?:उत्तर|विकल्प)?\s*(?:है|होगा|होता है)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:|स्पष्टतः)\s*,?\s*)?सही\s*(?:उत्तर|विकल्प)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:है|होगा)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार)\s*,?\s*)?विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*सही\s*(?:है|उत्तर है)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/सही\s*उत्तर\s*विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*है\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/सही\s*विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*है\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:)\s*,?\s*)?सही\s*(?:उत्तर|विकल्प)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:है|होगा)\s*[।\.]\s*/gi, '');
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:|स्पष्टतः)\s*,?\s*)?(?:सही\s*)?(?:उत्तर\s*)?विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-
-  // 2. English: Strip option letter/number references
-  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:the\s*)?(?:correct\s*)?(?:option|choice|answer)\s*(?:is\s*)?(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:is\s*(?:the\s*)?(?:correct|right)(?:\s*(?:answer|option|choice))?)?\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:option|choice)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*is\s*(?:the\s*)?(?:correct|right)(?:\s*(?:answer|option|choice))?\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:The\s*)?[Cc]orrect\s*(?:option|answer|choice)\s*[:：\-–]?\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/Correct\s*answer\s*is\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:the\s*)?(?:correct\s*)?(?:option|choice|answer)\s*(?:is\s*)?(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]\s*/gi, '');
-
-  res = res.replace(/\s+<\/p>/gi, '</p>').trim();
-  return res;
-}
-
-/**
- * Strips duplicate and unwanted solution prefixes (e.g. <b>Solution:</b>, <b>हल:</b>, Explanation:, etc.)
- * so the solution text begins directly with the step-by-step mathematical/conceptual proof.
- * Also removes any option letter references so that shuffled options in mock test portals never contradict the explanation.
- */
-export function stripSolutionPrefix(text: string): string {
-  if (!text) return '';
-  let res = text.trim();
-
-  // If first paragraph is ONLY the header, e.g. <p><b>Solution:</b></p> or <p><b>हल:</b></p>
-  res = res.replace(/^<p>\s*(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?<\/p>\s*/i, '');
-
-  // Handle <p> prefix with optional bold/strong tags around Solution/हल/Explanation/उत्तर
-  res = res.replace(/^(<p>\s*)(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '$1');
-
-  // Handle bare text with optional bold/strong tags around Solution/हल/Explanation/उत्तर
-  res = res.replace(/^(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '');
-
-  // Strip leading whitespace inside <p>
-  res = res.replace(/^<p>\s+/, '<p>');
-
-  // Strip option letter references so shuffled options do not contradict the solution
-  res = stripOptionLetterReferences(res);
-
-  return res.trim();
-}
 
 export interface PendingMcqContext {
   sourcePageNumber: number;

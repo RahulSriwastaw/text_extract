@@ -3,6 +3,15 @@ import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle } from '../types.js';
 import fs from 'fs';
 import path from 'path';
+import {
+  stripExamTagsAndJunk,
+  cleanMocktestText,
+  stripOptionLetterReferences,
+  stripSolutionPrefix,
+  prepareAiJsonString,
+  safeParseAiJson,
+  safeParseAiJsonObject
+} from '../services/textCleanService.js';
 
 try {
   process.loadEnvFile();
@@ -1383,362 +1392,39 @@ app.post('/api/proofread', async (req, res) => {
   }
 });
 
-// Server-side cleaner for math, LaTeX, stray $, and template scaffolding
-const SERVER_EXAM_KEYWORD_REGEX = '(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\\s\\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\\s\\-]*डी|टेक)';
-const SERVER_SHIFT_KEYWORD_REGEX = '(?:Afternoon|Morning|Evening|Night|Shift[\\s\\-]*[I|II|III|IV|V|1|2|3|4|5]|Batch[\\s\\-]*\\d+|दोपहर|सुबह|शाम|रात|प्रथम[\\s\\-]*पाली|द्वितीय[\\s\\-]*पाली|तृतीय[\\s\\-]*पाली|पाली[\\s\\-]*\\d+)';
-const SERVER_DATE_PATTERN_REGEX = '(?:\\d{1,2}[\\/\\.\\-]\\d{1,2}[\\/\\.\\-]\\d{2,4}|\\b(?:19|20)\\d{2}\\b)';
+// Unified cleaner aliases for backward compatibility across endpoints
+const cleanServerMocktestText = cleanMocktestText;
+const stripServerSolutionPrefix = stripSolutionPrefix;
+const stripServerExamTagsAndJunk = stripExamTagsAndJunk;
+const stripServerOptionLetterReferences = stripOptionLetterReferences;
 
-function stripServerExamTagsAndJunk(text: string): string {
-  if (!text) return '';
-  let res = text;
-  res = res.replace(/\[\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\]]*\]/gi, '');
-  res = res.replace(/\(\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\)]*\)/gi, '');
-  res = res.replace(/(?:^|<p>)\s*\[\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\]]*\]\s*/gi, (m) => m.startsWith('<p>') ? '<p>' : '');
-  res = res.replace(/(?:^|<p>)\s*\(\s*(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\s\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\s\-]*डी|टेक)[^\)]*\)\s*/gi, (m) => m.startsWith('<p>') ? '<p>' : '');
-  const trailingPattern = new RegExp(
-    '(?:[\\s\\.\\,\\;\\-\\–\\—]|\\?|\\!)+(' + SERVER_EXAM_KEYWORD_REGEX + '[\\s\\S]*?(?:' + SERVER_DATE_PATTERN_REGEX + '|' + SERVER_SHIFT_KEYWORD_REGEX + ')[\\s\\S]*?)(\\s*<\\/p>|$)',
-    'i'
-  );
-  res = res.replace(trailingPattern, (match, _tag, closing) => {
-    const preChar = match.trim().charAt(0);
-    const punct = (preChar === '?' || preChar === '!' || preChar === '.') ? preChar : '';
-    return punct + (closing || '');
-  });
-  res = res.replace(new RegExp('(?:[\\s\\-\\–\\—]+)(' + SERVER_DATE_PATTERN_REGEX + '\\s*\\(?' + SERVER_SHIFT_KEYWORD_REGEX + '\\)?|\\(?' + SERVER_SHIFT_KEYWORD_REGEX + '\\)?)(\\s*<\\/p>|$)', 'i'), '$2');
-  res = res.replace(/(?:Youth\s*Competition\s*Times|Pinnacle\s*Publication|Testbook\.com|Adda247|Exampur|Gradeup|Drishti\s*IAS|Kiran\s*Prakashan|Platform\s*Education|Rukmini\s*Prakashan)[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
-  res = res.replace(/\s+<\/p>/gi, '</p>').replace(/[ \t]{2,}/g, ' ');
-  return res.trim();
-}
-
-function cleanServerMocktestText(text: string): string {
-  if (!text) return '';
-  let res = text;
-  res = stripServerExamTagsAndJunk(res);
-
-  // Strip AI coach filler
-  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Important Exam Point\s*:\s*(?:<\/strong>|<\/b>)?[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
-  // Strip scaffolding headers
-  res = res.replace(/(?:<strong>|<b>)?\s*Key Point\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
-  res = res.replace(/(?:<strong>|<b>)?\s*Detailed Explanation\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '');
-  res = res.replace(/(?:<br\s*\/?>|\n)?\s*(?:<strong>|<b>)?\s*Additional Information\s*:\s*(?:<\/strong>|<\/b>)?\s*/gi, '<br>');
-
-  // Corrupted escapes
-  res = res.replace(/[\x0c\u21e1\u2191]rac/g, '\\frac');
-  res = res.replace(/[\x09\b]imes/g, '\\times');
-  res = res.replace(/(\d|[a-zA-Z\)])\s+imes\s+/g, '$1 \\times ');
-
-  // Corrupted \r + ightarrow or literal "ightarrow" from JSON unescaping
-  // e.g. "FISTightarrow3962" -> "FIST → 3962", "3, 4, 5ightarrow" -> "3, 4, 5 → "
-  res = res.replace(/[\r\x0d]?\\?r?ightarrow\b/gi, ' → ');
-  res = res.replace(/([a-zA-Z0-9,])\s*ightarrow\s*([a-zA-Z0-9])/gi, '$1 → $2');
-  res = res.replace(/([a-zA-Z0-9,])\s*ightarrow\b/gi, '$1 → ');
-  res = res.replace(/\bightarrow\b/gi, '→');
-
-  // Standardize LaTeX arrows to clean Unicode arrows
-  res = res.replace(/\\rightarrow\b/g, ' → ');
-  res = res.replace(/\\Rightarrow\b/g, ' ⇒ ');
-  res = res.replace(/\\leftarrow\b/g, ' ← ');
-  res = res.replace(/\\Leftarrow\b/g, ' ⇐ ');
-  res = res.replace(/\\to\b/g, ' → ');
-
-  // Clean LaTeX spacing junk \! (negative thin space)
-  res = res.replace(/\\!/g, '');
-
-  // Convert symbol-series LaTeX commands to clean Unicode symbols (e.g. \bigwedge, \wedge -> ∧)
-  res = res.replace(/\\(?:big)?wedge\b/gi, '∧');
-  res = res.replace(/\\(?:big)?vee\b/gi, '∨');
-
-  // Fix double-escaped backslashes (\\frac -> \frac, \\sqrt -> \sqrt)
-  res = res.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
-
-  // Standardize MathJax inline \( ... \) and display \[ ... \] into KaTeX $ and $$
-  res = res.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
-  res = res.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-
-  // Protect Indian Rupee currency from math dollars
-  res = res.replace(/\$\s*=\s*₹/g, '= ₹');
-  res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
-  res = res.replace(/\$\s*₹/g, '₹');
-  res = res.replace(/₹\s*\$/g, '₹');
-  res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
-
-  // Simplify simple number options wrapped in $: e.g. "$420$ litres" or "$420$ लीटर"
-  res = res.replace(/<p>\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)<\/p>/gi, '<p>$1 $2</p>');
-  res = res.replace(/^\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)$/gi, '$1 $2');
-
-  // Fix unclosed single $ at start of option like "$420 litres" or "$420 लीटर"
-  if (/^\s*<p>\s*\$\s*(\d+[\s\S]*)<\/p>\s*$/i.test(res) && (res.match(/\$/g) || []).length === 1) {
-    res = res.replace(/<p>\s*\$\s*/i, '<p>');
-  }
-  if (/^\s*\$\s*(\d+[\s\S]*)$/i.test(res) && (res.match(/\$/g) || []).length === 1) {
-    res = res.replace(/^\s*\$\s*/, '');
-  }
-
-  // Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
-  const parts = res.split('$');
-  for (let i = 0; i < parts.length; i += 2) {
-    let part = parts[i];
-    // Naked \frac{num}{den} outside $...$ -> wrap in $...$
-    part = part.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '$\\frac{$1}{$2}$');
-    // Naked \sqrt{...} outside $...$ -> wrap in $...$
-    part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, '$\\sqrt{$1}$');
-    // Naked \text{...} outside $...$ is plain text: unwrap it cleanly with space
-    part = part.replace(/\\text\s*\{([^{}]+)\}/g, ' $1 ');
-    // Naked LaTeX operators outside $...$ -> convert to clean Unicode
-    part = part.replace(/\\times\b/g, '×');
-    part = part.replace(/\\div\b/g, '÷');
-    part = part.replace(/\\pm\b/g, '±');
-    part = part.replace(/\\leq?\b/g, '≤');
-    part = part.replace(/\\geq?\b/g, '≥');
-    part = part.replace(/\\neq?\b/g, '≠');
-    part = part.replace(/\\approx\b/g, '≈');
-    part = part.replace(/\\Rightarrow\b/g, '⇒');
-    part = part.replace(/\\rightarrow\b/g, '→');
-    part = part.replace(/\\degree\b/g, '°');
-    parts[i] = part;
-  }
-  res = parts.join('$');
-
-  res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt[3]{$1}$$');
-  res = res.replace(/√\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, '$$\\sqrt{$1}$$');
-
-  // Convert Unicode vulgar fractions to clean LaTeX
-  res = res.replace(/½/g, '$$\\frac{1}{2}$$');
-  res = res.replace(/¼/g, '$$\\frac{1}{4}$$');
-  res = res.replace(/¾/g, '$$\\frac{3}{4}$$');
-  res = res.replace(/⅓/g, '$$\\frac{1}{3}$$');
-  res = res.replace(/⅔/g, '$$\\frac{2}{3}$$');
-
-  // Degree symbol inside math
-  res = res.replace(/(\d+)\s*\^\\circ/g, '$$$1^\\circ$$');
-
-  // Consolidate adjacent $ math blocks
-  res = res.replace(/\$\s*([+\-*=×÷<≤>≥≠])\s*\$/g, ' $1 ');
-  res = res.replace(/\$\s*\$/g, ' ');
-
-  // Fix broken br tags
-  res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
-  res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
-
-  // Clean consecutive <br> and paragraph starts
-  res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
-  res = res.replace(/<p>\s*<br\s*\/?>/gi, '<p>');
-  res = res.replace(/[ \t]{2,}/g, ' ');
-  return res.trim();
-}
-
-
-function stripServerOptionLetterReferences(text: string): string {
-  if (!text) return '';
-  let res = text;
-  // 1. Hindi: Strip option letter references like 'सही विकल्प A है।', 'अतः विकल्प B सही है।'
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:|स्पष्टतः)\s*,?\s*)?(?:सही\s*)?(?:उत्तर\s*)?विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:ही\s*)?(?:सही|उचित|सत्य|अभिष्ट|अभीष्ट|उपयुक्त)?\s*(?:उत्तर|विकल्प)?\s*(?:है|होगा|होता है)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:|स्पष्टतः)\s*,?\s*)?सही\s*(?:उत्तर|विकल्प)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:है|होगा)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार)\s*,?\s*)?विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*सही\s*(?:है|उत्तर है)\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/सही\s*उत्तर\s*विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*है\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/सही\s*विकल्प\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*है\s*[।\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:अतः|इसलिए|इस प्रकार|यहाँ|अत:)\s*,?\s*)?सही\s*(?:उत्तर|विकल्प)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:है|होगा)\s*[।\.]\s*/gi, '');
-
-  // 2. English: Strip option letter references like 'Option A is correct', 'Hence option (B)'
-  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:the\s*)?(?:correct\s*)?(?:option|choice|answer)\s*(?:is\s*)?(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*(?:is\s*(?:the\s*)?(?:correct|right)(?:\s*(?:answer|option|choice))?)?\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:option|choice)\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*is\s*(?:the\s*)?(?:correct|right)(?:\s*(?:answer|option|choice))?\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/The\s*correct\s*option\s*is\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/Correct\s*answer\s*is\s*(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]?\s*(?=<\/p>|$)/gi, '');
-  res = res.replace(/(?:(?:Therefore|Hence|Thus|So)\s*,?\s*)?(?:the\s*)?(?:correct\s*)?(?:option|choice|answer)\s*(?:is\s*)?(?:\([a-eA-E1-5]\)|[a-eA-E1-5])\s*[\.]\s*/gi, '');
-
-  res = res.replace(/\s+<\/p>/gi, '</p>').trim();
-  return res;
-}
-
-function stripServerSolutionPrefix(text: string): string {
-  if (!text) return '';
-  let res = text.trim();
-  res = res.replace(/^<p>\s*(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?<\/p>\s*/i, '');
-  res = res.replace(/^(<p>\s*)(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '$1');
-  res = res.replace(/^(?:<(?:b|strong)[^>]*>\s*)?(?:Solution|हल|Explanation|व्याख्या|उत्तर)\s*[:：\-–]?\s*(?:<\/(?:b|strong)>\s*)?(?:\s*<br\s*\/?>)?\s*/i, '');
-  res = res.replace(/^<p>\s+/, '<p>');
-  res = stripServerOptionLetterReferences(res);
-  return res.trim();
-}
-
-function prepareAiJsonString(raw: string): string {
-  if (!raw) return '';
-  let s = raw.trim();
-  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-
-  // Convert arrow LaTeX commands to Unicode so \r is not interpreted as carriage return by JSON.parse
-  s = s.replace(/(?<!\\)\\rightarrow\b/gi, ' → ');
-  s = s.replace(/(?<!\\)\\Rightarrow\b/g, ' ⇒ ');
-  s = s.replace(/(?<!\\)\\leftarrow\b/gi, ' ← ');
-  s = s.replace(/(?<!\\)\\Leftarrow\b/g, ' ⇐ ');
-  s = s.replace(/(?<!\\)\\to\b/g, ' → ');
-
-  // Convert symbol-series LaTeX commands to clean Unicode
-  s = s.replace(/(?<!\\)\\(?:big)?wedge\b/gi, '∧');
-  s = s.replace(/(?<!\\)\\(?:big)?vee\b/gi, '∨');
-  s = s.replace(/(?<!\\)\\!/g, '');
-
-  // Escape single-backslash math LaTeX commands so JSON.parse doesn't choke or corrupt \f, \t, etc.
-  s = s
-    .replace(/(?<!\\)\\frac/g, '\\\\frac')
-    .replace(/(?<!\\)\\times/g, '\\\\times')
-    .replace(/(?<!\\)\\sqrt/g, '\\\\sqrt')
-    .replace(/(?<!\\)\\text/g, '\\\\text')
-    .replace(/(?<!\\)\\div/g, '\\\\div')
-    .replace(/(?<!\\)\\pm/g, '\\\\pm')
-    .replace(/(?<!\\)\\cdot/g, '\\\\cdot')
-    .replace(/(?<!\\)\\le(?!a)/g, '\\\\le')
-    .replace(/(?<!\\)\\ge(?!t)/g, '\\\\ge')
-    .replace(/(?<!\\)\\neq/g, '\\\\neq')
-    .replace(/(?<!\\)\\approx/g, '\\\\approx');
-
-  return s;
-}
-
-function safeParseAiJson(rawJson: string): any {
-  if (!rawJson || !rawJson.trim()) return [];
-
-  const text = rawJson.trim();
-  const chunksToScan: string[] = [];
-
-  // 1. Collect all markdown code fences
-  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/gi;
-  let match: RegExpExecArray | null;
-  while ((match = fenceRe.exec(text)) !== null) {
-    if (match[1] && match[1].trim().length > 5) {
-      chunksToScan.push(match[1].trim());
-    }
-  }
-
-  if (chunksToScan.length === 0) {
-    const unclosedMatch = text.match(/```(?:json)?\s*([\s\S]+)$/i);
-    if (unclosedMatch && unclosedMatch[1].trim().length > 5) {
-      chunksToScan.push(unclosedMatch[1].trim());
-    } else {
-      chunksToScan.push(text);
-    }
-  }
-
-  const collected: any[] = [];
-  const seenSigs = new Set<string>();
-
-  const addParsed = (item: any) => {
-    if (!item) return;
-    if (Array.isArray(item)) {
-      item.forEach(addParsed);
-      return;
-    }
-    if (typeof item === 'object') {
-      const sig = String(item.question_hi || item.question_en || item.question || item.question_r || JSON.stringify(item)).slice(0, 60);
-      if (!seenSigs.has(sig)) {
-        seenSigs.add(sig);
-        collected.push(item);
-      }
-    }
-  };
-
-  for (const chunk of chunksToScan) {
-    const safeChunk = prepareAiJsonString(chunk);
-
-    try {
-      const p = JSON.parse(safeChunk);
-      addParsed(p);
-      continue;
-    } catch (_) {}
-
-    // Extract balanced arrays and objects from chunk
-    let startArr = -1;
-    let bDepth = 0;
-    let inStr = false;
-    let esc = false;
-    for (let i = 0; i < safeChunk.length; i++) {
-      const ch = safeChunk[i];
-      if (esc) { esc = false; continue; }
-      if (ch === '\\') { esc = true; continue; }
-      if (ch === '"') { inStr = !inStr; continue; }
-      if (!inStr) {
-        if (ch === '[') {
-          if (bDepth === 0) startArr = i;
-          bDepth++;
-        } else if (ch === ']') {
-          bDepth--;
-          if (bDepth === 0 && startArr >= 0) {
-            try {
-              const p = JSON.parse(safeChunk.slice(startArr, i + 1));
-              addParsed(p);
-            } catch (_) {}
-            startArr = -1;
-          }
-        }
-      }
-    }
-
-    // Extract standalone balanced { ... } objects
-    let braceDepth = 0;
-    let startObj = -1;
-    let inStr2 = false;
-    let esc2 = false;
-    for (let i = 0; i < safeChunk.length; i++) {
-      const ch = safeChunk[i];
-      if (esc2) { esc2 = false; continue; }
-      if (ch === '\\') { esc2 = true; continue; }
-      if (ch === '"') { inStr2 = !inStr2; continue; }
-      if (!inStr2) {
-        if (ch === '{') {
-          if (braceDepth === 0) startObj = i;
-          braceDepth++;
-        } else if (ch === '}') {
-          braceDepth--;
-          if (braceDepth === 0 && startObj >= 0) {
-            try {
-              const p = JSON.parse(safeChunk.slice(startObj, i + 1));
-              addParsed(p);
-            } catch (_) {}
-            startObj = -1;
-          }
-        }
-      }
-    }
-  }
-
-  return collected;
-}
-
-function safeParseAiJsonObject(rawJson: string): any {
-  if (!rawJson || !rawJson.trim()) return {};
-
-  const safeChunk = prepareAiJsonString(rawJson);
-
-  try {
-    const obj = JSON.parse(safeChunk);
-    if (Array.isArray(obj)) return obj[0] || {};
-    if (typeof obj === 'object' && obj !== null) return obj;
-  } catch (_) {}
-
-  // Fallback to safeParseAiJson
-  const list = safeParseAiJson(rawJson);
-  if (Array.isArray(list) && list.length > 0) {
-    return list[0];
-  }
-  return typeof list === 'object' && list !== null ? list : {};
-}
 
 
 const STRICT_MATH_AND_TEXT_PROMPT_RULES = `
-- MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX STANDARD):
+- MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT HUMAN-LIKE LATEX STANDARD):
   * Enclose ALL math formulas, equations, variables, algebra, fractions, and square roots in standard LaTeX delimiters: $...$ for inline, $$...$$ for display equations.
   * Fractions MUST use \\frac{numerator}{denominator} (e.g. $\\frac{4}{3}$).
+  * Mixed fractions MUST be enclosed entirely in $...$: e.g. "$1\\frac{7}{8}$" or "$1 \\frac{7}{8}$". NEVER leave dangling dollars like "1\\frac{7}{8}$$".
   * Powers: $x^2$, $10^{-5}$. Roots: $\\sqrt{x}$, $\\sqrt[3]{27}$.
   * Operators & symbols: $\\times$, $\\div$, $\\pm$, $\\le$, $\\ge$, $\\neq$, $\\approx$, $\\degree$, $\\alpha$, $\\beta$, $\\theta$, $\\pi$, $\\Delta$, $\\infty$.
   * CRITICAL: NEVER output naked LaTeX commands like \\frac, \\sqrt, \\times, or \\text in plain text without enclosing them in $...$!
   * CRITICAL: If you use \\text{...}, it MUST ALWAYS be inside $...$ with proper spacing: e.g. $\\text{Speed} = \\frac{\\text{Distance}}{\\text{Time}}$ or $45\\text{ litres}$.
+- EQUALS SIGN & DELIMITER SEPARATION (CRITICAL):
+  * NEVER place dollar signs immediately before or around '='!
+    - WRONG: "पत्नी का वेतन $= 11x = 11 \\times 5000 =$ ₹55,000"
+    - WRONG: "salary $= 11x"
+    - CORRECT: "पत्नी का वेतन = $11x = 11 \\times 5000$ = ₹55,000"
+    - CORRECT: "अतः $x = 5000$"
+  * Always keep prose and operators outside the math delimiters unless writing a complete display equation ($$...$$).
 - REASONING ARROWS & SYMBOL SERIES RULE (CRITICAL):
   * For Coding-Decoding, Letter Puzzles, Series steps, or Mappings:
     ALWAYS use standard Unicode arrows: '→' or '⇒' (e.g. "FIST → 3962", "SOFT → 3562", "F → 3, I → 9", "3, 4, 5 → preceded by...").
     NEVER write LaTeX '\\rightarrow', '\\Rightarrow', or 'ightarrow'!
   * For Character / Symbol / Number Series questions (संख्या-प्रतीक श्रृंखला):
-    ALWAYS use standard keyboard & Unicode symbols: '*', '^', '∧', '#', '@', '&', '$', '%', '!', '?', ';'.
-    NEVER output LaTeX commands like '\\bigwedge', '\\wedge', '\\vee', '\\star', or '\\!' in the series!
+    ALWAYS use pure standard Unicode symbols: 'Ω', '*', '^', '∧', '#', '@', '&', '$', '%', '!', '?', ';'.
+    NEVER output LaTeX commands like '\\Omega', '\\bigwedge', '\\wedge', '\\vee', '\\star', '\\text{ }', '\\%' or '\\!' in symbol series!
+    Write the series naturally: e.g. "(बाएँ) 3 Ω 2 * £ 1 + & % 4 6 @ 8 7 U 9 # 1 @ 5 $ (दाएँ)".
+    NEVER treat a literal '$' in a series as an opening/closing math delimiter!
 - WORD SPACING & PLAIN TEXT RULE (CRITICAL - NEVER CONCATENATE WORDS):
   * ALWAYS maintain natural, clear spacing between words, numbers, and variables!
   * NEVER glue words to numbers or variables!

@@ -192,11 +192,9 @@ export function cleanMocktestText(text: string): string {
   res = res.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
   // 13. Fix stray $= and =$ around operators and currency:
-  // Remove stray $ glued to = or ₹ (e.g. "वेतन $= 11x" -> "वेतन = 11x", "=$ ₹55,000" -> "= ₹55,000")
   res = res.replace(/\$\s*=\s*₹/g, '= ₹');
   res = res.replace(/\s*=\s*\$\s*₹/g, ' = ₹');
-  res = res.replace(/\$\s*=\s*/g, '= ');
-  res = res.replace(/\s*=\s*\$/g, ' = ');
+  res = res.replace(/([a-zA-Z\u0900-\u097F\s]+)\$\s*=\s*/g, '$1= $');
   res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
   res = res.replace(/\$\s*₹\s*/g, '₹');
   res = res.replace(/₹\s*\$/g, '₹');
@@ -214,6 +212,17 @@ export function cleanMocktestText(text: string): string {
     res = res.replace(/^\s*\$\s*/, '');
   }
 
+  // 14b. Heal trailing backslashes at end of line, formula, or before </p> (avoids KaTeX parse error)
+  res = res.replace(/\\+(\s*<\/p>|\s*$)/gm, '$1');
+
+  // 14c. Remove stray trailing $ on numbers, percentages, or units (e.g. "4%$" -> "4%", "224375$" -> "224375")
+  res = res.replace(/(\d+(?:\.\d+)?\s*%?)\$(\s*<\/p>|\s*$)/gm, '$1$2');
+
+  // 14d. Heal equations that end with $ but missed the opening $ after '='
+  // e.g. "2 वर्ष बाद की जनसंख्या = P \left(1 + \frac{R}{100}\right)^n$"
+  // or "= 224375 \times \left(1 + \frac{4}{100}\right)^2$"
+  res = res.replace(/(=\s*)([^\n$<]*\\[a-zA-Z][^\n$<]*)\$/gm, (_m, eq, math) => `${eq}$${math.trim()}$`);
+
   // 15. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ math blocks)
   const parts = res.split('$');
   for (let i = 0; i < parts.length; i += 2) {
@@ -227,6 +236,10 @@ export function cleanMocktestText(text: string): string {
     });
     // Naked \sqrt{...} outside $...$ -> wrap in $...$
     part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, (_m, inner) => `$\\sqrt{${inner}}$`);
+    // Naked \left( ... \right) outside $...$ -> wrap in $...$
+    part = part.replace(/\\left\(([\s\S]*?)\\right\)(?:\^([0-9a-zA-Z]+|\{[^}]+\}))?/g, (_m, inner, exp) => {
+      return exp ? `$\\left(${inner}\\right)^${exp}$` : `$\\left(${inner}\\right)$`;
+    });
     // Naked \text{...} outside $...$ is plain text: unwrap it cleanly with space
     part = part.replace(/\\text\s*\{([^{}]+)\}/g, ' $1 ');
     // Naked LaTeX operators outside $...$ -> clean Unicode

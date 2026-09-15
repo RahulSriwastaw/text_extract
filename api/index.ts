@@ -1119,7 +1119,7 @@ ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
 
   const executeCall = async (client: any) => {
     const response = await client.models.generateContent({
-      model: 'gemini-flash-lite-latest',
+      model: 'gemini-3-flash-preview',
       contents: [
         {
           inlineData: {
@@ -1324,7 +1324,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
 
   const executeProofread = async (client: any) => {
     const response = await client.models.generateContent({
-      model: 'gemini-flash-lite-latest',
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
         temperature: 0.1,
@@ -1505,8 +1505,8 @@ Output ONLY valid JSON:
     const executeSolve = async (client: any) =>
       callGeminiWithFallback(
         client,
+        'gemini-3-flash-preview',
         'gemini-2.5-flash',
-        'gemini-flash-lite-latest',
         [{ text: qPrompt }],
         { temperature: 0.15, responseMimeType: 'application/json' },
         'mocktest-solve'
@@ -1606,8 +1606,8 @@ Respond ONLY with a valid JSON object:
     const executeRepair = async (client: any) =>
       callGeminiWithFallback(
         client,
+        'gemini-3-flash-preview',
         'gemini-2.5-flash',
-        'gemini-flash-lite-latest',
         [{ text: repairPrompt }],
         { temperature: 0.1, responseMimeType: 'application/json' },
         'mocktest-repair'
@@ -1722,8 +1722,8 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
       parts.push({ text: reverifyPrompt });
       return callGeminiWithFallback(
         client,
+        'gemini-3-flash-preview',
         'gemini-2.5-flash',
-        'gemini-flash-lite-latest',
         parts,
         { temperature: 0.1, responseMimeType: 'application/json' },
         'mocktest-reverify'
@@ -1968,10 +1968,10 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
         return '';
       };
 
-      // Primary: gemini-flash-lite-latest (no responseMimeType to avoid empty output issues)
+      // Primary: gemini-3-flash-preview
       try {
         const response = await client.models.generateContent({
-          model: 'gemini-flash-lite-latest',
+          model: 'gemini-3-flash-preview',
           contents: [
             {
               inlineData: {
@@ -1989,9 +1989,9 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
         if (responseText && responseText.trim()) {
           return responseText;
         }
-        console.warn(`[mocktest-extract] gemini-flash-lite-latest returned empty output. Falling back to gemini-2.5-flash...`);
+        console.warn(`[mocktest-extract] gemini-3-flash-preview returned empty output. Falling back to gemini-2.5-flash...`);
       } catch (liteErr: any) {
-        console.warn(`[mocktest-extract] gemini-flash-lite-latest failed (${liteErr?.message}). Falling back to gemini-2.5-flash...`);
+        console.warn(`[mocktest-extract] gemini-3-flash-preview failed (${liteErr?.message}). Falling back to gemini-2.5-flash...`);
       }
 
       // Fallback model: gemini-2.5-flash
@@ -2180,8 +2180,8 @@ Output ONLY a JSON object matching this structure:
     const executeGenerate = async (client: any) =>
       callGeminiWithFallback(
         client,
+        'gemini-3-flash-preview',
         'gemini-2.5-flash',
-        'gemini-flash-lite-latest',
         [{ text: prompt }],
         { temperature: 0.4, responseMimeType: 'application/json' },
         'mocktest-generate-similar'
@@ -2265,8 +2265,8 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
     const executeProofread = async (client: any) =>
       callGeminiWithFallback(
         client,
+        'gemini-3-flash-preview',
         'gemini-2.5-flash',
-        'gemini-flash-lite-latest',
         [{ text: proofreadPrompt }],
         { temperature: 0.1, responseMimeType: 'application/json' },
         'mocktest-proofread'
@@ -2384,8 +2384,8 @@ Respond with ONLY a strict JSON object:
     const executeChat = async (client: any) =>
       callGeminiWithFallback(
         client,
+        'gemini-3-flash-preview',
         'gemini-2.5-flash',
-        'gemini-flash-lite-latest',
         [{ text: chatPrompt }],
         { temperature: 0.25, responseMimeType: 'application/json' },
         'mocktest-ai-chat'
@@ -2528,8 +2528,8 @@ Respond with ONLY a strict JSON object:
       contents.push({ text: prompt });
       return callGeminiWithFallback(
         client,
+        'gemini-3-flash-preview',
         'gemini-2.5-flash',
-        'gemini-flash-lite-latest',
         contents,
         { temperature: 0.25, responseMimeType: 'application/json' },
         'mocktest-add-question'

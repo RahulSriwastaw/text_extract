@@ -55,7 +55,7 @@ app.get('/api/debug-key', (req, res) => {
   res.json({ key: k, length: k.length });
 });
 
-let roundRobinIndex = 0;
+let globalKeyRotationIndex = 0;
 
 interface KeyHealthMetrics {
   lastErrorTime: number;
@@ -69,6 +69,7 @@ interface KeyHealthMetrics {
 
 const keyHealth = new Map<string, KeyHealthMetrics>();
 const deadKeys = new Set<string>();
+const dailyExhaustedKeys = new Map<string, number>();
 
 const FALLBACK_KEYS: string[] = [];
 
@@ -180,30 +181,39 @@ app.post('/api/admin/login', (req, res) => {
 
 app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
   const allKeys = getAllKeys();
+  const now = Date.now();
   const stats = allKeys.map(k => {
     const health = keyHealth.get(k) || { 
       lastErrorTime: 0, 
       lastSuccessTime: 0, 
       consecutiveErrors: 0, 
       totalErrors: 0, 
-      totalSuccesses: 0 
+      totalSuccesses: 0,
+      cooldownUntil: 0
     };
+    const dailyCooldownUntil = dailyExhaustedKeys.get(k) || 0;
     return {
       keyPrefix: k.substring(0, 8) + '...',
       key: k,
       ...health,
-      isDead: deadKeys.has(k)
+      isDead: deadKeys.has(k),
+      isDailyExhausted: dailyCooldownUntil > now,
+      dailyCooldownRemainingSec: Math.max(0, Math.round((dailyCooldownUntil - now) / 1000)),
+      cooldownRemainingSec: Math.max(0, Math.round((health.cooldownUntil - now) / 1000))
     };
   });
   
   // Also include dead keys
   const deadStats = Array.from(deadKeys).map(k => {
-    const health = keyHealth.get(k) || { lastErrorTime: 0, lastSuccessTime: 0, consecutiveErrors: 0, totalErrors: 0, totalSuccesses: 0 };
+    const health = keyHealth.get(k) || { lastErrorTime: 0, lastSuccessTime: 0, consecutiveErrors: 0, totalErrors: 0, totalSuccesses: 0, cooldownUntil: 0 };
     return {
       keyPrefix: k.substring(0, 8) + '...',
       key: k,
       ...health,
-      isDead: true
+      isDead: true,
+      isDailyExhausted: false,
+      dailyCooldownRemainingSec: 0,
+      cooldownRemainingSec: 0
     };
   });
 
@@ -220,6 +230,12 @@ app.post('/api/admin/dead-key', checkAdminAuth, (req, res) => {
   }
 });
 
+/**
+ * Sequential round-robin API key selector with instant failover.
+ * - Guarantees sequential distribution starting from globalKeyRotationIndex.
+ * - Excludes keys currently in deadKeys, dailyExhaustedKeys, or temporary cooldown.
+ * - Immediately advances pointer so subsequent attempts/requests NEVER repeat the same key.
+ */
 const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: string) => {
   const allKeys = getAllKeys(userKeyInput);
   const now = Date.now();
@@ -229,44 +245,85 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
     throw new Error("No valid API keys found. Please verify your keys in .env (GEMINI_API_KEYS) or Settings menu.");
   }
 
-  // 1. Available candidate keys not yet tried in this request sequence
-  let candidates = allKeys.filter(k => !skipSet.has(k));
+  const total = allKeys.length;
 
-  // If all keys have been attempted once in this sequence, reset candidates to all active keys
-  if (candidates.length === 0) {
-    candidates = allKeys;
+  // Pass 1: Find a healthy key starting from globalKeyRotationIndex
+  for (let i = 0; i < total; i++) {
+    const idx = (globalKeyRotationIndex + i) % total;
+    const k = allKeys[idx];
+
+    if (skipSet.has(k)) continue;
+    if (deadKeys.has(k)) continue;
+
+    const dailyCd = dailyExhaustedKeys.get(k) || 0;
+    if (dailyCd > now) continue;
+
+    const health = keyHealth.get(k);
+    if (health && health.cooldownUntil > now) continue;
+
+    // Healthy key found! Advance global pointer immediately for fair distribution
+    globalKeyRotationIndex = (idx + 1) % total;
+    return {
+      client: new GoogleGenAI({ apiKey: k }),
+      key: k,
+      keyIndex: idx + 1,
+      totalKeys: total,
+      waitNeededMs: 0
+    };
   }
 
-  // 2. Filter candidate keys not currently under temporary cooldown
-  const availableHealthy = candidates.filter(k => {
+  // Pass 2: If all healthy keys were already tried in this request sequence (skipSet),
+  // pick the next key from the pool that is not dead or daily exhausted
+  for (let i = 0; i < total; i++) {
+    const idx = (globalKeyRotationIndex + i) % total;
+    const k = allKeys[idx];
+
+    if (deadKeys.has(k)) continue;
+
+    const dailyCd = dailyExhaustedKeys.get(k) || 0;
+    if (dailyCd > now) continue;
+
     const health = keyHealth.get(k);
-    if (!health) return true;
-    return now >= health.cooldownUntil;
+    if (health && health.cooldownUntil > now) continue;
+
+    globalKeyRotationIndex = (idx + 1) % total;
+    return {
+      client: new GoogleGenAI({ apiKey: k }),
+      key: k,
+      keyIndex: idx + 1,
+      totalKeys: total,
+      waitNeededMs: 0
+    };
+  }
+
+  // Pass 3: All keys are in temporary cooldown or daily exhausted/dead
+  // Find non-dead, non-daily-exhausted candidate whose temporary cooldown expires earliest
+  const eligibleTemporary = allKeys.filter(k => !deadKeys.has(k) && (dailyExhaustedKeys.get(k) || 0) <= now);
+
+  if (eligibleTemporary.length === 0) {
+    throw new Error(`All ${total} API keys have reached their daily free-tier limit or are unavailable. Please add fresh Gemini API keys in Settings or wait for quota reset.`);
+  }
+
+  const sorted = [...eligibleTemporary].sort((a, b) => {
+    const cdA = keyHealth.get(a)?.cooldownUntil || 0;
+    const cdB = keyHealth.get(b)?.cooldownUntil || 0;
+    return cdA - cdB;
   });
 
-  let selectedKey = '';
-  let waitNeededMs = 0;
+  const selectedKey = sorted[0];
+  const earliestCd = keyHealth.get(selectedKey)?.cooldownUntil || 0;
+  const waitNeededMs = Math.max(0, earliestCd - now);
 
-  if (availableHealthy.length > 0) {
-    // True Round-Robin distribution across healthy keys to spread the load evenly across all keys
-    const idx = Math.abs(roundRobinIndex % availableHealthy.length);
-    selectedKey = availableHealthy[idx];
-    roundRobinIndex = (roundRobinIndex + 1) % 1000000;
-  } else {
-    // All candidates are currently under cooldown; pick the one whose cooldown expires the soonest
-    const sorted = [...candidates].sort((a, b) => {
-      const cdA = keyHealth.get(a)?.cooldownUntil || 0;
-      const cdB = keyHealth.get(b)?.cooldownUntil || 0;
-      return cdA - cdB;
-    });
-    selectedKey = sorted[0];
-    const earliestCd = keyHealth.get(selectedKey)?.cooldownUntil || 0;
-    if (earliestCd > now) {
-      waitNeededMs = Math.min(earliestCd - now + 100, 15000);
-    }
-  }
+  const selIdx = allKeys.indexOf(selectedKey);
+  globalKeyRotationIndex = (selIdx + 1) % total;
 
-  return { client: new GoogleGenAI({ apiKey: selectedKey }), key: selectedKey, totalKeys: allKeys.length, waitNeededMs };
+  return {
+    client: new GoogleGenAI({ apiKey: selectedKey }),
+    key: selectedKey,
+    keyIndex: selIdx + 1,
+    totalKeys: total,
+    waitNeededMs
+  };
 };
 
 const reportKeySuccess = (key: string) => {
@@ -280,17 +337,46 @@ const reportKeySuccess = (key: string) => {
   };
   health.lastSuccessTime = Date.now();
   health.consecutiveErrors = 0;
-  health.cooldownUntil = 0; // instantly clear cooldown on success
+  health.cooldownUntil = 0; // Clear cooldown immediately on success
   health.totalSuccesses++;
   keyHealth.set(key, health);
 };
 
-const reportKeyError = (key: string, type: string, isPermanent = false, customCooldownMs?: number) => {
-  if (isPermanent) {
+const reportKeyError = (key: string, error: any) => {
+  const now = Date.now();
+  const errorStr = (error?.message || String(error)).toUpperCase();
+  const keyPrefix = key.substring(0, 8) + '...' + key.slice(-4);
+
+  // 1. Permanent Key Invalidation
+  const isInvalid = errorStr.includes("API KEY NOT VALID") || 
+                    errorStr.includes("API_KEY_INVALID") ||
+                    errorStr.includes("PERMISSION_DENIED") ||
+                    errorStr.includes("CONSUMER HAS BEEN SUSPENDED") ||
+                    errorStr.includes("PROJECT HAS BEEN DELETED") ||
+                    errorStr.includes("ACCOUNT_DEACTIVATED");
+
+  if (isInvalid) {
     deadKeys.add(key);
-    console.error(`[API-Key] Key ${key.substring(0, 8)}... marked as PERMANENTLY DEAD (Invalid or Denied)`);
-    return;
+    console.error(`[API-Rotate] Key ${keyPrefix} marked as PERMANENTLY DEAD (Invalid/Denied)`);
+    return { type: 'DEAD', isDaily: false };
   }
+
+  // 2. Daily Quota Exhaustion (Free tier 20 RPD on gemini-2.5-flash)
+  const isDailyLimit = errorStr.includes("PERDAY") || 
+                       errorStr.includes("PER_DAY") || 
+                       errorStr.includes("PERMODEL-FREETIER") || 
+                       errorStr.includes("GENERATE_CONTENT_FREE_TIER_REQUESTS") ||
+                       (errorStr.includes("RESOURCE_EXHAUSTED") && errorStr.includes("LIMIT: 20"));
+
+  if (isDailyLimit) {
+    // Quarantine key for 4 hours so it is NEVER retried in this session
+    const quarantineDurationMs = 4 * 60 * 60 * 1000;
+    dailyExhaustedKeys.set(key, now + quarantineDurationMs);
+    console.warn(`[API-Rotate] Key ${keyPrefix} reached DAILY QUOTA LIMIT! Quarantined for 4 hours. Immediately switching to next key.`);
+    return { type: 'DAILY_EXHAUSTED', isDaily: true };
+  }
+
+  // 3. Temporary Rate Limits (RPM: 15 req/min) or Server Overload
   const health = keyHealth.get(key) || { 
     lastErrorTime: 0, 
     lastSuccessTime: 0, 
@@ -299,52 +385,37 @@ const reportKeyError = (key: string, type: string, isPermanent = false, customCo
     totalSuccesses: 0,
     cooldownUntil: 0
   };
-  const now = Date.now();
   health.lastErrorTime = now;
   health.consecutiveErrors++;
   health.totalErrors++;
-  health.errorType = type;
 
-  let cooldownMs = 5000;
-  if (customCooldownMs && customCooldownMs > 0) {
-    cooldownMs = customCooldownMs;
-  } else if (type === 'QUOTA' || type === 'RATE_LIMIT') {
-    cooldownMs = Math.min(5000 + health.consecutiveErrors * 2000, 12000);
-  } else if (type === 'OVERLOAD') {
-    cooldownMs = 4000;
-  } else {
-    cooldownMs = 2000;
+  const isRateLimit = errorStr.includes("429") || 
+                      errorStr.includes("RESOURCE_EXHAUSTED") || 
+                      errorStr.includes("QUOTA");
+  const isOverload = errorStr.includes("503") || 
+                     errorStr.includes("500") || 
+                     errorStr.includes("UNAVAILABLE") ||
+                     errorStr.includes("FETCH FAILED") ||
+                     errorStr.includes("ECONNRESET") ||
+                     errorStr.includes("ETIMEDOUT");
+
+  // Set a 25-second cooldown for RPM rate limits to give priority to remaining healthy keys
+  let cooldownMs = 25000;
+  if (isOverload) {
+    cooldownMs = 10000;
+  } else if (!isRateLimit) {
+    cooldownMs = 3000;
   }
 
   health.cooldownUntil = now + cooldownMs;
+  health.errorType = isRateLimit ? 'RATE_LIMIT' : (isOverload ? 'OVERLOAD' : 'TRANSIENT');
   keyHealth.set(key, health);
-  console.warn(`[API-Key] Key ${key.substring(0, 8)}... error: ${type}. Cooldown set for ${Math.round(cooldownMs / 1000)}s.`);
+
+  console.warn(`[API-Rotate] Key ${keyPrefix} failed (${health.errorType}). Quarantined for ${Math.round(cooldownMs / 1000)}s. Switching to next key immediately.`);
+  return { type: health.errorType, isDaily: false };
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-const extractRetryDelayMs = (error: any): number => {
-  if (!error) return 0;
-  const msg = error?.message || String(error);
-  const match = msg.match(/retry\s+(?:in|after)\s+([0-9.]+)\s*s/i);
-  if (match && match[1]) {
-    const sec = parseFloat(match[1]);
-    if (!isNaN(sec) && sec > 0) {
-      return Math.ceil(sec * 1000);
-    }
-  }
-  if (Array.isArray(error?.details)) {
-    for (const d of error.details) {
-      if (d?.retryDelay) {
-        const sec = parseFloat(String(d.retryDelay).replace('s', ''));
-        if (!isNaN(sec) && sec > 0) {
-          return Math.ceil(sec * 1000);
-        }
-      }
-    }
-  }
-  return 0;
-};
 
 export async function runAIAction(
   action: (client: any) => Promise<any>, 
@@ -352,59 +423,55 @@ export async function runAIAction(
   maxRetries?: number
 ) {
   const allKeys = getAllKeys(userKeyInput);
-  // Allow enough attempts to rotate across the entire key pool twice (minimum 10 attempts)
+  // Allow enough attempts to rotate across available keys
   const effectiveRetries = maxRetries ?? Math.max(10, allKeys.length * 2);
   const triedKeys = new Set<string>();
   let lastError: any = null;
 
   for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
-    // If all keys have been tried in this request, reset the set to allow a second pass
+    // If all keys have been tried in this request, reset the set to allow a second pass if needed
     if (triedKeys.size >= allKeys.length && allKeys.length > 0) {
       triedKeys.clear();
     }
 
-    const { client, key, totalKeys, waitNeededMs } = getGeminiClient(triedKeys, userKeyInput);
+    let clientInfo: ReturnType<typeof getGeminiClient>;
+    try {
+      clientInfo = getGeminiClient(triedKeys, userKeyInput);
+    } catch (e: any) {
+      throw e;
+    }
+
+    const { client, key, keyIndex, totalKeys, waitNeededMs } = clientInfo;
     triedKeys.add(key);
 
-    // If all keys are currently cooling down, wait for the earliest one to become available
+    const keyPrefix = key.substring(0, 8) + '...' + key.slice(-4);
+
+    // If all healthy keys are temporarily cooling down, wait for earliest one
     if (waitNeededMs > 0) {
-      console.log(`[API-Key] All keys temporarily in rate-limit cooldown. Waiting ${waitNeededMs}ms for key ${key.substring(0, 8)}...`);
-      await delay(waitNeededMs);
+      const waitSec = Math.ceil(waitNeededMs / 1000);
+      console.log(`[API-Rotate] All healthy keys temporarily cooling down. Waiting ${waitSec}s for key [${keyIndex}/${totalKeys}] ${keyPrefix}...`);
+      await delay(Math.min(waitNeededMs, 10000));
     }
+
+    console.log(`[API-Rotate] Attempt ${attempt + 1}/${effectiveRetries + 1} using Key [${keyIndex}/${totalKeys}]: ${keyPrefix}`);
 
     try {
       const result = await action(client);
       reportKeySuccess(key);
+      console.log(`[API-Rotate] Key [${keyIndex}/${totalKeys}] ${keyPrefix} SUCCESS!`);
       return result;
     } catch (error: any) {
       lastError = error;
       const errorStr = (error?.message || String(error)).toUpperCase();
-      
-      const isQuotaError = errorStr.includes("429") || 
-                           errorStr.includes("RESOURCE_EXHAUSTED") ||
-                           errorStr.includes("QUOTA") ||
-                           errorStr.includes("LIMIT");
-      
-      const isServerOverloaded = errorStr.includes("503") || 
-                                 errorStr.includes("500") ||
-                                 errorStr.includes("UNAVAILABLE") ||
-                                 errorStr.includes("FETCH FAILED") ||
-                                 errorStr.includes("ECONNRESET") ||
-                                 errorStr.includes("ETIMEDOUT");
 
-      const isInvalidKey = errorStr.includes("API KEY NOT VALID") || 
-                           errorStr.includes("PERMISSION_DENIED") ||
-                           errorStr.includes("API_KEY_INVALID");
+      const { type } = reportKeyError(key, error);
 
-      if (isInvalidKey) {
-        reportKeyError(key, 'INVALID', true);
-        // Immediately try the next key with minimal delay
-        await delay(50);
-        continue; 
-      }
-
-      const isRetryable = isQuotaError || 
-                          isServerOverloaded || 
+      const isRetryable = type === 'DEAD' || 
+                          type === 'DAILY_EXHAUSTED' || 
+                          type === 'RATE_LIMIT' || 
+                          type === 'OVERLOAD' ||
+                          errorStr.includes("429") ||
+                          errorStr.includes("RESOURCE_EXHAUSTED") ||
                           errorStr.includes("EMPTY RESPONSE") || 
                           errorStr.includes("FAILED TO PARSE") ||
                           errorStr.includes("JSON") ||
@@ -419,31 +486,17 @@ export async function runAIAction(
                           errorStr.includes("RECITATION") ||
                           errorStr.includes("OTHER");
 
-      if (isRetryable) {
-        const errType = isQuotaError ? 'QUOTA' : (isServerOverloaded ? 'OVERLOAD' : 'TRANSIENT');
-        const retryDelayMs = extractRetryDelayMs(error);
-        const cooldownMs = retryDelayMs > 0 ? (retryDelayMs + 500) : undefined;
-        reportKeyError(key, errType, false, cooldownMs);
-
-        console.warn(`[API-Key] Key ${key.substring(0, 8)}... failed (${errType}: ${error?.message || errorStr}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Rotating to next key in pool (${totalKeys} active keys).`);
-        
-        const remainingUntried = allKeys.filter(k => !triedKeys.has(k)).length;
-        if (remainingUntried > 0) {
-          // Pacing rotated attempts with 350ms prevents burst limit exhaustion
-          await delay(350); 
-        } else {
-          // All keys in the pool have been attempted in this round. Wait for quota cooldown before next pass!
-          const waitTime = retryDelayMs > 0 ? (retryDelayMs + 500) : 6000;
-          console.log(`[API-Key] All ${allKeys.length} keys attempted in this round. Waiting ${waitTime}ms before next cycle...`);
-          await delay(waitTime);
-        }
+      if (isRetryable && attempt < effectiveRetries) {
+        console.warn(`[API-Rotate] Key [${keyIndex}/${totalKeys}] ${keyPrefix} FAILED (${error?.message || errorStr}). Instantly switching to next API key...`);
+        // Brief pacing delay of 100ms before rotating to next key
+        await delay(100);
         continue;
       }
-      
+
       throw error;
     }
   }
-  
+
   const finalError = new Error(`Exhausted attempts across all ${allKeys.length} available Gemini API keys. Last error: ${lastError?.message || "Service unavailable"}.`);
   (finalError as any).status = 429;
   throw finalError;

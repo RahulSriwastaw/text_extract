@@ -1449,7 +1449,14 @@ const STRICT_MATH_AND_TEXT_PROMPT_RULES = `
   * Enclose formulas, equations, roots, powers, fractions, and variables in standard LaTeX $...$ (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
   * Plain text words, units, numbers, and currency (₹) MUST be plain text (e.g. "40 km/h", "₹500", not in LaTeX).
   * Use standard Unicode arrows: →, ⇒.
-- NO OPTION LETTERS IN SOLUTIONS: Never write "Option A is correct" (options shuffle dynamically). State facts/formulas directly.`;
+- COMPREHENSIVE, STEP-BY-STEP DETAILED SOLUTIONS (FOR ALL STUDENT LEVELS):
+  * Provide in-depth, thorough solutions so that even beginner or weaker students can understand easily.
+  * For Math/Numericals: State Given Data ("दिया गया है / Given that:"), Key Formula/Theorem in LaTeX ($...$), complete step-by-step arithmetic without skipping intermediate steps, and final calculated value with units.
+  * For Reasoning: State the fundamental rule, write out every step/pattern mapping, and explain the exact deduction.
+  * For Science/GK/Polity/History: Provide full background/context (Articles, dates, causes) + 3-5 connected high-yield exam facts.
+  * For Language: Explain grammar rules, vocabulary meanings, and why other options do not fit.
+  * Avoid short 1-2 line summaries. Ensure the explanation is detailed, clear, and instructive.
+- NO OPTION LETTERS IN SOLUTIONS: Never write "Option A is correct" or "सही विकल्प A है" (options shuffle dynamically). State facts, concept, and calculated values directly!`;
 
 app.post('/api/mocktest-solve', async (req, res) => {
   try {
@@ -1457,7 +1464,7 @@ app.post('/api/mocktest-solve', async (req, res) => {
     const userKey = (req.headers['x-user-gemini-key'] as string) || '';
 
     const qPrompt = `You are an elite Indian Competitive Exam Educator and Master Test-Series Author (specializing in SSC CGL/CHSL, Railway RRB NTPC/ALP/Group-D, Banking IBPS/SBI, UPSC, State PSC, and YCT-style exam publications).
-Provide an EXAM-ORIENTED, HIGH-YIELD, MEDIUM-LENGTH PEDAGOGICAL SOLUTION tailored precisely to this question.
+Provide a THOROUGH, IN-DEPTH, STEP-BY-STEP PEDAGOGICAL SOLUTION tailored precisely to this question so that students of ANY level (from beginners to advanced) can easily understand the complete concept and derivation.
 
 QUESTION CONTEXT:
 Target Option / Answer: ${answer || 'Deduce correct answer'}
@@ -1477,29 +1484,30 @@ Question: ${question_en || ''}
 (C) ${option3_en || ''}
 (D) ${option4_en || ''}
 
-CRITICAL PEDAGOGICAL GUIDELINES (YCT EXAM PUBLICATION STANDARD):
-1. DYNAMIC PATTERN ACCORDING TO QUESTION DISCIPLINE (जैसा प्रश्न वैसा पैटर्न):
+CRITICAL PEDAGOGICAL GUIDELINES (DETAILED & STUDENT-FRIENDLY STANDARD):
+1. DYNAMIC STEP-BY-STEP PATTERN (जैसा प्रश्न वैसा विस्तृत पैटर्न):
    - For MATHEMATICS / NUMERICALS / QUANT:
-     * State given data clearly: "दिया गया है / Given that:" (e.g. A की चाल = 40 km/h...).
-     * State the key formula in clean LaTeX math ($...$).
-     * Show step-by-step intermediate calculation without skipping steps so even weaker students understand clearly.
-     * Conclude with the final computed numerical value.
-   - For REASONING / LOGIC (Puzzles, Coding-Decoding, Series, Syllogism):
+     * State given data clearly: "दिया गया है / Given that:" (list all given values and units).
+     * State the key formula/theorem clearly in standard LaTeX math ($...$).
+     * Show complete step-by-step intermediate calculations without skipping steps so weaker students understand clearly.
+     * Conclude with the final computed numerical value and units.
+   - For REASONING / LOGIC (Puzzles, Coding-Decoding, Series, Syllogism, Blood Relations):
      * State the core logic rule directly ("जिस प्रकार...", reverse letter positions, difference pattern).
      * Show the step-by-step pattern verification for each term or concept (e.g. K (+3) → N (-8) → F).
      * State the derived correct answer term/value directly.
-   - For GENERAL KNOWLEDGE / HISTORY / POLITY / GEOGRAPHY / STATIC GK:
+   - For GENERAL KNOWLEDGE / HISTORY / POLITY / GEOGRAPHY / STATIC GK / ECONOMICS:
      * Direct Factual Context: State why the answer is correct with date, year, treaty, person, place, or Article.
-     * High-Yield Connected Exam Facts: Provide 3–4 essential connected facts, treaty conditions, or mini-list.
+     * High-Yield Connected Exam Facts: Provide 3–5 essential connected facts, treaty conditions, or mini-list for deep learning.
    - For GENERAL SCIENCE (Physics, Chemistry, Biology):
-     * Explain the scientific principle/reaction/mechanism directly.
-     * Mention practical remedies (concave lens) or related discoveries/scientists with years.
+     * Explain the scientific principle/reaction/mechanism thoroughly.
+     * Mention practical applications, related laws, and discoverers with years.
    - For LANGUAGE (Hindi & English Grammar, Vocab, Error Spotting):
-     * State the grammatical rule, tense, voice, idiom meaning, or vocabulary usage clearly.
+     * State the grammatical rule, tense, voice, idiom meaning, or vocabulary usage clearly with examples.
 
+2. FORMATTING RULES:
 - NO HTML TAGS: Output clean normal text without <p>, <b>, <br>, <table>, or <span>. Use natural newlines (\\n) for line breaks.
 - LATEX FOR MATH & SCIENCE ONLY: Use standard LaTeX $...$ for mathematical/scientific formulas.
-- STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'.
+- STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'. Start directly with the derivation or explanation.
 - STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A है" or "Option A is correct". State facts, formulas, or calculated values directly!
 
 Output ONLY valid JSON:
@@ -1798,7 +1806,7 @@ RULES:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
 3. Populate both Hindi and English fields.
-4. Solutions: Provide step-by-step reasoning or calculation. NEVER write "Option A is correct" (options shuffle dynamically). State facts/formulas directly.
+4. Comprehensive Solutions: Provide a detailed, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete intermediate calculation or factual background) so any level of student can understand easily. NEVER write "Option A is correct" (options shuffle dynamically).
 5. Answer: Correct option single letter ("A", "B", "C", or "D").
 
 Output ONLY a valid JSON array of objects:
@@ -1833,7 +1841,7 @@ RULES:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
 3. Populate both Hindi and English fields. If original is in one language only, translate to provide both.
-4. Solutions: Provide step-by-step reasoning or calculation. NEVER write "Option A is correct" (options shuffle dynamically). State facts/formulas directly.
+4. Comprehensive Solutions: Provide a detailed, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete intermediate calculation or factual background) so any level of student can understand easily. NEVER write "Option A is correct" (options shuffle dynamically).
 5. Answer: Correct option single letter ("A", "B", "C", or "D").
 6. If this is a passage/comprehension question (गद्यांश), prepend the passage text to the question text separated by "\\n---\\n".
 
@@ -2125,9 +2133,10 @@ STRICT EDITORIAL GUIDELINES:
    - DO NOT alter mathematical numerical values, variables, or the correct answer.
 ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
 
-4. SEMANTIC HTML & NO SOLUTION LABELS:
-   - Ensure question_hi and question_en are wrapped in <p>...</p>.
-   - Ensure solutions (if present) are structured with clean step-by-step explanations in <p>...</p> WITHOUT prefix labels like "<b>हल:</b>", "हल:", "<b>Solution:</b>", or "Solution:" as the portal UI displays its own Solution header!
+4. NO HTML TAGS & COMPREHENSIVE SOLUTIONS:
+   - Output clean normal text without HTML tags (NO <p>, <b>, <br>, <span>, <table>).
+   - Ensure solutions have detailed, thorough step-by-step explanations without prefix labels like "हल:" or "Solution:".
+   - NEVER mention option letters ("Option A is correct") in solutions.
 
 INPUT ITEMS TO PROOFREAD:
 ${JSON.stringify(items, null, 2)}
@@ -2218,7 +2227,7 @@ USER INSTRUCTION / REQUEST:
 YOUR MISSION:
 1. Carefully analyze what the user wants to adjust, fix, or improve for this question.
    - If user asks to change the answer: update "answer", adjust options if needed, and rewrite "solution_hi" & "solution_en" step-by-step to match the new answer.
-   - If user asks to improve solution/explanation: provide a structured, step-by-step pedagogical derivation following the YCT Exam pattern (जैसा प्रश्न वैसा पैटर्न) with given data, formula, and step-by-step intermediate calculation.
+   - If user asks to improve solution/explanation: provide a comprehensive, step-by-step pedagogical derivation with given data, formula, and step-by-step intermediate calculations so any level of student can understand clearly.
    - If user asks to improve language/translation: ensure accurate, natural Hindi & English exam phrasing.
    - If user asks about Current Affairs: STRICT 1-YEAR WINDOW ONLY! Ensure all dates, schemes, winners, ministers, or statistics are verified from the LAST 1 YEAR ONLY (within 12 months).
    - If user asks to simplify or make harder: adjust question wording and distractors accordingly.
@@ -2226,28 +2235,27 @@ YOUR MISSION:
    - STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A/B/C/D है" or "Option A/B/C/D is correct" in "solution_hi" or "solution_en"! State facts, formulas, or calculated values directly!
    - NO filler headers like 'Key Point:', 'Detailed Explanation:', 'हल:', 'Solution:'.
 ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
-   - Wrap text in semantic HTML (<p>...</p>).
 3. Generate a friendly, concise, and helpful "reply" in the user's language (Hindi or English) explaining exactly what you changed or improved.
 
 OUTPUT FORMAT:
 Respond with ONLY a strict JSON object:
 {
   "updatedItem": {
-    "question_hi": "<p>...</p>",
-    "question_en": "<p>...</p>",
-    "option1_hi": "<p>...</p>",
-    "option2_hi": "<p>...</p>",
-    "option3_hi": "<p>...</p>",
-    "option4_hi": "<p>...</p>",
-    "option5_hi": "<p>...</p>",
-    "option1_en": "<p>...</p>",
-    "option2_en": "<p>...</p>",
-    "option3_en": "<p>...</p>",
-    "option4_en": "<p>...</p>",
-    "option5_en": "<p>...</p>",
+    "question_hi": "...",
+    "question_en": "...",
+    "option1_hi": "...",
+    "option2_hi": "...",
+    "option3_hi": "...",
+    "option4_hi": "...",
+    "option5_hi": "...",
+    "option1_en": "...",
+    "option2_en": "...",
+    "option3_en": "...",
+    "option4_en": "...",
+    "option5_en": "...",
     "answer": "A",
-    "solution_hi": "<p>...</p>",
-    "solution_en": "<p>...</p>",
+    "solution_hi": "...",
+    "solution_en": "...",
     "subject": "${item.subject || 'General'}",
     "difficulty_level": "easy | medium | hard"
   },
@@ -2341,21 +2349,19 @@ YOUR MISSION:
    - If an instruction/topic is provided (e.g. "Create a question on..."): formulate an authentic, exam-standard question with realistic distractors.
 2. BOTH Hindi and English fields MUST be fully populated!
 3. Accurately deduce and verify the SINGLE CORRECT ANSWER ("A", "B", "C", or "D").
-4. Formulate an EXAM-ORIENTED, STEP-BY-STEP PEDAGOGICAL SOLUTION in BOTH Hindi (<p>...</p>) and English (<p>...</p>) following the YCT Exam Pattern (जैसा प्रश्न वैसा पैटर्न):
-   - Math/Numericals: State given data ("दिया गया है / Given that:"), clean Unicode formula, complete step-by-step intermediate calculation without skipping steps so weaker students understand easily, conclude with final value.
-   - Reasoning: Core rule/logic, step-by-step verification, conclusion.
-   - GK/Polity/History/Geography: Direct factual context + 3-4 connected high-yield exam facts or mini-list.
-   - Science: Scientific law/reaction/mechanism + practical remedies.
-   - Language: Grammar rule/meaning + usage.
+4. Formulate an IN-DEPTH, STEP-BY-STEP PEDAGOGICAL SOLUTION in BOTH Hindi and English:
+   - Math/Numericals: State given data ("दिया गया है / Given that:"), LaTeX formula ($...$), complete step-by-step intermediate calculation without skipping steps so any level of student can follow easily, conclude with final value with units.
+   - Reasoning: Core rule/logic, full step-by-step pattern verification for each term, conclusion.
+   - GK/Polity/History/Geography/Science: Full factual background + 3-5 connected high-yield exam points.
+   - Language: Grammar rule/meaning + usage example.
 5. STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
    - Options shuffle dynamically in mock test portals!
    - YOU MUST NEVER mention option letters (A, B, C, D) or option numbers in solution_hi or solution_en! (e.g. NEVER write "सही विकल्प A है" or "Option B is correct").
-   - State the factual name, term, formula, or calculated value directly! (e.g. "'खेलो इंडिया मिशन ढांचा' को लॉन्च किया गया था।" or "अतः समय = 160 मिनट होगा।").
+   - State the factual name, term, formula, or calculated value directly!
 6. CRITICAL CURRENT AFFAIRS RULE (STRICT LAST 1-YEAR WINDOW ONLY):
    - If the question belongs to Current Affairs, contemporary government schemes, national initiatives, sports tournaments, awards, summits, appointments, union budget, or recent GK:
    - The data, events, facts, schemes, and statistics MUST STRICTLY BE FROM THE LAST 1 YEAR ONLY (within the last 12 months)! Outdated 2-5 year old data is strictly forbidden.
 ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
-- Wrap all text in clean semantic HTML (<p>...</p>). Use <b>...</b> for emphasis and <table>...</table> for tabular steps.
 
 OUTPUT FORMAT:
 Respond with ONLY a strict JSON object:
@@ -2363,21 +2369,21 @@ Respond with ONLY a strict JSON object:
   "item": {
     "question_r": ${nextQuestionNumber},
     "question_type": "MCQ",
-    "question_hi": "<p>...</p>",
-    "question_en": "<p>...</p>",
-    "option1_hi": "<p>...</p>",
-    "option2_hi": "<p>...</p>",
-    "option3_hi": "<p>...</p>",
-    "option4_hi": "<p>...</p>",
+    "question_hi": "...",
+    "question_en": "...",
+    "option1_hi": "...",
+    "option2_hi": "...",
+    "option3_hi": "...",
+    "option4_hi": "...",
     "option5_hi": "",
-    "option1_en": "<p>...</p>",
-    "option2_en": "<p>...</p>",
-    "option3_en": "<p>...</p>",
-    "option4_en": "<p>...</p>",
+    "option1_en": "...",
+    "option2_en": "...",
+    "option3_en": "...",
+    "option4_en": "...",
     "option5_en": "",
     "answer": "A",
-    "solution_hi": "<p>...</p>",
-    "solution_en": "<p>...</p>",
+    "solution_hi": "...",
+    "solution_en": "...",
     "subject": "Current Affairs | Mathematics | Reasoning | General Science | Polity | History | Geography | English | Hindi",
     "subject_level": "RRB Level 01 Stage I 2025",
     "difficulty_level": "${difficulty}",

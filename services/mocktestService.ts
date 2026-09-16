@@ -1443,7 +1443,7 @@ FORMAT & TYPOGRAPHY RULES:
 1. NO HTML TAGS: Output question stems, options, and solutions as clean normal text. Never output <p>, <br>, <b>, <table>, or <span>. Use simple \\n for line breaks.
 2. LATEX FOR MATH/SCIENCE ONLY: Wrap formulas, equations, fractions, and roots in $...$ (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$, $H_2O$). Keep normal text, units (e.g. km/h), and currency (₹500) as normal plain text.
 3. BOTH LANGUAGES: Provide both Hindi (_hi) and English (_en). If document has only one, translate the counterpart.
-4. YCT SOLUTION: Provide concise 3-5 line step-by-step solution. Do NOT start with 'हल:' or 'Solution:'.
+4. COMPREHENSIVE SOLUTION: Provide an in-depth, step-by-step pedagogical explanation (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. NO EXAM BOILERPLATE: Strip exam dates, shifts, and book publisher watermarks.
 
 TARGET JSON FIELDS FOR EACH OBJECT:
@@ -2069,7 +2069,7 @@ RULES:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
 3. Both Hindi and English fields must be filled.
-4. Solutions: Give clear, step-by-step solutions explaining the logic/formula directly. NEVER write "Option A is correct" (options shuffle dynamically).
+4. Comprehensive Solutions: Provide an in-depth, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. Correct Answer: Single letter "A", "B", "C", or "D".
 
 Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:
@@ -2117,7 +2117,7 @@ RULES:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
 3. Both Hindi and English fields must be filled.
-4. Solutions: Give clear, step-by-step solutions explaining the logic/formula directly. NEVER write "Option A is correct" (options shuffle dynamically).
+4. Comprehensive Solutions: Provide an in-depth, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. Correct Answer: Single letter "A", "B", "C", or "D".
 
 Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:

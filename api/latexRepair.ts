@@ -126,44 +126,81 @@ export function normalizeLatexLocally(content: string): string {
   if (!content) return '';
   let res = content;
 
-  // 1. Convert MathJax delimiters \( ... \) and \[ ... \] into $ and $$
+  // 1. Standardize environments: KaTeX requires aligned/gathered instead of align/gather
+  res = res.replace(/\\begin\{align\*?\}/g, '\\begin{aligned}');
+  res = res.replace(/\\end\{align\*?\}/g, '\\end{aligned}');
+  res = res.replace(/\\begin\{gather\*?\}/g, '\\begin{gathered}');
+  res = res.replace(/\\end\{gather\*?\}/g, '\\end{gathered}');
+
+  // 2. Convert MathJax delimiters \( ... \) and \[ ... \] into $ and $$
   res = res.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
   res = res.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-  // 2. Fix double-escaped backslashes in TeX commands (e.g., \\frac -> \frac, \\sqrt -> \sqrt)
+  // 3. Fix double-escaped backslashes in TeX commands (e.g., \\frac -> \frac, \\sqrt -> \sqrt)
   res = res.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
 
-  // 3. Fix corrupted JSON escape sequences:
-  // \x0crac -> \frac, \bimes -> \times, \r + ightarrow -> \rightarrow
+  // 4. Fix corrupted JSON escape sequences
   res = res.replace(/[\x0c\u21e1\u2191]rac/g, '\\frac');
   res = res.replace(/[\x09\b]imes/g, '\\times');
   res = res.replace(/[\r\x0d]?\\?r?ightarrow\b/gi, '\\rightarrow');
 
-  // 4. Wrap naked fractions outside $...$ in $...$
+  // 5. Wrap naked fractions outside $...$ in $...$
   res = res.replace(/(?<!\$|\\)(?:(\d+)\s*)?\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}(?!\$)/g, (_m, whole, n, d) => {
     return whole ? `$${whole}\\frac{${n}}{${d}}$` : `$\\frac{${n}}{${d}}$`;
   });
 
-  // 5. Wrap naked \sqrt outside $...$ in $...$
+  // 6. Wrap naked \sqrt outside $...$ in $...$
   res = res.replace(/(?<!\$|\\)\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}(?!\$)/g, (_m, inner) => `$\\sqrt{${inner}}$`);
 
-  // 6. Fix unclosed $ at end of equations starting with '= $' or similar
-  res = res.replace(/(=\s*)([^\n$<]*\\[a-zA-Z][^\n$<]*)\$(\s*<\/p>|\s*$)/gm, (_m, eq, math, tail) => {
-    return `${eq}$${math.trim()}$${tail}`;
-  });
-
-  // 7. Balance single odd trailing or starting $ in simple expressions
-  const dollarCount = (res.match(/(?<!\\)\$/g) || []).length;
-  if (dollarCount === 1) {
-    if (/^\s*<p>\s*\$([^\$]+)<\/p>\s*$/i.test(res)) {
-      res = res.replace(/^\s*<p>\s*\$([^\$]+)<\/p>\s*$/i, '<p>$$$1$$</p>');
-    } else if (/^\s*\$([^\$]+)$/.test(res)) {
-      res = `$${res.trim().replace(/^\$/, '')}$`;
-    }
-  }
-
-  // 8. Clean trailing backslashes at end of lines/paragraphs
+  // 7. Clean trailing backslashes at end of lines/paragraphs
   res = res.replace(/\\+(\s*<\/p>|\s*$)/gm, '$1');
+
+  // 8. Safe line-by-line single dollar balancing
+  const rawLines = res.split('\n');
+  for (let li = 0; li < rawLines.length; li++) {
+    let line = rawLines[li];
+    const hasPStart = /^\s*<p>/i.test(line);
+    const hasPEnd = /<\/p>\s*$/i.test(line);
+    let inner = line.replace(/^\s*<p>/i, '').replace(/<\/p>\s*$/i, '').trim();
+
+    const displayMatch = inner.match(/\$\$/g);
+    if (!displayMatch) {
+      const dollarCount = (inner.match(/(?<!\\)\$/g) || []).length;
+      if (dollarCount === 1) {
+        if (inner.endsWith('$')) {
+          if (inner.includes('=')) {
+            inner = inner.replace(/(=\s*)([^\n$]*\\[a-zA-Z][^\n$]*)\$$/, '$1$$$2$$');
+          } else if (/\\[a-zA-Z]/.test(inner)) {
+            inner = inner.replace(/([^\n$]*\\[a-zA-Z][^\n$]*)\$$/, '$$$1$$');
+          } else {
+            inner = inner.replace(/\$$/, '');
+          }
+        } else if (inner.startsWith('=')) {
+          inner = `$$${inner}$$`;
+        } else {
+          inner = inner.replace(/(?<!\\)\$([^\n$]*)$/, '$$$1$$');
+        }
+      }
+    }
+    rawLines[li] = (hasPStart ? '<p>' : '') + inner + (hasPEnd ? '</p>' : '');
+  }
+  res = rawLines.join('\n');
+
+  // 9. Clean inside all math blocks:
+  // - Escape unescaped % inside math
+  // - Replace HTML <br> with \\ (LaTeX newline)
+  // - Strip HTML tags inside math blocks
+  res = res.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (match) => {
+    const isDisplay = match.startsWith('$$');
+    let inner = isDisplay ? match.slice(2, -2) : match.slice(1, -1);
+
+    inner = inner.replace(/(?<!\\)%/g, '\\%');
+    inner = inner.replace(/<br\s*\/?>/gi, ' \\\\ ');
+    inner = inner.replace(/<\/?(?:p|b|strong|i|em|span|div)[^>]*>/gi, '');
+    inner = inner.replace(/\\cosec\b/g, '\\csc');
+
+    return isDisplay ? `$$${inner}$$` : `$${inner}$`;
+  });
 
   return res.trim();
 }

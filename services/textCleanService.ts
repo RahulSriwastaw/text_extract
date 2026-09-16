@@ -177,67 +177,41 @@ export function cleanMocktestText(text: string): string {
   res = res.replace(/\\(?:big)?vee\b/gi, '∨');
   res = res.replace(/\\degree\b/g, '°');
 
-  // 9. Unescape literal symbols like \%, \#, \&, and stray escaped digits like \7
-  res = res.replace(/\\([%#&_])/g, '$1');
+  // 9. Unescape stray escaped digits like \7 (do NOT unescape \%, \_, \&, \# which are valid/required in LaTeX!)
   res = res.replace(/\\([0-9])/g, '$1');
 
-  // 10. Clean empty \text{ } or \text{  }
+  // 10. Standardize environments: KaTeX requires aligned/gathered instead of align/gather
+  res = res.replace(/\\begin\{align\*?\}/g, '\\begin{aligned}');
+  res = res.replace(/\\end\{align\*?\}/g, '\\end{aligned}');
+  res = res.replace(/\\begin\{gather\*?\}/g, '\\begin{gathered}');
+  res = res.replace(/\\end\{gather\*?\}/g, '\\end{gathered}');
+
+  // 11. Clean empty \text{ } or \text{  }
   res = res.replace(/\\text\s*\{\s*\}/g, ' ');
 
-  // 11. Fix double-escaped backslashes (\\frac -> \frac, \\sqrt -> \sqrt)
+  // 12. Fix double-escaped backslashes (\\frac -> \frac, \\sqrt -> \sqrt)
   res = res.replace(/\\\\([a-zA-Z]+)/g, '\\$1');
 
-  // 12. Standardize MathJax inline \( ... \) and display \[ ... \] into KaTeX $ and $$
+  // 13. Standardize MathJax inline \( ... \) and display \[ ... \] into KaTeX $ and $$
   res = res.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
   res = res.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-  // 13. Fix stray $= and =$ around operators and currency:
+  // 14. Fix stray $= and =$ around operators and currency
   res = res.replace(/\$\s*=\s*₹/g, '= ₹');
   res = res.replace(/\s*=\s*\$\s*₹/g, ' = ₹');
-  res = res.replace(/([a-zA-Z\u0900-\u097F\s]+)\$\s*=\s*/g, '$1= $');
   res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
   res = res.replace(/\$\s*₹\s*/g, '₹');
   res = res.replace(/₹\s*\$/g, '₹');
   res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
 
-  // 14. Simplify simple number options wrapped in $: e.g. "$420$ litres" or "$420$ लीटर"
+  // 15. Simplify simple number options wrapped in $: e.g. "$420$ litres" or "$420$ लीटर"
   res = res.replace(/<p>\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)<\/p>/gi, '<p>$1 $2</p>');
   res = res.replace(/^\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)$/gi, '$1 $2');
 
-  // Fix unclosed single $ at start of option like "$420 litres"
-  if (/^\s*<p>\s*\$\s*(\d+[\s\S]*)<\/p>\s*$/i.test(res) && (res.match(/\$/g) || []).length === 1) {
-    res = res.replace(/<p>\s*\$\s*/i, '<p>');
-  }
-  if (/^\s*\$\s*(\d+[\s\S]*)$/i.test(res) && (res.match(/\$/g) || []).length === 1) {
-    res = res.replace(/^\s*\$\s*/, '');
-  }
-
-  // 14b. Heal trailing backslashes at end of line, formula, or before </p> (avoids KaTeX parse error)
+  // 16. Heal trailing backslashes at end of line, formula, or before </p>
   res = res.replace(/\\+(\s*<\/p>|\s*$)/gm, '$1');
 
-  // 14c. Remove stray trailing $ on numbers, percentages, or units (e.g. "4%$" -> "4%", "224375$" -> "224375")
-  res = res.replace(/(\d+(?:\.\d+)?\s*%?)\$(\s*<\/p>|\s*$)/gm, '$1$2');
-
-  // 14d. Heal equations that end with $ but missed the opening $ after '='
-  // e.g. "2 वर्ष बाद की जनसंख्या = P \left(1 + \frac{R}{100}\right)^n$"
-  // or "= 224375 \times \left(1 + \frac{4}{100}\right)^2$"
-  res = res.replace(/(=\s*)([^\n$<]*\\[a-zA-Z][^\n$<]*)\$/gm, (_m, eq, math) => `${eq}$${math.trim()}$`);
-
-  // 14e. Heal fractions or expressions split across HTML paragraphs or newlines
-  res = res.replace(/(\\frac\s*\{[^{}]*\}\s*)\s*<\/p>\s*<p>\s*(\{[^{}]*\})/gi, '$1$2');
-  res = res.replace(/(\\frac\s*\{[^{}]*)\s*<\/p>\s*<p>\s*([^{}]*\}\s*\{[^{}]*\})/gi, '$1$2');
-  res = res.replace(/(\\frac\s*\{[^{}]*\}\s*)\n+(\{[^{}]*\})/g, '$1$2');
-  res = res.replace(/(\\frac\s*\{[^{}]*)\n+([^{}]*\}\s*\{[^{}]*\})/g, '$1$2');
-
-  // 14f. Heal unclosed \left( that got split across </p><p> without \right
-  res = res.replace(/(\\left\([^\n<]*?)\s*<\/p>\s*<p>\s*([^\n<]*?\\right\))/gi, (m, l, r) => {
-    if (!l.includes('\\right')) {
-      return `${l} ${r}`;
-    }
-    return m;
-  });
-
-  // 14g. Line-by-line / paragraph-by-paragraph equation healing
+  // 17. Safe line-by-line single dollar balancing (avoids corrupting display math $$ or equations)
   const rawLines = res.split('\n');
   for (let li = 0; li < rawLines.length; li++) {
     let line = rawLines[li];
@@ -245,35 +219,56 @@ export function cleanMocktestText(text: string): string {
     const hasPEnd = /<\/p>\s*$/i.test(line);
     let inner = line.replace(/^\s*<p>/i, '').replace(/<\/p>\s*$/i, '').trim();
 
-    // If line starts with `= $` or `= $ ` without closing $
-    // e.g. `= $359 \times 676` -> `$= 359 \times 676$`
-    if (/^=\s*\$\s*([^$]+)$/.test(inner)) {
-      inner = inner.replace(/^=\s*\$\s*([^$]+)$/, '$= $1$');
-    }
-
-    // If line has a single unclosed $ after `= $` or starts with `$` without closing
-    // e.g. `2 वर्ष बाद कस्बे की जनसंख्या = $224375 \times \left(1 + \frac{4}{100}\right)^2`
-    const dollarCount = (inner.match(/(?<!\\)\$/g) || []).length;
-    if (dollarCount === 1) {
-      if (/=\s*\$([^$]+)$/.test(inner)) {
-        inner = inner.replace(/(=\s*)\$([^$]+)$/, '$1$$$2$$');
-      } else if (/^\$([^$]+)$/.test(inner)) {
-        inner = `$${inner.replace(/^\$/, '')}$`;
+    // If line has display math $$...$$, leave it completely intact!
+    const displayMatch = inner.match(/\$\$/g);
+    if (!displayMatch) {
+      const dollarCount = (inner.match(/(?<!\\)\$/g) || []).length;
+      if (dollarCount === 1) {
+        if (inner.endsWith('$')) {
+          if (inner.includes('=')) {
+            inner = inner.replace(/(=\s*)([^\n$]*\\[a-zA-Z][^\n$]*)\$$/, '$1$$$2$$');
+          } else if (/\\[a-zA-Z]/.test(inner)) {
+            inner = inner.replace(/([^\n$]*\\[a-zA-Z][^\n$]*)\$$/, '$$$1$$');
+          } else {
+            inner = inner.replace(/\$$/, '');
+          }
+        } else if (inner.startsWith('=')) {
+          inner = `$$${inner}$$`;
+        } else {
+          inner = inner.replace(/(?<!\\)\$([^\n$]*)$/, '$$$1$$');
+        }
+      } else if (dollarCount === 0 && /^=\s*[^$]*\\[a-zA-Z]/.test(inner)) {
+        inner = `$$${inner}$$`;
       }
     }
-
-    // If line starts with `= ` and contains LaTeX commands (\times, \frac, \left, etc.) but NO $ at all
-    // e.g. `= 224375\times\left( \frac{104}{100} \right)^2`
-    // or `= 224375\times\frac{26}{25} \times \frac{26}{25}`
-    if (/^=\s*[^$]*\\[a-zA-Z]/.test(inner) && !inner.includes('$')) {
-      inner = `$$${inner}$$`;
-    }
-
     rawLines[li] = (hasPStart ? '<p>' : '') + inner + (hasPEnd ? '</p>' : '');
   }
   res = rawLines.join('\n');
 
-  // 15. Safe outside-math LaTeX normalization (only affects parts OUTSIDE $...$ and $$...$$ math blocks)
+  // 18. Clean inside all math blocks ($...$ and $$...$$):
+  // - Escape unescaped % inside math so KaTeX doesn't comment out the formula
+  // - Replace HTML <br> with \\ (LaTeX newline)
+  // - Strip HTML tags inside math blocks
+  res = res.replace(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g, (match) => {
+    const isDisplay = match.startsWith('$$');
+    let inner = isDisplay ? match.slice(2, -2) : match.slice(1, -1);
+
+    // Escape % inside math
+    inner = inner.replace(/(?<!\\)%/g, '\\%');
+
+    // Replace HTML <br> with LaTeX newline
+    inner = inner.replace(/<br\s*\/?>/gi, ' \\\\ ');
+
+    // Strip remaining HTML tags from inside math
+    inner = inner.replace(/<\/?(?:p|b|strong|i|em|span|div)[^>]*>/gi, '');
+
+    // Standardize cosec -> csc
+    inner = inner.replace(/\\cosec\b/g, '\\csc');
+
+    return isDisplay ? `$$${inner}$$` : `$${inner}$`;
+  });
+
+  // 19. Safe outside-math LaTeX normalization
   const tokens = res.split(/(\$\$[\s\S]*?\$\$|\$[^\$\n]+?\$)/g);
   for (let i = 0; i < tokens.length; i++) {
     const isMath = /^\$\$[\s\S]*?\$\$$/.test(tokens[i]) || /^\$[^\$\n]+?\$$/.test(tokens[i]);
@@ -281,10 +276,7 @@ export function cleanMocktestText(text: string): string {
       let part = tokens[i];
       // Naked fraction or mixed fraction outside $...$ -> wrap cleanly in $...$
       part = part.replace(/(?:(\d+)\s*)?\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, (_m, whole, n, d) => {
-        if (whole) {
-          return `$${whole}\\frac{${n}}{${d}}$`;
-        }
-        return `$\\frac{${n}}{${d}}$`;
+        return whole ? `$${whole}\\frac{${n}}{${d}}$` : `$\\frac{${n}}{${d}}$`;
       });
       // Naked \sqrt{...} outside $...$ -> wrap in $...$
       part = part.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}/g, (_m, inner) => `$\\sqrt{${inner}}$`);
@@ -310,33 +302,16 @@ export function cleanMocktestText(text: string): string {
   }
   res = tokens.join('');
 
-  // 16. Convert Unicode roots to standard KaTeX
+  // 20. Convert Unicode roots to standard KaTeX
   res = res.replace(/∛\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, (_m, val) => `$\\sqrt[3]{${val}}$`);
   res = res.replace(/√\s*\(?([0-9a-zA-Z\.\+\-\*\/]+)\)?/g, (_m, val) => `$\\sqrt{${val}}$`);
 
-  // 17. Convert Unicode vulgar fractions to clean LaTeX
+  // 21. Convert Unicode vulgar fractions to clean LaTeX
   res = res.replace(/½/g, '$\\frac{1}{2}$');
   res = res.replace(/¼/g, '$\\frac{1}{4}$');
   res = res.replace(/¾/g, '$\\frac{3}{4}$');
   res = res.replace(/⅓/g, '$\\frac{1}{3}$');
   res = res.replace(/⅔/g, '$\\frac{2}{3}$');
-
-  // 18. Degree symbol inside math
-  res = res.replace(/(\d+)\s*\^\\circ/g, '$$$1^\\circ$$');
-
-  // 19. Consolidate adjacent $ math blocks (without destroying $$ display math)
-  res = res.replace(/(?<!\$)\$\s*([+\-*=×÷<≤>≥≠])\s*\$(?!\$)/g, ' $1 ');
-  res = res.replace(/(?<!\$)\$\s+\$(?!\$)/g, ' ');
-
-  // 20. Fix dangling odd $ in series or plain text so KaTeX never crashes with red text
-  const dollarCount = (res.match(/(?<!\\)\$/g) || []).length;
-  if (dollarCount % 2 !== 0) {
-    res = res.replace(/(?<!\\)\$([^\$]*)$/, '\\$$$1');
-  }
-
-  // 21. Fix broken br tags
-  res = res.replace(/&lt;\s*br\s*\/?&gt;/gi, '<br>');
-  res = res.replace(/<\s*br\s*\/?>/gi, '<br>');
 
   // 22. Clean consecutive <br> and paragraph starts
   res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');

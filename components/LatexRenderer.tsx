@@ -157,12 +157,18 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
     )
   };
 
+  const katexOptions = {
+    throwOnError: false,
+    strict: false,
+    trust: true
+  };
+
   if (inline) {
     return (
       <span ref={containerRef as React.RefObject<HTMLSpanElement>} className={`inline-flex items-center text-xs leading-normal ${className || ''}`}>
         <ReactMarkdown
           remarkPlugins={[remarkMath, remarkGfm]}
-          rehypePlugins={[rehypeKatex]}
+          rehypePlugins={[[rehypeKatex, katexOptions]]}
           components={{
             p: ({ children }) => <span className="inline">{children}</span>,
             ...customTableComponents
@@ -178,7 +184,7 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
     <div ref={containerRef} className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkMath, remarkGfm]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, katexOptions]]}
         components={customTableComponents}
       >
         {clean}

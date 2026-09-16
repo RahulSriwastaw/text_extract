@@ -150,6 +150,14 @@
     try {
       if (!job.continueChat) {
         try {
+          // STRICT GUARD: Never interrupt an ongoing generation!
+          let waitGenSec = 0;
+          while (isGenerating() && waitGenSec < 90) {
+            LOG("Ongoing generation detected — waiting before starting new chat...");
+            progress(requestId, "wait", "Previous generation still completing… please wait", adminTabId);
+            await sleep(1000);
+            waitGenSec++;
+          }
           const existingTurns = getModelResponseNodes();
           if (existingTurns.length > 0) {
             const newChatBtn = deepQueryAll('button, a, [role="button"]').find(b => {
@@ -159,10 +167,12 @@
             if (newChatBtn) {
               LOG("Starting clean new chat for fresh page extraction");
               newChatBtn.click();
-              await sleep(600);
+              await sleep(1000);
             }
           }
-        } catch {}
+        } catch (e) {
+          LOG("Error during new chat guard/click:", e);
+        }
       }
 
       progress(requestId, "composer", "Waiting for input…", adminTabId);
@@ -618,13 +628,32 @@
     );
   }
   function isGenerating() {
+    // 1. Check for Stop buttons (Gemini web UI uses various aria-labels / titles)
     const buttons = deepQueryAll('button, [role="button"]');
     const hasStop = buttons.some(b => {
-      const al = (b.getAttribute("aria-label") || b.getAttribute("title") || b.textContent || "").toLowerCase().trim();
-      return /stop|stop response|stop generation|stop generating/i.test(al);
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.textContent || "")).toLowerCase().trim();
+      return /stop|stop response|stop generation|stop generating|cancel response/i.test(al) ||
+             b.querySelector('.ds-icon-stop, [class*="stop-icon"], svg[data-icon="stop"]') !== null;
     });
     if (hasStop) return true;
-    return deepQueryAll('.streaming, [data-is-streaming="true"], [class*="streaming"]').length > 0;
+
+    // 2. Check for streaming/thinking/processing DOM indicators in Gemini
+    const streamIndicators = deepQueryAll(
+      '.streaming, [data-is-streaming="true"], [class*="streaming"], .typing-indicator, ' +
+      'span.cursor, .blinking-cursor, mat-progress-bar, mat-progress-spinner, ' +
+      '[aria-label*="Thinking" i], .thinking-container, .thinking-process, [data-test-id*="thinking"], ' +
+      '.result-streaming, [class*="loading-spinner"]'
+    );
+    return streamIndicators.length > 0;
+  }
+
+  function hasCompletionMarker(text) {
+    if (!text) return false;
+    const u = String(text).toUpperCase();
+    return u.includes(COMPLETE_MARKER) || 
+           u.includes("STUDY_AI_COMPLETE") || 
+           u.includes("YOUR_TEST_SERIES_JSON_COMPLETED") ||
+           u.includes("ALL_QUESTIONS_EXTRACTED_COMPLETELY");
   }
 
   function hasStandaloneCompletion(text) {
@@ -913,26 +942,34 @@
     return preferLast ? all.slice(-6e4) : all;
   }
 
-  function isJsonArrayComplete(text) {
+  function isJsonCompleteAndBalanced(text) {
     if (!text) return false;
     const t = text.trim();
-    const fenceMatch = t.match(/```(?:json)?\s*\[([\s\S]*?)\]\s*```/i);
-    if (fenceMatch) return true;
+    if (!/"question(?:_[a-z]+)?"\s*:/i.test(t)) return false;
+
+    // Code fence check: if odd count of ```, code block is still open and streaming!
+    const fenceMatches = t.match(/```/g);
+    if (fenceMatches && fenceMatches.length % 2 !== 0) return false;
+
     let inStr = false;
     let esc = false;
-    let depth = 0;
-    let seenOpen = false;
+    let squareDepth = 0;
+    let curlyDepth = 0;
+    let seenSquareOpen = false;
+
     for (let i = 0; i < t.length; i++) {
       const c = t[i];
       if (esc) { esc = false; continue; }
       if (c === "\\") { esc = true; continue; }
       if (c === '"') { inStr = !inStr; continue; }
       if (!inStr) {
-        if (c === "[") { depth++; seenOpen = true; }
-        else if (c === "]") { depth--; if (depth === 0 && seenOpen) return true; }
+        if (c === "[") { squareDepth++; seenSquareOpen = true; }
+        else if (c === "]") { squareDepth--; }
+        else if (c === "{") { curlyDepth++; }
+        else if (c === "}") { curlyDepth--; }
       }
     }
-    return false;
+    return seenSquareOpen && squareDepth === 0 && curlyDepth === 0;
   }
 
   function waitForJsonReplyLive(timeoutMs, requestId, baselineFingerprint, adminTabId, initialReplyCount = 0) {
@@ -989,51 +1026,59 @@
 
         const stillDurationMs = Date.now() - lastChangeTime;
 
-        // Immediate completion if model output completion marker
-        if (hasCompletionMarker(blob) && !generating) {
-          const j = extractJsonCandidate(blob) || "[]";
-          cleanup();
-          progress(requestId, "done", "Completion marker received — complete response captured", adminTabId);
-          return resolve(j + "\n" + COMPLETE_MARKER);
-        }
-
-        // While generating or text still changing in the last 3.5 seconds, keep waiting
-        if (generating || stillDurationMs < 3500) {
+        // STRICT: If Gemini is actively generating or thinking, NEVER resolve!
+        if (generating) {
           if (Date.now() - lastProgressAt > 2000) {
             lastProgressAt = Date.now();
-            progress(requestId, "stream", `Gemini streaming response… (${blob.length} chars)`, adminTabId);
+            progress(requestId, "stream", `Gemini generating response… (${blob.length} chars)`, adminTabId);
           }
           return;
         }
 
-        // Here: stillDurationMs >= 3500 (at least 3.5 seconds of stillness) AND not generating
-        const isComplete = isJsonArrayComplete(blob);
-        const json = extractJsonCandidate(blob);
-
-        if (isComplete && json && json !== "[]") {
+        // Criterion 1: Completion marker found AND not generating AND at least 2.5s stillness
+        if (hasCompletionMarker(blob) && stillDurationMs >= 2500) {
+          const j = extractJsonCandidate(blob) || "[]";
           cleanup();
-          progress(requestId, "done", `Complete JSON response captured (${json.length} chars)`, adminTabId);
+          progress(requestId, "done", `Completion marker verified — complete response captured (${blob.length} chars)`, adminTabId);
+          return resolve(j + "\n" + COMPLETE_MARKER);
+        }
+
+        // Criterion 2: Balanced JSON array AND not generating AND at least 6s of complete stillness
+        const isBalanced = isJsonCompleteAndBalanced(blob);
+        const json = extractJsonCandidate(blob);
+        if (isBalanced && json && json !== "[]" && stillDurationMs >= 6000) {
+          cleanup();
+          progress(requestId, "done", `Complete balanced JSON captured (${json.length} chars)`, adminTabId);
           return resolve(json);
         }
 
-        // If 5 full seconds of stillness, resolve with whatever the model completed
-        if (stillDurationMs >= 5000 && blob.length > 50) {
+        // While text changed recently (< 6.0 seconds), keep waiting for next chunk
+        if (stillDurationMs < 6000) {
+          if (Date.now() - lastProgressAt > 2000) {
+            lastProgressAt = Date.now();
+            progress(requestId, "stream", `Verifying output stability… (${blob.length} chars, still ${Math.round(stillDurationMs / 1000)}s)`, adminTabId);
+          }
+          return;
+        }
+
+        // Criterion 3 (Fallback): Only after 15 full seconds of absolute stillness without generating
+        if (stillDurationMs >= 15000 && blob.length > 50) {
           cleanup();
           if (json && json !== "[]") {
-            progress(requestId, "done", `Captured ${json.length} chars JSON (stream finished)`, adminTabId);
+            progress(requestId, "done", `Captured ${json.length} chars JSON (stream stabilized)`, adminTabId);
             return resolve(json);
           }
           const qs = extractQuestionsFromText(blob);
           if (qs.length) {
-            progress(requestId, "done", `Captured ${qs.length} MCQ objects (stream finished)`, adminTabId);
+            progress(requestId, "done", `Captured ${qs.length} MCQ objects (stream stabilized)`, adminTabId);
             return resolve(JSON.stringify(qs));
           }
           const objs = extractBalancedObjects(blob);
           if (objs.length) {
-            progress(requestId, "done", `Captured ${objs.length} objects (stream finished)`, adminTabId);
+            progress(requestId, "done", `Captured ${objs.length} objects (stream stabilized)`, adminTabId);
             return resolve(`[\n${objs.join(",\n")}\n]`);
           }
-          progress(requestId, "done", `Captured ${blob.length} chars reply (stream finished)`, adminTabId);
+          progress(requestId, "done", `Captured ${blob.length} chars reply (stream stabilized)`, adminTabId);
           return resolve(blob);
         }
       };

@@ -516,7 +516,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           skipPdf: !page.imageUrl,
           prompt,
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
-          continueChat: false,
+          continueChat: pageIndex > 0,
           onProgress: (step, detail) => {
             const msg = detail || `${step.toUpperCase()}...`;
             setLiveStatusText(`[Page ${page.pageNumber}] ${msg}`);

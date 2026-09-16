@@ -305,13 +305,31 @@
 
   function isGenerating() {
     const buttons = deepQueryAll("button, [role='button']");
-    return buttons.some((b) => {
-      const al = (b.getAttribute("aria-label") || b.getAttribute("title") || "").toLowerCase();
+    const hasStop = buttons.some((b) => {
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.textContent || "")).toLowerCase();
       if (/stop generating|stop response|cancel response/i.test(al)) return true;
       if (al === "stop") return true;
-      if (b.querySelector(".ds-icon-stop") || b.querySelector("[class*='stop-icon']")) return true;
+      if (b.querySelector(".ds-icon-stop") || b.querySelector("[class*='stop-icon']") || b.querySelector("svg[data-icon='stop']")) return true;
       return false;
     });
+    if (hasStop) return true;
+
+    const streamIndicators = deepQueryAll(
+      '.streaming, [data-is-streaming="true"], [class*="streaming"], .typing-indicator, ' +
+      'span.cursor, .blinking-cursor, mat-progress-bar, mat-progress-spinner, ' +
+      '[aria-label*="Thinking" i], .thinking-container, .thinking-process, [data-test-id*="thinking"], ' +
+      '.result-streaming, [class*="loading-spinner"]'
+    );
+    return streamIndicators.length > 0;
+  }
+
+  function hasCompletionMarker(text) {
+    if (!text) return false;
+    const u = String(text).toUpperCase();
+    return u.includes(COMPLETE_MARKER) || 
+           u.includes("STUDY_AI_COMPLETE") || 
+           u.includes("YOUR_TEST_SERIES_JSON_COMPLETED") ||
+           u.includes("ALL_QUESTIONS_EXTRACTED_COMPLETELY");
   }
 
   function isOurPromptText(text) {
@@ -327,7 +345,10 @@
       .split(/\n/)
       .map((l) => l.trim())
       .filter(Boolean);
-    return lines.some((l) => l.toUpperCase() === COMPLETE_MARKER);
+    return lines.some((l) => {
+      const u = l.toUpperCase();
+      return u === COMPLETE_MARKER || u.includes("STUDY_AI_COMPLETE") || u.includes("YOUR_TEST_SERIES_JSON_COMPLETED");
+    });
   }
 
   /**
@@ -775,26 +796,34 @@
     return [...byKey.values()];
   }
 
-  function isJsonArrayComplete(text) {
+  function isJsonCompleteAndBalanced(text) {
     if (!text) return false;
     const t = text.trim();
-    const fenceMatch = t.match(/```(?:json)?\s*\[([\s\S]*?)\]\s*```/i);
-    if (fenceMatch) return true;
+    if (!/"question(?:_[a-z]+)?"\s*:/i.test(t)) return false;
+
+    // Code fence check: if odd count of ```, code block is still open and streaming!
+    const fenceMatches = t.match(/```/g);
+    if (fenceMatches && fenceMatches.length % 2 !== 0) return false;
+
     let inStr = false;
     let esc = false;
-    let depth = 0;
-    let seenOpen = false;
+    let squareDepth = 0;
+    let curlyDepth = 0;
+    let seenSquareOpen = false;
+
     for (let i = 0; i < t.length; i++) {
       const c = t[i];
       if (esc) { esc = false; continue; }
       if (c === "\\") { esc = true; continue; }
       if (c === '"') { inStr = !inStr; continue; }
       if (!inStr) {
-        if (c === "[") { depth++; seenOpen = true; }
-        else if (c === "]") { depth--; if (depth === 0 && seenOpen) return true; }
+        if (c === "[") { squareDepth++; seenSquareOpen = true; }
+        else if (c === "]") { squareDepth--; }
+        else if (c === "{") { curlyDepth++; }
+        else if (c === "}") { curlyDepth--; }
       }
     }
-    return false;
+    return seenSquareOpen && squareDepth === 0 && curlyDepth === 0;
   }
 
   function waitForJsonReplyLive(timeoutMs, requestId, baseline, adminTabId, initialReplyCount = 0) {
@@ -857,48 +886,56 @@
 
         const stillDurationMs = Date.now() - lastChangeTime;
 
-        // Real completion marker: empty [] + standalone marker in assistant text
-        if (!generating && hasStandaloneCompletion(blob)) {
-          const j = extractJsonCandidate(blob);
-          if (!j || j === "[]") {
-            cleanup();
-            progress(requestId, "done", "Completion marker — stopping", adminTabId);
-            return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
-          }
-        }
-
-        // Keep waiting while generating or text still actively growing in last 3.5s
-        if (generating || stillDurationMs < 3500) {
+        // STRICT: If model is generating, NEVER resolve!
+        if (generating) {
           if (Date.now() - lastProgressAt > 2000) {
             lastProgressAt = Date.now();
-            progress(requestId, "stream", `Generating… ${blob.length} chars`, adminTabId);
+            progress(requestId, "stream", `Generating response… (${blob.length} chars)`, adminTabId);
           }
           return;
         }
 
-        // Here: stillDurationMs >= 3500 AND not generating
-        const isComplete = isJsonArrayComplete(blob);
-        const json = extractJsonCandidate(blob);
+        // Criterion 1: Real completion marker + not generating + at least 2.5s stillness
+        if (hasCompletionMarker(blob) && stillDurationMs >= 2500) {
+          const j = extractJsonCandidate(blob);
+          if (!j || j === "[]") {
+            cleanup();
+            progress(requestId, "done", "Completion marker verified — complete", adminTabId);
+            return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
+          }
+        }
 
-        if (isComplete && json && json !== "[]") {
+        // Criterion 2: Balanced JSON array + not generating + at least 6s of complete stillness
+        const isBalanced = isJsonCompleteAndBalanced(blob);
+        const json = extractJsonCandidate(blob);
+        if (isBalanced && json && json !== "[]" && stillDurationMs >= 6000) {
           cleanup();
-          progress(requestId, "done", `Captured complete JSON (${json.length} chars)`, adminTabId);
+          progress(requestId, "done", `Captured complete balanced JSON (${json.length} chars)`, adminTabId);
           return resolve(json);
         }
 
-        // If 5 full seconds of stillness, resolve with complete available content
-        if (stillDurationMs >= 5000 && blob.length > 50) {
+        // Keep waiting while text changed recently (< 6.0s)
+        if (stillDurationMs < 6000) {
+          if (Date.now() - lastProgressAt > 2000) {
+            lastProgressAt = Date.now();
+            progress(requestId, "stream", `Verifying output stability… (${blob.length} chars, still ${Math.round(stillDurationMs / 1000)}s)`, adminTabId);
+          }
+          return;
+        }
+
+        // Criterion 3 (Fallback): Only after 15 full seconds of stillness without generating
+        if (stillDurationMs >= 15000 && blob.length > 50) {
           cleanup();
           if (json && json !== "[]") {
-            progress(requestId, "done", `Captured ${json.length} chars JSON (stream finished)`, adminTabId);
+            progress(requestId, "done", `Captured ${json.length} chars JSON (stream stabilized)`, adminTabId);
             return resolve(json);
           }
           const fallbackObjs = extractBalancedObjects(blob);
           if (fallbackObjs.length > 0) {
-            progress(requestId, "done", `Captured ${fallbackObjs.length} objects (stream finished)`, adminTabId);
+            progress(requestId, "done", `Captured ${fallbackObjs.length} objects (stream stabilized)`, adminTabId);
             return resolve(`[\n${fallbackObjs.join(",\n")}\n]`);
           }
-          progress(requestId, "done", `Captured text (${blob.length} chars)`, adminTabId);
+          progress(requestId, "done", `Captured text (${blob.length} chars, stream stabilized)`, adminTabId);
           return resolve(blob);
         }
       };
@@ -1002,6 +1039,14 @@
     try {
       if (!job.continueChat) {
         try {
+          // STRICT GUARD: Never interrupt an ongoing generation!
+          let waitGenSec = 0;
+          while (isGenerating() && waitGenSec < 90) {
+            LOG("Ongoing generation detected — waiting before starting new chat...");
+            progress(requestId, "wait", "Previous generation still completing… please wait", adminTabId);
+            await sleep(1000);
+            waitGenSec++;
+          }
           const turns = getAssistantTurnNodes();
           if (turns.length > 0) {
             const newChatBtn = deepQueryAll('button, a, [role="button"]').find(b => {
@@ -1011,10 +1056,12 @@
             if (newChatBtn) {
               LOG("Clicking New chat to isolate page extraction");
               newChatBtn.click();
-              await sleep(600);
+              await sleep(1000);
             }
           }
-        } catch {}
+        } catch (e) {
+          LOG("Error during new chat guard/click:", e);
+        }
       }
 
       progress(requestId, "composer", "Waiting for chat input…", adminTabId);

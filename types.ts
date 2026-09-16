@@ -105,3 +105,29 @@ export interface MockTestMcqItem {
   pageId?: string;
 }
 
+export type LatexRepairScope = 'entire_mcq' | 'question' | 'options' | 'solution';
+export type LatexRepairStatus = 'valid' | 'fixed' | 'review_required';
+
+export interface LatexRepairRequest {
+  content?: string;
+  contentType?: 'question' | 'options' | 'solution' | 'all';
+  selectedFormula?: string;
+  item?: MockTestMcqItem;
+  scope?: LatexRepairScope;
+}
+
+export interface LatexRepairResponse {
+  status: LatexRepairStatus;
+  original: string;
+  repaired: string;
+  changes: string[];
+  confidence: number;
+  repairedItem?: MockTestMcqItem;
+  error?: string;
+}
+
+export interface LatexValidationIssue {
+  formula: string;
+  error: string;
+}
+

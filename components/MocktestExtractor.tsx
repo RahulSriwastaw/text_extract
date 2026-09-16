@@ -12,10 +12,14 @@ import rehypeKatex from 'rehype-katex';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import { MocktestAiChatModal } from './MocktestAiChatModal';
 import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
+import { LatexRepairModal } from './LatexRepairModal';
+import { LatexRenderer, useMathJax } from './LatexRenderer';
 import { 
   MockTestMcqItem, 
-  DifficultyLevel 
+  DifficultyLevel,
+  LatexRepairScope
 } from '../types';
+import { saveItemBackup, restoreItemBackup, canUndoItem } from '../services/latexRepairService';
 import { 
   downloadMockTestCsv, 
   serializeMockTestToCsv, 
@@ -69,200 +73,8 @@ interface PageQueueItem {
   pendingContext?: PendingMcqContext | null;
 }
 
-// ─── MathJax 3 Integration ────────────────────────────────────────────────────
-// Declare global MathJax type so TypeScript doesn't complain
-declare global {
-  interface Window {
-    MathJax?: {
-      typesetPromise: (elements?: HTMLElement[]) => Promise<void>;
-      typesetClear?: (elements?: HTMLElement[]) => void;
-      startup?: { promise: Promise<void> };
-    };
-  }
-}
+export { LatexRenderer, useMathJax };
 
-/**
- * Hook: Calls MathJax.typesetPromise() whenever `deps` change.
- * Pass a ref to typeset only that subtree, or omit to typeset the whole page.
- */
-export function useMathJax(ref?: React.RefObject<HTMLElement | null>, deps: any[] = []) {
-  useEffect(() => {
-    const triggerTypeset = async () => {
-      const mj = window.MathJax;
-      if (!mj?.typesetPromise) return;
-      try {
-        // Wait for MathJax startup to finish if it hasn't already
-        if (mj.startup?.promise) await mj.startup.promise;
-        const elements = ref?.current ? [ref.current] : undefined;
-        // Clear previous rendering on the element first to avoid duplication
-        if (mj.typesetClear && elements) mj.typesetClear(elements);
-        await mj.typesetPromise(elements);
-      } catch (e) {
-        // Silently ignore typeset errors (e.g., invalid LaTeX)
-        console.debug('[MathJax] typesetPromise error (non-fatal):', e);
-      }
-    };
-    // Small delay so React has finished painting the DOM
-    const timer = setTimeout(triggerTypeset, 50);
-    return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-}
-// ──────────────────────────────────────────────────────────────────────────────
-
-/**
- * LaTeX and Math-safe content renderer using KaTeX + MathJax 3.
- * Renders $...$ / $$...$$ via KaTeX (fast, offline).
- * Also calls MathJax.typesetPromise() after render to handle any \(...\) / \[...\] that survived.
- */
-export const LatexRenderer: React.FC<{ content: string; className?: string; inline?: boolean }> = ({
-  content,
-  className,
-  inline = false
-}) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  // Re-typeset with MathJax after every content change
-  useMathJax(containerRef, [content]);
-
-  if (!content) return null;
-
-  // 1. Run unified math, LaTeX, arrow, and symbol-series cleaner
-  let clean = cleanMocktestText(content);
-
-  // 2. Standardize MathJax \( ... \) and \[ ... \] to $ and $$ for remarkMath
-  clean = clean.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
-  clean = clean.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-
-  // 3. Convert HTML tables to clean Markdown tables for remarkGfm
-  clean = clean.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_match, tableContent) => {
-    const rows: string[][] = [];
-    const rowMatches = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
-    for (const rowHtml of rowMatches) {
-      const cells: string[] = [];
-      const cellMatches = rowHtml.match(/<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>/gi) || [];
-      for (const c of cellMatches) {
-        const inner = c.replace(/<(?:th|td)[^>]*>|<\/(?:th|td)>/gi, '').replace(/\n/g, ' ').trim();
-        cells.push(inner || '-');
-      }
-      if (cells.length > 0) rows.push(cells);
-    }
-    if (rows.length === 0) return '';
-    const maxCols = Math.max(...rows.map(r => r.length));
-    const paddedRows = rows.map(r => {
-      const full = [...r];
-      while (full.length < maxCols) full.push('-');
-      return '| ' + full.join(' | ') + ' |';
-    });
-    const headerDivider = '| ' + Array(maxCols).fill('---').join(' | ') + ' |';
-    return '\n\n' + paddedRows[0] + '\n' + headerDivider + '\n' + paddedRows.slice(1).join('\n') + '\n\n';
-  });
-
-  // 4. Convert HTML lists
-  clean = clean.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, '* $1\n');
-  clean = clean.replace(/<\/?(?:ul|ol)[^>]*>/gi, '\n');
-
-  // 5. Convert formatting tags to Markdown and clean ALL <p> & </p> to prevent stray tags
-  clean = clean
-    .replace(/<hr\s*\/?>/gi, '\n\n---\n\n')
-    .replace(/<div[^>]*>/gi, '')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<(?:b|strong)[^>]*>(.*?)<\/(?:b|strong)>/gi, '**$1**')
-    .replace(/<(?:i|em)[^>]*>(.*?)<\/(?:i|em)>/gi, '*$1*')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/<\/?p[^>]*>/gi, '\n\n');
-
-  // 6. Ensure ANY existing Markdown table block has blank lines before and after it
-  const lines = clean.split('\n');
-  const normalizedLines: string[] = [];
-  let inTable = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    const isTableLine = /^\s*\|.*\|\s*$/.test(l);
-
-    if (isTableLine) {
-      if (!inTable) {
-        if (normalizedLines.length > 0 && normalizedLines[normalizedLines.length - 1].trim() !== '') {
-          normalizedLines.push('');
-        }
-        inTable = true;
-      }
-      normalizedLines.push(l.trim());
-    } else {
-      if (inTable) {
-        inTable = false;
-        normalizedLines.push('');
-      }
-      normalizedLines.push(l);
-    }
-  }
-  clean = normalizedLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-
-  const customTableComponents = {
-    table: ({ children }: any) => (
-      <div className="my-3 overflow-x-auto w-full rounded-xl border border-white/[0.15] bg-black/50 shadow-md">
-        <table className="w-full text-left text-xs border-collapse border-spacing-0">
-          {children}
-        </table>
-      </div>
-    ),
-    thead: ({ children }: any) => (
-      <thead className="bg-white/[0.08] border-b border-white/[0.15] text-amber-300 font-extrabold uppercase tracking-wider text-[11px]">
-        {children}
-      </thead>
-    ),
-    tbody: ({ children }: any) => (
-      <tbody className="divide-y divide-white/[0.06] text-slate-200">
-        {children}
-      </tbody>
-    ),
-    tr: ({ children }: any) => (
-      <tr className="hover:bg-white/[0.04] transition-colors">
-        {children}
-      </tr>
-    ),
-    th: ({ children }: any) => (
-      <th className="py-2 px-3 font-extrabold border-r border-white/[0.08] last:border-r-0 text-amber-300">
-        {children}
-      </th>
-    ),
-    td: ({ children }: any) => (
-      <td className="py-2 px-3 border-r border-white/[0.06] last:border-r-0 font-medium text-slate-200 leading-relaxed">
-        {children}
-      </td>
-    )
-  };
-
-  if (inline) {
-    return (
-      <span ref={containerRef as React.RefObject<HTMLSpanElement>} className={`inline-flex items-center text-xs leading-normal ${className || ''}`}>
-        <ReactMarkdown
-          remarkPlugins={[remarkMath, remarkGfm]}
-          rehypePlugins={[rehypeKatex]}
-          components={{
-            p: ({ children }) => <span className="inline">{children}</span>,
-            ...customTableComponents
-          }}
-        >
-          {clean}
-        </ReactMarkdown>
-      </span>
-    );
-  }
-
-  return (
-    <div ref={containerRef} className={`prose prose-invert max-w-none text-xs leading-relaxed ${className || ''}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkMath, remarkGfm]}
-        rehypePlugins={[rehypeKatex]}
-        components={customTableComponents}
-      >
-        {clean}
-      </ReactMarkdown>
-    </div>
-  );
-};
 
 export interface MocktestExtractorProps {
   initialPages?: string[];
@@ -305,6 +117,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [isRepairingAll, setIsRepairingAll] = useState(false);
   const [repairProgress, setRepairProgress] = useState<{ current: number; total: number } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // AI LaTeX Repair Modal state
+  const [latexRepairTarget, setLatexRepairTarget] = useState<{ item: MockTestMcqItem; scope: LatexRepairScope } | null>(null);
+  const [undoToast, setUndoToast] = useState<{ itemId: string; questionNum: number } | null>(null);
 
   // Inline editing & High-Res Image Zoom modal with 500% Zoom, Pan & Page Navigation
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -1392,6 +1208,29 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         mcqCount: nextItems.length
       };
     }));
+  };
+
+  // AI LaTeX Repair Modal handlers
+  const handleOpenLatexRepair = (item: MockTestMcqItem, targetScope: LatexRepairScope = 'entire_mcq') => {
+    setLatexRepairTarget({ item, scope: targetScope });
+  };
+
+  const handleApplyLatexRepair = (repairedItem: MockTestMcqItem) => {
+    if (!latexRepairTarget) return;
+    const original = latexRepairTarget.item;
+    saveItemBackup(original);
+    updateItem(original.id, repairedItem);
+    setUndoToast({ itemId: original.id, questionNum: original.question_r || 1 });
+    setLiveStatusText(`✓ Applied LaTeX repair to Q#${original.question_r || 1}!`);
+  };
+
+  const handleUndoRepair = (itemId: string) => {
+    const previous = restoreItemBackup(itemId);
+    if (previous) {
+      updateItem(previous.id, previous);
+      setLiveStatusText(`↺ Reverted LaTeX repair for Q#${previous.question_r || 1}`);
+    }
+    setUndoToast(null);
   };
 
   // Insert question created via AI Quick Add / Screenshot paste
@@ -2771,6 +2610,54 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                       </span>
                                     </button>
 
+                                    {/* AI Fix LaTeX Button with Scope Dropdown */}
+                                    <div className="relative group">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenLatexRepair(item, 'entire_mcq')}
+                                        className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-teal-500/15 to-emerald-500/15 hover:from-teal-500/25 hover:to-emerald-500/25 border border-teal-500/30 text-teal-300 hover:text-white rounded text-xs font-bold transition-all shadow-sm"
+                                        title="Inspect & Repair LaTeX formulas with KaTeX and AI"
+                                      >
+                                        <Sparkles className="w-3.5 h-3.5 text-teal-400" />
+                                        <span>Fix LaTeX</span>
+                                        <ChevronDown className="w-3 h-3 text-teal-400/80 ml-0.5" />
+                                      </button>
+                                      <div className="absolute right-0 top-full mt-1 hidden group-hover:block z-30 min-w-[160px] p-1 bg-zinc-900 border border-white/15 rounded-xl shadow-2xl text-xs">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'entire_mcq')}
+                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
+                                        >
+                                          <span>📐</span>
+                                          <span>Fix Entire MCQ</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'question')}
+                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
+                                        >
+                                          <span>❓</span>
+                                          <span>Fix Question</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'options')}
+                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
+                                        >
+                                          <span>🔠</span>
+                                          <span>Fix Options</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'solution')}
+                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
+                                        >
+                                          <span>💡</span>
+                                          <span>Fix Solution</span>
+                                        </button>
+                                      </div>
+                                    </div>
+
                                     {/* Generate Similar Question Variant Button */}
                                     <button
                                       type="button"
@@ -2920,9 +2807,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                                   {/* HINDI SIDE */}
                                   <div className="space-y-2 p-3 bg-black/40 rounded-xl border border-white/[0.06]">
-                                    <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
-                                      Hindi Question & Options
-                                    </span>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
+                                        Hindi Question & Options
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenLatexRepair(item, 'question')}
+                                        className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                        title="Fix LaTeX in Question"
+                                      >
+                                        <Sparkles className="w-2.5 h-2.5" />
+                                        <span>Fix LaTeX</span>
+                                      </button>
+                                    </div>
 
                                     {isEditing ? (
                                       <textarea
@@ -2988,9 +2886,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
                                     {/* Hindi Solution */}
                                     <div className="pt-2 border-t border-white/[0.06] space-y-1">
-                                      <span className="text-[10px] font-bold text-amber-400/80 uppercase">
-                                        Solution (Hindi)
-                                      </span>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-amber-400/80 uppercase">
+                                          Solution (Hindi)
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'solution')}
+                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                          title="Fix LaTeX in Hindi Solution"
+                                        >
+                                          <Sparkles className="w-2.5 h-2.5" />
+                                          <span>Fix LaTeX</span>
+                                        </button>
+                                      </div>
                                       {isEditing ? (
                                         <textarea
                                           rows={3}
@@ -3008,9 +2917,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
                                   {/* ENGLISH SIDE */}
                                   <div className="space-y-2 p-3 bg-black/40 rounded-xl border border-white/[0.06]">
-                                    <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider block">
-                                      English Question & Options
-                                    </span>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider block">
+                                        English Question & Options
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenLatexRepair(item, 'question')}
+                                        className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                        title="Fix LaTeX in Question"
+                                      >
+                                        <Sparkles className="w-2.5 h-2.5" />
+                                        <span>Fix LaTeX</span>
+                                      </button>
+                                    </div>
 
                                     {isEditing ? (
                                       <textarea
@@ -3076,9 +2996,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
                                     {/* English Solution */}
                                     <div className="pt-2 border-t border-white/[0.06] space-y-1">
-                                      <span className="text-[10px] font-bold text-blue-400/80 uppercase">
-                                        Solution (English)
-                                      </span>
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-blue-400/80 uppercase">
+                                          Solution (English)
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'solution')}
+                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                          title="Fix LaTeX in English Solution"
+                                        >
+                                          <Sparkles className="w-2.5 h-2.5" />
+                                          <span>Fix LaTeX</span>
+                                        </button>
+                                      </div>
                                       {isEditing ? (
                                         <textarea
                                           rows={3}
@@ -3611,6 +3542,42 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         setName={setName}
         onAddQuestion={handleInsertNewQuestion}
       />
+
+      {/* AI LaTeX Repair Modal */}
+      {latexRepairTarget && (
+        <LatexRepairModal
+          isOpen={latexRepairTarget !== null}
+          onClose={() => setLatexRepairTarget(null)}
+          item={latexRepairTarget.item}
+          initialScope={latexRepairTarget.scope}
+          onApply={handleApplyLatexRepair}
+        />
+      )}
+
+      {/* Floating Undo Toast for LaTeX Repair */}
+      {undoToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 bg-zinc-900/95 border border-teal-500/40 rounded-2xl shadow-2xl shadow-black/80 text-xs backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+            <span className="text-slate-200 font-medium">LaTeX repaired for <strong>Q#{undoToast.questionNum}</strong></span>
+          </div>
+          <button
+            type="button"
+            onClick={() => handleUndoRepair(undoToast.itemId)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-bold border border-teal-500/40 transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Undo</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setUndoToast(null)}
+            className="p-1 text-slate-400 hover:text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

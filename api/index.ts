@@ -12,6 +12,11 @@ import {
   safeParseAiJson,
   safeParseAiJsonObject
 } from '../services/textCleanService.js';
+import {
+  repairContentLatex,
+  repairEntireMcqItem,
+  validateAndExtractLatex
+} from './latexRepair.js';
 
 try {
   process.loadEnvFile();
@@ -368,7 +373,7 @@ const reportKeyError = (key: string, type: string, isPermanent = false) => {
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function runAIAction(
+export async function runAIAction(
   action: (client: any) => Promise<any>, 
   userKeyInput?: string,
   maxRetries?: number
@@ -480,7 +485,7 @@ const safeExtractResponseText = (response: any): string => {
  * Calls Gemini with primary model, falls back to secondary model if primary fails or returns empty output.
  * Throws a retryable error if both models produce empty output, so runAIAction can retry with a different key.
  */
-const callGeminiWithFallback = async (
+export const callGeminiWithFallback = async (
   client: any,
   primaryModel: string,
   fallbackModel: string,
@@ -2703,6 +2708,58 @@ Respond with ONLY a strict JSON object:
   } catch (error: any) {
     console.warn("MockTest Add Question failed:", error?.message || error);
     res.status(500).json({ error: error.message || "Failed to add question with AI" });
+  }
+});
+
+app.post('/api/latex/repair', async (req, res) => {
+  try {
+    const { content, contentType = 'content', selectedFormula, item, scope } = req.body;
+    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+
+    // Scope-level item repair (Entire MCQ, Question, Options, Solution)
+    if (item && typeof item === 'object') {
+      const { repairedItem, result } = await repairEntireMcqItem(
+        item,
+        scope || 'entire_mcq',
+        userKey,
+        runAIAction,
+        callGeminiWithFallback,
+        getPrimaryModel(),
+        getFallbackModel()
+      );
+      return res.json({
+        ...result,
+        repairedItem
+      });
+    }
+
+    // Single content string repair
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: "Missing 'content' or 'item' in request body." });
+    }
+
+    const result = await repairContentLatex(
+      content,
+      contentType,
+      selectedFormula,
+      userKey,
+      runAIAction,
+      callGeminiWithFallback,
+      getPrimaryModel(),
+      getFallbackModel()
+    );
+
+    return res.json(result);
+  } catch (error: any) {
+    console.error('[API /api/latex/repair] Error:', error);
+    res.status(500).json({
+      status: 'review_required',
+      original: req.body?.content || '',
+      repaired: req.body?.content || '',
+      changes: [`Error processing repair: ${error?.message || 'Internal server error'}`],
+      confidence: 0,
+      error: error?.message || 'Failed to repair LaTeX'
+    });
   }
 });
 

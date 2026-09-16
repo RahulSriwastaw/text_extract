@@ -23,61 +23,11 @@ try {
 } catch (e) {}
 
 export const getPrimaryModel = (): string => {
-  try {
-    process.loadEnvFile();
-  } catch (e) {}
-  if (process.env.GEMINI_MODEL && process.env.GEMINI_MODEL.trim()) {
-    return process.env.GEMINI_MODEL.trim();
-  }
-  const candidatePaths = [
-    path.join(process.cwd(), '.env'),
-    path.resolve('.env'),
-    'h:/Rahul Sriwastaw/Tools/Code/text_extract/.env'
-  ];
-  for (const envPath of candidatePaths) {
-    try {
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, 'utf8');
-        for (const line of content.split('\n')) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('GEMINI_MODEL=')) {
-            const m = trimmed.replace(/^GEMINI_MODEL=/, '').replace(/^["']|["']$/g, '').trim();
-            if (m) return m;
-          }
-        }
-      }
-    } catch (err) {}
-  }
   return 'gemini-2.5-flash';
 };
 
 export const getFallbackModel = (): string => {
-  try {
-    process.loadEnvFile();
-  } catch (e) {}
-  if (process.env.GEMINI_FALLBACK_MODEL && process.env.GEMINI_FALLBACK_MODEL.trim()) {
-    return process.env.GEMINI_FALLBACK_MODEL.trim();
-  }
-  const candidatePaths = [
-    path.join(process.cwd(), '.env'),
-    path.resolve('.env'),
-    'h:/Rahul Sriwastaw/Tools/Code/text_extract/.env'
-  ];
-  for (const envPath of candidatePaths) {
-    try {
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, 'utf8');
-        for (const line of content.split('\n')) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('GEMINI_FALLBACK_MODEL=')) {
-            const m = trimmed.replace(/^GEMINI_FALLBACK_MODEL=/, '').replace(/^["']|["']$/g, '').trim();
-            if (m) return m;
-          }
-        }
-      }
-    } catch (err) {}
-  }
-  return 'gemini-2.5-flash-lite';
+  return 'gemini-2.5-flash';
 };
 
 const app = express();
@@ -312,7 +262,7 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
     selectedKey = sorted[0];
     const earliestCd = keyHealth.get(selectedKey)?.cooldownUntil || 0;
     if (earliestCd > now) {
-      waitNeededMs = Math.min(earliestCd - now + 100, 4000);
+      waitNeededMs = Math.min(earliestCd - now + 100, 15000);
     }
   }
 
@@ -335,7 +285,7 @@ const reportKeySuccess = (key: string) => {
   keyHealth.set(key, health);
 };
 
-const reportKeyError = (key: string, type: string, isPermanent = false) => {
+const reportKeyError = (key: string, type: string, isPermanent = false, customCooldownMs?: number) => {
   if (isPermanent) {
     deadKeys.add(key);
     console.error(`[API-Key] Key ${key.substring(0, 8)}... marked as PERMANENTLY DEAD (Invalid or Denied)`);
@@ -355,23 +305,46 @@ const reportKeyError = (key: string, type: string, isPermanent = false) => {
   health.totalErrors++;
   health.errorType = type;
 
-  // Circuit Breaker: Gemini rate limits reset within 4-10 seconds.
-  // Keeping cooldowns short prevents locking out all keys simultaneously.
-  let cooldownSec = 5;
-  if (type === 'QUOTA' || type === 'RATE_LIMIT') {
-    cooldownSec = Math.min(4 + health.consecutiveErrors * 2, 8);
+  let cooldownMs = 5000;
+  if (customCooldownMs && customCooldownMs > 0) {
+    cooldownMs = customCooldownMs;
+  } else if (type === 'QUOTA' || type === 'RATE_LIMIT') {
+    cooldownMs = Math.min(5000 + health.consecutiveErrors * 2000, 12000);
   } else if (type === 'OVERLOAD') {
-    cooldownSec = 4;
+    cooldownMs = 4000;
   } else {
-    cooldownSec = 2;
+    cooldownMs = 2000;
   }
 
-  health.cooldownUntil = now + (cooldownSec * 1000);
+  health.cooldownUntil = now + cooldownMs;
   keyHealth.set(key, health);
-  console.warn(`[API-Key] Key ${key.substring(0, 8)}... error: ${type}. Transient cooldown set for ${cooldownSec}s.`);
+  console.warn(`[API-Key] Key ${key.substring(0, 8)}... error: ${type}. Cooldown set for ${Math.round(cooldownMs / 1000)}s.`);
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const extractRetryDelayMs = (error: any): number => {
+  if (!error) return 0;
+  const msg = error?.message || String(error);
+  const match = msg.match(/retry\s+(?:in|after)\s+([0-9.]+)\s*s/i);
+  if (match && match[1]) {
+    const sec = parseFloat(match[1]);
+    if (!isNaN(sec) && sec > 0) {
+      return Math.ceil(sec * 1000);
+    }
+  }
+  if (Array.isArray(error?.details)) {
+    for (const d of error.details) {
+      if (d?.retryDelay) {
+        const sec = parseFloat(String(d.retryDelay).replace('s', ''));
+        if (!isNaN(sec) && sec > 0) {
+          return Math.ceil(sec * 1000);
+        }
+      }
+    }
+  }
+  return 0;
+};
 
 export async function runAIAction(
   action: (client: any) => Promise<any>, 
@@ -448,14 +421,22 @@ export async function runAIAction(
 
       if (isRetryable) {
         const errType = isQuotaError ? 'QUOTA' : (isServerOverloaded ? 'OVERLOAD' : 'TRANSIENT');
+        const retryDelayMs = extractRetryDelayMs(error);
+        const cooldownMs = retryDelayMs > 0 ? (retryDelayMs + 500) : undefined;
+        reportKeyError(key, errType, false, cooldownMs);
+
         console.warn(`[API-Key] Key ${key.substring(0, 8)}... failed (${errType}: ${error?.message || errorStr}). Attempt ${attempt + 1}/${effectiveRetries + 1}. Rotating to next key in pool (${totalKeys} active keys).`);
-        reportKeyError(key, errType);
         
-        // Intelligent Rotation:
-        // Pacing each rotated attempt with 300ms prevents simultaneous burst limit exhaustion across all keys!
         const remainingUntried = allKeys.filter(k => !triedKeys.has(k)).length;
-        const delayMs = remainingUntried > 0 ? 300 : Math.min(attempt * 250, 1500);
-        await delay(delayMs); 
+        if (remainingUntried > 0) {
+          // Pacing rotated attempts with 350ms prevents burst limit exhaustion
+          await delay(350); 
+        } else {
+          // All keys in the pool have been attempted in this round. Wait for quota cooldown before next pass!
+          const waitTime = retryDelayMs > 0 ? (retryDelayMs + 500) : 6000;
+          console.log(`[API-Key] All ${allKeys.length} keys attempted in this round. Waiting ${waitTime}ms before next cycle...`);
+          await delay(waitTime);
+        }
         continue;
       }
       
@@ -482,45 +463,31 @@ const safeExtractResponseText = (response: any): string => {
 };
 
 /**
- * Calls Gemini with primary model, falls back to secondary model if primary fails or returns empty output.
- * Throws a retryable error if both models produce empty output, so runAIAction can retry with a different key.
+ * Strictly calls gemini-2.5-flash only.
+ * Throws a retryable error if model produces empty output, so runAIAction can retry with a different key.
  */
 export const callGeminiWithFallback = async (
   client: any,
-  primaryModel: string,
-  fallbackModel: string,
+  _primaryModel: string,
+  _fallbackModel: string,
   contents: any[],
   config: Record<string, any> = {},
   label = 'AI call'
 ): Promise<string> => {
-  // Try primary model
-  try {
-    const response = await client.models.generateContent({
-      model: primaryModel,
-      contents,
-      config
-    });
-    const text = safeExtractResponseText(response);
-    if (text) return text;
-    console.warn(`[${label}] ${primaryModel} returned empty output. Trying fallback ${fallbackModel}...`);
-  } catch (err: any) {
-    console.warn(`[${label}] ${primaryModel} failed (${err?.message}). Trying fallback ${fallbackModel}...`);
-  }
+  // STRICT: User mandated using ONLY gemini-2.5-flash
+  const modelToUse = 'gemini-2.5-flash';
 
-  // Try fallback model (without responseMimeType to avoid empty output issues on lite models)
-  const fallbackConfig = { ...config };
-  delete fallbackConfig.responseMimeType;
   const response = await client.models.generateContent({
-    model: fallbackModel,
+    model: modelToUse,
     contents,
-    config: fallbackConfig
+    config
   });
   const text = safeExtractResponseText(response);
-  if (!text) {
-    const finishReason = response?.candidates?.[0]?.finishReason || 'UNKNOWN';
-    throw new Error(`Model output was empty (finishReason: ${finishReason}). Both ${primaryModel} and ${fallbackModel} returned no content.`);
+  if (text) {
+    return text;
   }
-  return text;
+
+  throw new Error(`[${label}] Model ${modelToUse} returned empty output.`);
 };
 
 const cleanBilingualDuplicates = (text: string): string => {
@@ -1261,37 +1228,14 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         responseMimeType: "application/json",
       };
 
-      let responseText = '';
-      try {
-        const response = await client.models.generateContent({
-          model: primaryModel,
-          contents,
-          config: generateConfig
-        });
-        responseText = response?.text;
-        if (!responseText && response?.candidates?.[0]?.content?.parts) {
-          responseText = response.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-      } catch (primaryErr: any) {
-        console.warn(`[/api/extract] ${primaryModel} failed (${primaryErr?.message}). Trying fallback ${fallbackModel}...`);
-      }
-
-      if (!responseText || !responseText.trim()) {
-        console.warn(`[/api/extract] Retrying with fallback model ${fallbackModel}...`);
-        const fallbackResponse = await client.models.generateContent({
-          model: fallbackModel,
-          contents,
-          config: generateConfig
-        });
-        responseText = fallbackResponse?.text;
-        if (!responseText && fallbackResponse?.candidates?.[0]?.content?.parts) {
-          responseText = fallbackResponse.candidates[0].content.parts.map((p: any) => p.text || '').join('');
-        }
-      }
-
-      if (!responseText || !responseText.trim()) {
-        throw new Error(`Empty response from Gemini API for both ${primaryModel} and ${fallbackModel}`);
-      }
+      const responseText = await callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-2.5-flash',
+        contents,
+        generateConfig,
+        '/api/extract'
+      );
 
     const cleanedText = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
     // Escape unescaped LaTeX backslashes so JSON.parse doesn't interpret \f as formfeed, \t as tab, etc.
@@ -1418,37 +1362,17 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
   const executeProofread = async (client: any) => {
     const primaryModel = getPrimaryModel();
     const fallbackModel = getFallbackModel();
-    let responseText = '';
-    try {
-      const response = await client.models.generateContent({
-        model: primaryModel,
-        contents: prompt,
-        config: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-        }
-      });
-      responseText = response?.text || '';
-    } catch (primaryErr: any) {
-      console.warn(`[/api/proofread] ${primaryModel} failed (${primaryErr?.message}). Trying fallback ${fallbackModel}...`);
-    }
-
-    if (!responseText || !responseText.trim()) {
-      console.warn(`[/api/proofread] Retrying with fallback model ${fallbackModel}...`);
-      const fallbackResponse = await client.models.generateContent({
-        model: fallbackModel,
-        contents: prompt,
-        config: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-        }
-      });
-      responseText = fallbackResponse?.text || '';
-    }
-
-    if (!responseText || !responseText.trim()) {
-      throw new Error(`Empty response from Gemini API for both ${primaryModel} and ${fallbackModel}`);
-    }
+    const responseText = await callGeminiWithFallback(
+      client,
+      'gemini-2.5-flash',
+      'gemini-2.5-flash',
+      prompt,
+      {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
+      '/api/proofread'
+    );
 
     const cleanedText = responseText.replace(/^\`\`\`json\n?/, '').replace(/\n?\`\`\`$/, '').trim();
     const parsed = JSON.parse(cleanedText);
@@ -2086,38 +2010,11 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
         return '';
       };
 
-      // Primary model
-      const primaryModel = getPrimaryModel();
-      const fallbackModel = getFallbackModel();
-      try {
-        const response = await client.models.generateContent({
-          model: primaryModel,
-          contents: [
-            {
-              inlineData: {
-                mimeType: 'image/png',
-                data: cleanBase64
-              }
-            },
-            { text: promptText }
-          ],
-          config: {
-            temperature: generateSimilar ? 0.35 : 0.1,
-          }
-        });
-        const responseText = extractText(response);
-        if (responseText && responseText.trim()) {
-          return responseText;
-        }
-        console.warn(`[mocktest-extract] ${primaryModel} returned empty output. Falling back to ${fallbackModel}...`);
-      } catch (liteErr: any) {
-        console.warn(`[mocktest-extract] ${primaryModel} failed (${liteErr?.message}). Falling back to ${fallbackModel}...`);
-      }
-
-      // Fallback model
-      const response = await client.models.generateContent({
-        model: fallbackModel,
-        contents: [
+      const responseText = await callGeminiWithFallback(
+        client,
+        'gemini-2.5-flash',
+        'gemini-2.5-flash',
+        [
           {
             inlineData: {
               mimeType: 'image/png',
@@ -2126,15 +2023,12 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
           },
           { text: promptText }
         ],
-        config: {
+        {
           temperature: generateSimilar ? 0.35 : 0.1,
           responseMimeType: "application/json"
-        }
-      });
-      const responseText = extractText(response);
-      if (!responseText || !responseText.trim()) {
-        throw new Error('Model output was empty. Finish reason: ' + (response?.candidates?.[0]?.finishReason || 'UNKNOWN'));
-      }
+        },
+        'mocktest-extract'
+      );
       return responseText;
     };
 

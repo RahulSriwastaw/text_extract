@@ -1,18 +1,18 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.0.0
+ * Version: 2.1.0
  */
 
 (function() {
-  const EXT_VER = "2.0.0";
+  const EXT_VER = "2.1.0";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   window.__tfStudyAiGeminiVer = EXT_VER;
   window.__tfStudyAiGeminiBound = true;
   const LOG = (...a) => console.log("[TextExtract Bridge]", ...a);
-  const COMPLETE_MARKER = "YOUR_TEST_SERIES_JSON_COMPLETED";
+  const COMPLETE_MARKER = "---STUDY_AI_COMPLETE---";
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   function isOurPromptText(text) {
-    return /You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF/i.test(text || "");
+    return /You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|You are a professional Document Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF|---STUDY_AI_COMPLETE---|YOUR_TEST_SERIES_JSON_COMPLETED/i.test(text || "");
   }
   let port = null;
   function connectKeepalive() {
@@ -631,7 +631,7 @@
     if (!text || isOurPromptText(text)) return false;
     if (/"question(?:_[a-z]+)?"\s*:/i.test(text || "")) return false;
     const lines = String(text).split(/\n/).map(l => l.trim()).filter(Boolean);
-    return lines.some(l => l.toUpperCase() === COMPLETE_MARKER);
+    return lines.some(l => l.toUpperCase() === COMPLETE_MARKER || l.toUpperCase().includes("STUDY_AI_COMPLETE") || l.toUpperCase().includes("YOUR_TEST_SERIES_JSON_COMPLETED"));
   }
 
   function sanitizeJsonEscapes(jsonStr) {
@@ -699,6 +699,8 @@
   function isValidMcqObj(x) {
     if (!x || typeof x !== "object") return false;
     return Boolean(
+      x.content != null ||
+      x.text != null ||
       x.question != null ||
       x.question_hi != null ||
       x.question_en != null ||
@@ -707,9 +709,7 @@
       x.option1_en != null ||
       x.solution_hi != null ||
       x.solution_en != null ||
-      x.type != null ||
-      x.content != null ||
-      x.text != null
+      x.type != null
     );
   }
 

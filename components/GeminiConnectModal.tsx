@@ -434,7 +434,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                       <div>
                         <p className="text-xs font-bold text-white flex items-center gap-1.5">
                           <Download className="w-4 h-4 text-[#FF884D]" />
-                          Download TextExtract Pro Bridge (v2.0.0 ZIP)
+                          Download TextExtract Pro Bridge (v2.1.0 ZIP)
                         </p>
                         <p className="text-[11px] text-slate-300">
                           Autonomous multi-page digitizer · Gemini, DeepSeek, ChatGPT & Claude

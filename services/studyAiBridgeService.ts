@@ -259,29 +259,53 @@ SPLIT QUESTION HANDLING:
 - If this page ends with an incomplete question whose options will appear on the next page, extract what is visible.
 ` : '';
 
-  return `You are an expert Indian exam-paper and document digitizer.
-Extract ALL questions, text, tables, and multiple choice questions from this page.
+  if (mcqMode) {
+    return `You are a professional Exam Paper Digitizer.
+Extract ALL multiple-choice questions (MCQs), passages, and tables from this page with 100% fidelity.
 ${continuationInstruction}
 RULES:
-1. ${numInstruction}
-2. ${bilingualInstruction}
-3. ${ansInstruction}
-4. ${refineInstruction}
-5. ALL mathematical formulas, fractions, powers, and expressions MUST be enclosed in double dollar signs: e.g. $$x^2 + y^2 = r^2$$, $$\\frac{a}{b}$$. Never output unmatched or dangling $$ symbols.
-6. Each option must be on its own line: (a)... \\n (b)... \\n (c)... \\n (d)...
-7. Format: Return a valid JSON array of objects.
-Each object must represent a question or section:
+1. Extract ONLY the real content present in the image. NEVER output sample, placeholder, or mock questions.
+2. NO HTML TAGS: Output clean normal text without <p>, <br>, <b>, <span>, or <table>. Use natural newlines (\\n) for line breaks.
+3. ${numInstruction}
+4. ${bilingualInstruction}
+5. ${ansInstruction}
+6. ${refineInstruction}
+7. LATEX FOR MATH & SCIENCE ONLY:
+   - Use standard LaTeX for formulas, equations, roots, powers, fractions, and variables ($...$ or $$...$$).
+   - Regular words, numbers, and units should remain normal plain text.
+8. Each option must be on its own line: (a)... \\n (b)... \\n (c)... \\n (d)...
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array of objects inside \`\`\`json ... \`\`\` code block:
 [
   {
-    "question": "#1. Question text here",
-    "options": ["(a) Option A", "(b) Option B", "(c) Option C", "(d) Option D"],
-    "answer": "C",
     "type": "text",
-    "continues_previous": false,
-    "content": "#1. Question text\\n(a) Option A\\n(b) Option B\\n(c) Option C\\n(d) Option D\\nAnswer: C"
+    "content": "Full extracted question text with options and answer..."
   }
 ]
-Please output ONLY the JSON array inside \`\`\`json ... \`\`\` code block.
+At the very end after the JSON code block, on a new line, output:
+---STUDY_AI_COMPLETE---`;
+  }
+
+  return `You are a professional Document Digitizer.
+Extract all content from this document page with 100% fidelity.
+${continuationInstruction}
+RULES:
+1. Extract ONLY the real content present in the image. NEVER output sample, placeholder, or mock data.
+2. NO HTML TAGS: Output clean markdown and plain text without HTML tags.
+3. Preserve headings (#, ##), paragraphs, lists (•, 1., 2.), and tables (| Col 1 | Col 2 |).
+4. LATEX FOR MATH & SCIENCE ONLY:
+   - Enclose mathematical/scientific formulas in LaTeX ($...$ or $$...$$).
+5. ${refineInstruction}
+
+OUTPUT FORMAT:
+Return ONLY a valid JSON array of objects inside \`\`\`json ... \`\`\` code block:
+[
+  {
+    "type": "text",
+    "content": "Full extracted document text or markdown table..."
+  }
+]
 At the very end after the JSON code block, on a new line, output:
 ---STUDY_AI_COMPLETE---`;
 }

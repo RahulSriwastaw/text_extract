@@ -1,12 +1,12 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.0.0
+ * Version: 2.1.0
  */
 
 (function() {
   const PAGE = "tf-study-ai";
   const EXT = "tf-study-ai-extension";
-  const VERSION = "2.0.0";
+  const VERSION = "2.1.0";
   let port = null;
   let portTimer = null;
 

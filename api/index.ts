@@ -523,7 +523,7 @@ export const callGeminiWithFallback = async (
   client: any,
   _primaryModel: string,
   _fallbackModel: string,
-  contents: any[],
+  contents: any[] | string,
   config: Record<string, any> = {},
   label = 'AI call'
 ): Promise<string> => {
@@ -536,9 +536,11 @@ export const callGeminiWithFallback = async (
     thinkingConfig: config.thinkingConfig !== undefined ? config.thinkingConfig : { thinkingBudget: 0 }
   };
 
+  const effectiveContents = typeof contents === 'string' ? [{ text: contents }] : contents;
+
   const response = await client.models.generateContent({
     model: modelToUse,
-    contents,
+    contents: effectiveContents,
     config: effectiveConfig
   });
   const text = safeExtractResponseText(response);
@@ -1425,7 +1427,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
       client,
       'gemini-2.5-flash',
       'gemini-2.5-flash',
-      prompt,
+      [{ text: prompt }],
       {
         temperature: 0.1,
         responseMimeType: "application/json",

@@ -1,4 +1,4 @@
-# TextExtract Pro Bridge — v2.0.0
+# TextExtract Pro Bridge — v2.1.0
 
 High-performance multi-AI document & MCQ digitizer bridge for TextExtract (Gemini, DeepSeek, ChatGPT, Claude). 100% Free with Zero Token limits.
 

@@ -1794,7 +1794,7 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
 
 app.post('/api/mocktest-extract', async (req, res) => {
   try {
-    const { base64Image, setName = 'Exam Paper', pendingContext, pageNumber, generateSimilar = false } = req.body;
+    const { base64Image, rawText, setName = 'Exam Paper', pendingContext, pageNumber, generateSimilar = false } = req.body;
     const userKey = (req.headers['x-user-gemini-key'] as string) || '';
 
     let cleanBase64 = base64Image || '';
@@ -2010,19 +2010,28 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
         return '';
       };
 
+      const contents: any[] = [];
+      if (cleanBase64) {
+        contents.push({
+          inlineData: {
+            mimeType: 'image/png',
+            data: cleanBase64
+          }
+        });
+      }
+      if (rawText && typeof rawText === 'string' && rawText.trim()) {
+        contents.push({
+          text: `RAW EXAM / QUESTION PAPER TEXT OR DOCX CONTENT TO DIGITIZE:\n"""\n${rawText.trim()}\n"""\n\n${promptText}`
+        });
+      } else {
+        contents.push({ text: promptText });
+      }
+
       const responseText = await callGeminiWithFallback(
         client,
         'gemini-2.5-flash',
         'gemini-2.5-flash',
-        [
-          {
-            inlineData: {
-              mimeType: 'image/png',
-              data: cleanBase64
-            }
-          },
-          { text: promptText }
-        ],
+        contents,
         {
           temperature: generateSimilar ? 0.35 : 0.1,
           responseMimeType: "application/json"

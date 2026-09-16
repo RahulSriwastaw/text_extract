@@ -2399,7 +2399,8 @@ export async function extractMockTestWithDirectApi(
   startIndex: number = 1,
   pendingContext?: PendingMcqContext | null,
   pageNumber?: number,
-  generateSimilar: boolean = false
+  generateSimilar: boolean = false,
+  rawText?: string
 ): Promise<MockTestMcqItem[]> {
   const settings = await getAiSettings();
   const headers: Record<string, string> = {
@@ -2416,6 +2417,7 @@ export async function extractMockTestWithDirectApi(
       headers,
       body: JSON.stringify({
         base64Image,
+        rawText,
         setName,
         pendingContext: pendingContext || undefined,
         pageNumber: pageNumber || undefined,

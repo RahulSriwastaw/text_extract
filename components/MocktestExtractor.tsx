@@ -10,6 +10,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
+import mammoth from 'mammoth';
 import { MocktestAiChatModal } from './MocktestAiChatModal';
 import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
 import { LatexRepairModal } from './LatexRepairModal';
@@ -71,6 +72,58 @@ interface PageQueueItem {
   isSelected: boolean;
   items?: MockTestMcqItem[];
   pendingContext?: PendingMcqContext | null;
+  rawTextContent?: string;
+  sourceType?: 'pdf' | 'image' | 'docx' | 'text';
+  fileName?: string;
+}
+
+export function splitTextIntoDocumentPages(text: string, maxQuestionsPerPage = 10): string[] {
+  if (!text || !text.trim()) return [];
+  const clean = text.trim();
+
+  // 1. If text has form-feed page breaks (\f)
+  if (clean.includes('\f')) {
+    const parts = clean.split('\f').map(p => p.trim()).filter(Boolean);
+    if (parts.length > 0) return parts;
+  }
+
+  // 2. If text has markdown / explicit page delimiters
+  if (/(?:^|\n)\s*(?:---|===+\s*Page\s*\d*===+)\s*(?:\n|$)/i.test(clean)) {
+    const parts = clean.split(/(?:^|\n)\s*(?:---|===+\s*Page\s*\d*===+)\s*(?:\n|$)/i)
+      .map(p => p.trim())
+      .filter(Boolean);
+    if (parts.length > 0) return parts;
+  }
+
+  // 3. Question-aware chunking: detect question boundaries like "1.", "Q1.", "Question 1:", "प्रश्न 1"
+  const qMatches = clean.match(/(?:^|\n)\s*(?:Q\.?\s*\d+|\d+\.|\(\d+\)|Question\s*\d+|प्रश्न\s*\d+)[\s:\.\-]/gi);
+  if (qMatches && qMatches.length > maxQuestionsPerPage) {
+    const qSplit = clean.split(/(?=(?:^|\n)\s*(?:Q\.?\s*\d+|\d+\.|\(\d+\)|Question\s*\d+|प्रश्न\s*\d+)[\s:\.\-])/i)
+      .map(q => q.trim())
+      .filter(Boolean);
+    
+    if (qSplit.length > 1) {
+      const pagedChunks: string[] = [];
+      for (let i = 0; i < qSplit.length; i += maxQuestionsPerPage) {
+        const slice = qSplit.slice(i, i + maxQuestionsPerPage);
+        pagedChunks.push(slice.join('\n\n'));
+      }
+      return pagedChunks;
+    }
+  }
+
+  // 4. Word-count chunking if very large (> 1800 words)
+  const words = clean.split(/\s+/);
+  if (words.length > 1800) {
+    const pagedChunks: string[] = [];
+    const chunkSize = 1200;
+    for (let i = 0; i < words.length; i += chunkSize) {
+      pagedChunks.push(words.slice(i, i + chunkSize).join(' '));
+    }
+    return pagedChunks;
+  }
+
+  return [clean];
 }
 
 export { LatexRenderer, useMathJax };
@@ -91,10 +144,15 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [liveStatusText, setLiveStatusText] = useState<string>('');
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; text: string } | null>(null);
 
-  // Engine Mode & Concurrency Batch Size
-  const [aiEngine, setAiEngine] = useState<'bridge' | 'api'>('bridge');
-  const [batchSize, setBatchSize] = useState<number>(3); // Multi-page parallel batch size
+  // Engine Mode & Concurrency Batch Size (default to direct API to avoid bridge 503 errors)
+  const [aiEngine, setAiEngine] = useState<'bridge' | 'api'>('api');
+  const [batchSize, setBatchSize] = useState<number>(3);
   const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
+
+  // Direct Text Input state
+  const [inputMode, setInputMode] = useState<'upload' | 'direct_text'>('upload');
+  const [directTextInput, setDirectTextInput] = useState<string>('');
+  const [directTextSplitCount, setDirectTextSplitCount] = useState<number>(10);
 
   // Configuration state
   const [outputFileName, setOutputFileName] = useState<string>('');
@@ -286,7 +344,76 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
             status: 'pending',
             mcqCount: 0,
             isSelected: true,
-            items: []
+            items: [],
+            sourceType: 'image',
+            fileName: file.name
+          });
+        } else if (file.name.toLowerCase().endsWith('.docx') || file.name.toLowerCase().endsWith('.doc') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          // Word Document processing using mammoth
+          setUploadProgress({
+            current: i + 1,
+            total: validFiles.length,
+            text: `Extracting text from Word document (${file.name})...`
+          });
+          const arrayBuffer = await file.arrayBuffer();
+          let extractedText = '';
+          try {
+            const result = await mammoth.convertToMarkdown({ arrayBuffer });
+            extractedText = (result.value || '').trim();
+          } catch (mErr) {
+            console.warn('mammoth markdown conversion failed, falling back to raw text:', mErr);
+            const rawRes = await mammoth.extractRawText({ arrayBuffer });
+            extractedText = (rawRes.value || '').trim();
+          }
+
+          if (!extractedText) {
+            alert(`Could not extract readable text from "${file.name}". Please make sure the Word document contains text.`);
+            continue;
+          }
+
+          const chunks = splitTextIntoDocumentPages(extractedText, directTextSplitCount || 10);
+          chunks.forEach((chunk, chunkIdx) => {
+            newQueueItems.push({
+              id: `docx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              pageNumber: 0,
+              imageUrl: '',
+              status: 'pending',
+              mcqCount: 0,
+              isSelected: true,
+              items: [],
+              rawTextContent: chunk,
+              sourceType: 'docx',
+              fileName: chunks.length > 1 ? `${file.name} (Part ${chunkIdx + 1}/${chunks.length})` : file.name
+            });
+          });
+        } else if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.md')) {
+          // Raw text or markdown file
+          setUploadProgress({
+            current: i + 1,
+            total: validFiles.length,
+            text: `Reading text file (${file.name})...`
+          });
+          const text = await file.text();
+          const cleanText = text.trim();
+          if (!cleanText) {
+            alert(`File "${file.name}" is empty.`);
+            continue;
+          }
+
+          const chunks = splitTextIntoDocumentPages(cleanText, directTextSplitCount || 10);
+          chunks.forEach((chunk, chunkIdx) => {
+            newQueueItems.push({
+              id: `txt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+              pageNumber: 0,
+              imageUrl: '',
+              status: 'pending',
+              mcqCount: 0,
+              isSelected: true,
+              items: [],
+              rawTextContent: chunk,
+              sourceType: 'text',
+              fileName: chunks.length > 1 ? `${file.name} (Part ${chunkIdx + 1}/${chunks.length})` : file.name
+            });
           });
         }
       }
@@ -304,6 +431,43 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     } finally {
       setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // Direct Text Input: Chunk and add to pages
+  const handleAddDirectText = (startExtractNow = false) => {
+    if (!directTextInput || !directTextInput.trim()) {
+      alert('Please enter or paste exam text first.');
+      return;
+    }
+
+    const clean = directTextInput.trim();
+    const chunks = splitTextIntoDocumentPages(clean, directTextSplitCount || 10);
+    const startNum = pages.length + 1;
+
+    const newItems: PageQueueItem[] = chunks.map((chunk, idx) => ({
+      id: `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      pageNumber: startNum + idx,
+      imageUrl: '',
+      status: 'pending',
+      mcqCount: 0,
+      isSelected: true,
+      items: [],
+      rawTextContent: chunk,
+      sourceType: 'text',
+      fileName: chunks.length > 1 ? `Pasted Text (Section ${idx + 1}/${chunks.length})` : 'Pasted Text'
+    }));
+
+    setPages(prev => [...prev, ...newItems]);
+    setDirectTextInput('');
+    setInputMode('upload'); // Switch to main workspace view
+
+    setLiveStatusText(`✓ Added ${chunks.length} text section(s) to extraction queue!`);
+
+    if (startExtractNow) {
+      setTimeout(() => {
+        handleStartExtraction(extractionMode);
+      }, 350);
     }
   };
 
@@ -337,13 +501,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       let rawExtractedItems: MockTestMcqItem[] = [];
 
       if (isUsingBridge) {
-        const prompt = isSimilar
+        let prompt = isSimilar
           ? buildMockTestSimilarBridgePrompt(setName, pendingContext, page.pageNumber)
           : buildMockTestBridgePrompt(setName, pendingContext, page.pageNumber);
+
+        if (page.rawTextContent) {
+          prompt = `${prompt}\n\nRAW EXAM DOCUMENT TEXT TO EXTRACT:\n\`\`\`\n${page.rawTextContent}\n\`\`\``;
+        }
+
         const { rawText, elements } = await extractWithStudyAiBridge({
-          base64Image: page.imageUrl,
-          fileName: `mocktest_page_${page.pageNumber}.png`,
-          mimeType: 'image/png',
+          base64Image: page.imageUrl || undefined,
+          fileName: page.fileName || `mocktest_page_${page.pageNumber}.txt`,
+          mimeType: page.imageUrl ? 'image/png' : 'text/plain',
+          skipPdf: !page.imageUrl,
           prompt,
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
           continueChat: false,
@@ -366,17 +536,18 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         // Direct API mode
         setLiveStatusText(
           isSimilar
-            ? `[Page ${page.pageNumber}] 🧠 Calling Gemini API to generate NEW practice MCQs from reference page...`
+            ? `[Page ${page.pageNumber}] 🧠 Calling Gemini API to generate NEW practice MCQs from reference...`
             : `[Page ${page.pageNumber}] Calling Gemini API with carry-over context...`
         );
         const startIndex = extractedMcqs.length + 1;
         rawExtractedItems = await extractMockTestWithDirectApi(
-          page.imageUrl,
+          page.imageUrl || '',
           setName,
           startIndex,
           pendingContext,
           page.pageNumber,
-          isSimilar
+          isSimilar,
+          page.rawTextContent
         );
       }
 
@@ -1767,50 +1938,203 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         )}
       </div>
 
-      {/* File Upload Dropzone (Compact if pages exist) */}
-      <div 
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        onDrop={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
-        }}
-        onClick={() => fileInputRef.current?.click()}
-        className={`relative border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${
-          pages.length === 0 
-            ? 'border-amber-500/40 bg-amber-500/[0.03] hover:bg-amber-500/[0.06] p-8' 
-            : 'border-white/[0.08] bg-white/[0.015] hover:bg-white/[0.04] p-3'
-        }`}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept=".pdf,image/*"
-          onChange={(e) => e.target.files && handleFiles(e.target.files)}
-          className="hidden"
-        />
+      {/* Input Mode Selector & Upload / Direct Text Area */}
+      <div className="space-y-2">
+        {/* Tab Selector */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex p-1 bg-black/60 border border-white/[0.08] rounded-xl shadow-inner">
+            <button
+              type="button"
+              onClick={() => setInputMode('upload')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                inputMode === 'upload'
+                  ? 'bg-amber-500 text-black shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload Files (PDF / DOCX / TXT / Images)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setInputMode('direct_text')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                inputMode === 'direct_text'
+                  ? 'bg-amber-500 text-black shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Direct Text / Paste Exam Paper</span>
+            </button>
+          </div>
 
-        <div className="flex items-center justify-center gap-2.5">
-          <div className={`rounded-lg border text-amber-400 ${pages.length === 0 ? 'p-3 bg-amber-500/10 border-amber-500/20' : 'p-1.5 bg-amber-500/10 border-amber-500/20'}`}>
-            <Upload className={pages.length === 0 ? "w-5 h-5" : "w-3.5 h-3.5"} />
-          </div>
-          <div className="text-left">
-            <h3 className={`font-bold text-white ${pages.length === 0 ? 'text-sm' : 'text-xs'}`}>
-              {pages.length === 0 ? 'Upload Exam PDF or Question Paper Images' : '+ Add More Pages (PDF / Images)'}
-            </h3>
-            {pages.length === 0 && (
-              <p className="text-xs text-slate-400 mt-0.5">
-                Drag & drop exam PDF files or photos. Each page will render with its high-res image on the left and extracted questions on the right.
-              </p>
-            )}
-          </div>
+          {inputMode === 'upload' && (
+            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-300 font-semibold">.docx Word</span>
+              <span className="px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-300 font-semibold">.pdf</span>
+              <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-semibold">.txt / .md</span>
+              <span className="px-2 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-300 font-semibold">Images</span>
+            </div>
+          )}
         </div>
 
-        {uploadProgress && (
-          <div className="mt-3 max-w-md mx-auto p-2 bg-black/60 rounded-lg border border-amber-500/30 flex items-center gap-2.5">
-            <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0" />
-            <span className="text-xs text-amber-300 font-medium">{uploadProgress.text}</span>
+        {inputMode === 'upload' ? (
+          /* File Upload Dropzone */
+          <div 
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+            }}
+            onClick={() => fileInputRef.current?.click()}
+            className={`relative border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${
+              pages.length === 0 
+                ? 'border-amber-500/40 bg-amber-500/[0.03] hover:bg-amber-500/[0.06] p-8' 
+                : 'border-white/[0.08] bg-white/[0.015] hover:bg-white/[0.04] p-3'
+            }`}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.docx,.doc,.txt,.md,image/*"
+              onChange={(e) => e.target.files && handleFiles(e.target.files)}
+              className="hidden"
+            />
+
+            <div className="flex items-center justify-center gap-2.5">
+              <div className={`rounded-lg border text-amber-400 ${pages.length === 0 ? 'p-3 bg-amber-500/10 border-amber-500/20' : 'p-1.5 bg-amber-500/10 border-amber-500/20'}`}>
+                <Upload className={pages.length === 0 ? "w-5 h-5" : "w-3.5 h-3.5"} />
+              </div>
+              <div className="text-left">
+                <h3 className={`font-bold text-white ${pages.length === 0 ? 'text-sm' : 'text-xs'}`}>
+                  {pages.length === 0 ? 'Upload Exam PDF, DOCX Word Document, TXT or Images' : '+ Add More (PDF / DOCX / TXT / Images)'}
+                </h3>
+                {pages.length === 0 && (
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Drag & drop PDF, Word (.docx), text files, or photos. Word DOCX and direct text extract with 100% fidelity without OCR errors.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {uploadProgress && (
+              <div className="mt-3 max-w-md mx-auto p-2 bg-black/60 rounded-lg border border-amber-500/30 flex items-center gap-2.5">
+                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0" />
+                <span className="text-xs text-amber-300 font-medium">{uploadProgress.text}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Direct Text Input Editor */
+          <div className="relative rounded-2xl bg-gradient-to-b from-slate-900/95 to-slate-950/95 border border-amber-500/30 p-4 shadow-xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/[0.08] pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-white">Paste Raw Exam Text / Notes</h3>
+                  <p className="text-[11px] text-slate-400">Paste questions directly from any source (PDF text, Word document, web page, or notes)</p>
+                </div>
+              </div>
+
+              {/* Chunking options */}
+              <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Chunk By:</span>
+                <div className="flex items-center p-0.5 bg-black/50 border border-white/[0.1] rounded-lg text-xs">
+                  {[5, 10, 15, 20, 50].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setDirectTextSplitCount(num)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+                        directTextSplitCount === num
+                          ? 'bg-amber-500 text-black shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                      title={`Split text into sections of approximately ${num} questions`}
+                    >
+                      {num} Qs
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <textarea
+              rows={pages.length === 0 ? 9 : 6}
+              value={directTextInput}
+              onChange={(e) => setDirectTextInput(e.target.value)}
+              placeholder="Paste exam questions or question paper text here...
+
+Example:
+1. निम्नलिखित में से कौन सी नदी भ्रंश घाटी से होकर बहती है?
+(a) नर्मदा
+(b) गोदावरी
+(c) कृष्णा
+(d) महानदी
+उत्तर: (a) नर्मदा
+व्याख्या: नर्मदा नदी विंध्य और सतपुड़ा पर्वत श्रृंखलाओं के बीच एक भ्रंश घाटी से होकर बहती है।
+
+2. In which year was the Indian National Congress founded?
+(A) 1885
+(B) 1890
+(C) 1905
+(D) 1919
+Answer: (A) 1885
+Explanation: The Indian National Congress was founded in December 1885 at Bombay by Allan Octavian Hume."
+              className="w-full bg-black/60 border border-white/[0.1] focus:border-amber-500/60 rounded-xl p-3 text-xs text-slate-200 placeholder:text-slate-600 font-mono leading-relaxed focus:outline-none custom-scrollbar resize-y"
+            />
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1 text-xs">
+              <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                <span>Characters: <strong className="text-amber-400">{directTextInput.length}</strong></span>
+                <span>•</span>
+                <span>Words: <strong className="text-amber-400">{directTextInput.trim() ? directTextInput.trim().split(/\s+/).length : 0}</strong></span>
+                {directTextInput.trim() && (
+                  <>
+                    <span>•</span>
+                    <span className="text-emerald-400 font-semibold">
+                      ~{splitTextIntoDocumentPages(directTextInput, directTextSplitCount || 10).length} section(s)
+                    </span>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                {directTextInput.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setDirectTextInput('')}
+                    className="px-2.5 py-1.5 text-xs text-slate-400 hover:text-rose-400 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleAddDirectText(false)}
+                  disabled={!directTextInput.trim()}
+                  className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-white font-bold rounded-xl text-xs transition-all disabled:opacity-40"
+                >
+                  + Add to Queue as Pages
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddDirectText(true)}
+                  disabled={!directTextInput.trim()}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all disabled:opacity-40"
+                >
+                  <Sparkles className="w-3.5 h-3.5 fill-black" />
+                  <span>⚡ Add & Extract Immediately</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -2243,22 +2567,58 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                           </div>
                         </div>
 
-                        {/* Page Image Preview with Zoom on Click */}
-                        <div
-                          className="relative group rounded-xl overflow-hidden border border-white/[0.08] bg-black cursor-pointer aspect-[3/4] max-h-[380px] flex items-center justify-center shadow-inner"
-                          onClick={() => { setZoomPageIndex(idx); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
-                          title="Click to view full image in lightbox"
-                        >
-                          <img
-                            src={page.imageUrl}
-                            alt={`Page ${page.pageNumber}`}
-                            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
-                          />
-                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white gap-2 font-bold text-xs backdrop-blur-xs">
-                            <ZoomIn className="w-5 h-5 text-amber-400" />
-                            <span>Click to Zoom Image</span>
+                        {/* Page Preview (Image or Text/DOCX Document) */}
+                        {page.imageUrl ? (
+                          <div
+                            className="relative group rounded-xl overflow-hidden border border-white/[0.08] bg-black cursor-pointer aspect-[3/4] max-h-[380px] flex items-center justify-center shadow-inner"
+                            onClick={() => { setZoomPageIndex(idx); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                            title="Click to view full image in lightbox"
+                          >
+                            <img
+                              src={page.imageUrl}
+                              alt={`Page ${page.pageNumber}`}
+                              className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                            />
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white gap-2 font-bold text-xs backdrop-blur-xs">
+                              <ZoomIn className="w-5 h-5 text-amber-400" />
+                              <span>Click to Zoom Image</span>
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="rounded-xl overflow-hidden border border-white/[0.08] bg-slate-950/90 p-3 aspect-[3/4] max-h-[380px] flex flex-col justify-between shadow-inner">
+                            <div className="flex items-center justify-between pb-2 border-b border-white/[0.06] text-[11px]">
+                              <span className="font-bold text-amber-400 flex items-center gap-1">
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>{page.sourceType === 'docx' ? 'Word DOCX' : 'Direct Text'}</span>
+                              </span>
+                              <span className="text-slate-400 text-[10px]">
+                                {page.rawTextContent ? `${page.rawTextContent.length} chars` : ''}
+                              </span>
+                            </div>
+                            <div className="flex-1 my-2 overflow-y-auto custom-scrollbar font-mono text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap select-text p-2.5 rounded-lg bg-black/50 border border-white/[0.04]">
+                              {page.rawTextContent || 'No text content available'}
+                            </div>
+                            <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[11px]">
+                              <span className="text-slate-500 truncate max-w-[140px] text-[10px]" title={page.fileName}>
+                                {page.fileName || `Section ${page.pageNumber}`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (page.rawTextContent) {
+                                    navigator.clipboard.writeText(page.rawTextContent);
+                                    alert('Copied section text to clipboard!');
+                                  }
+                                }}
+                                className="px-2 py-1 bg-white/[0.05] hover:bg-white/[0.1] rounded text-slate-300 hover:text-white flex items-center gap-1 transition-colors text-[10px]"
+                              >
+                                <Copy className="w-3 h-3" />
+                                <span>Copy</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Bottom Controls for Page */}

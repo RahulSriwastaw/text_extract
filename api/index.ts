@@ -48,7 +48,7 @@ export const getPrimaryModel = (): string => {
       }
     } catch (err) {}
   }
-  return 'gemini-3-flash-preview';
+  return 'gemini-2.5-flash';
 };
 
 export const getFallbackModel = (): string => {
@@ -77,7 +77,7 @@ export const getFallbackModel = (): string => {
       }
     } catch (err) {}
   }
-  return 'gemini-2.5-flash';
+  return 'gemini-2.5-flash-lite';
 };
 
 const app = express();

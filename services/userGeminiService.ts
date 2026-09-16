@@ -11,7 +11,7 @@ import { pingStudyAiExtension, extractWithStudyAiBridge, getStoredAiProvider } f
 
 const GEMINI_MODEL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_GEMINI_MODEL)
   ? (import.meta as any).env.VITE_GEMINI_MODEL
-  : 'gemini-3-flash-preview';
+  : 'gemini-2.5-flash';
 const API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 export interface QuestionContext {

@@ -182,7 +182,7 @@ export function normalizeLatexLocally(content: string): string {
         }
       }
     }
-    rawLines[li] = (hasPStart ? '<p>' : '') + inner + (hasPEnd ? '</p>' : '');
+    rawLines[li] = inner;
   }
   res = rawLines.join('\n');
 
@@ -202,6 +202,12 @@ export function normalizeLatexLocally(content: string): string {
     return isDisplay ? `$$${inner}$$` : `$${inner}$`;
   });
 
+  // Strip all HTML tags completely
+  res = res
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/?(?:p|b|strong|i|em|span|div|table|thead|tbody|tr|td|th|ul|ol|li|hr)[^>]*>/gi, '')
+    .trim();
+
   return res.trim();
 }
 
@@ -209,10 +215,10 @@ export function normalizeLatexLocally(content: string): string {
  * Builds a strict prompt for Gemini to repair LaTeX syntax.
  */
 function buildLatexRepairPrompt(content: string, contentType: string, selectedFormula?: string): string {
-  return `You are a world-class LaTeX and mathematical typesetting engineer for competitive examinations.
+  return `You are an expert LaTeX and mathematical typesetting assistant for competitive examinations.
 
 TASK:
-Repair incorrect, incomplete, improperly escaped, or broken LaTeX syntax in the provided ${contentType.toUpperCase()} content.
+Repair broken, incomplete, improperly escaped, or invalid LaTeX syntax in the provided ${contentType.toUpperCase()} content.
 
 INPUT CONTENT:
 """
@@ -220,22 +226,20 @@ ${content}
 """
 ${selectedFormula ? `TARGET FORMULA TO SPECIFICALLY REPAIR:\n"""\n${selectedFormula}\n"""\n` : ''}
 
-CRITICAL RULES & CONSTRAINTS:
-1. PURE LATEX REPAIR ONLY:
+CRITICAL RULES:
+1. PURE LATEX REPAIR:
    - Fix broken braces (e.g. \\frac{a}{b), missing brackets, unescaped symbols, mismatched \\left and \\right.
-   - Fix corrupted LaTeX commands from OCR or JSON escaping (e.g. rac -> \\frac, imes -> \\times, ightarrow -> \\rightarrow).
-   - Ensure proper math delimiters: inline math MUST be wrapped in $...$, display equations in $$...$$.
-   - Standardize KaTeX-compatible expressions (KaTeX standard).
-2. DO NOT REWRITE TEXT:
-   - Absolutely DO NOT change the question wording, numbers, variables, question options, or reasoning!
-   - Preserve all Hindi (Devanagari) and English text exactly.
-   - Preserve HTML tags like <p>, </p>, <b>, <strong>, <br>, <table>, <tr>, <td> intact.
+   - Fix corrupted LaTeX commands from OCR or JSON escaping (e.g. rac -> \\frac, imes -> \\times).
+   - Ensure proper math delimiters: inline math in $...$, display equations in $$...$$.
+2. NO HTML TAGS:
+   - Output clean normal text without HTML tags (NO <p>, <br>, <b>, <table>, <span>).
+   - Preserve all Hindi (Devanagari) and English text exactly. Do NOT change question wording or options.
 3. MATHEMATICAL INTEGRITY:
-   - Do NOT change mathematical relations, numbers (e.g., 25 must remain 25), or exponents.
-4. CONFIDENCE & AMBIGUITY:
-   - If the formula syntax can be clearly repaired to clean KaTeX, set status to "fixed".
-   - If the formula was already 100% valid KaTeX, set status to "valid".
-   - If the LaTeX is so degraded/truncated that mathematical intent cannot be deduced with certainty, set status to "review_required" and explain what needs manual review in "changes".
+   - Do NOT change mathematical relations, numbers, or exponents.
+4. CONFIDENCE:
+   - If repaired to clean KaTeX, set status to "fixed".
+   - If already valid KaTeX, set status to "valid".
+   - If intent cannot be deduced, set status to "review_required".
 
 OUTPUT FORMAT:
 Respond with ONLY a valid, strict JSON object (no markdown code fence, no text outside JSON):
@@ -323,7 +327,7 @@ export async function repairContentLatex(
         primaryModel,
         fallbackModel,
         [{ text: prompt }],
-        { temperature: 0.1, responseMimeType: 'application/json' },
+        { temperature: 0.1, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } },
         'latex-repair'
       );
     }, userKey);

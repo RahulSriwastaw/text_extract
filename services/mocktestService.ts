@@ -337,30 +337,11 @@ export function normalizeStrictSubject(
 }
 
 /**
- * Ensures text is wrapped in semantic HTML (<p>...</p>) if not already strictly enclosed in <p>.
+ * Returns clean plain text normalized with LaTeX math (NO HTML tags).
  */
 export function ensureHtmlParagraph(text: string): string {
   if (!text) return '';
-  const trimmed = text.trim();
-  if (!trimmed) return '';
-
-  // Check if ALREADY strictly wrapped in <p>...</p>
-  if (/^<p(?:\s+[^>]*)?>/i.test(trimmed) && /<\/p>$/i.test(trimmed)) {
-    return trimmed;
-  }
-
-  // If text already contains passage-box or complex HTML blocks (div, table, section, article, hr, etc.)
-  if (/^<(?:div|section|article|table)\b/i.test(trimmed) || trimmed.includes('<div class="passage-box">') || trimmed.includes('<hr>') || trimmed.includes('<table')) {
-    return trimmed;
-  }
-
-  // Strip broken partial outer tags if any
-  const uncorrupted = trimmed.replace(/^<p(?:\s+[^>]*)?>/i, '').replace(/<\/p>$/i, '').trim();
-  const paras = uncorrupted.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
-  if (paras.length <= 1) {
-    return `<p>${uncorrupted.replace(/\n/g, '<br>')}</p>`;
-  }
-  return paras.map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+  return cleanMocktestText(text);
 }
 
 import {
@@ -944,40 +925,11 @@ export function convertToMathJaxSyntax(text: string): string {
 
 /**
  * Normalizes all text fields of a MockTestMcqItem to ensure:
- * 1. 100% consistent <p>...</p> HTML wrapping on all fields (no bare text).
- * 2. Standard MathJax \(...\) notation for exponents (y^3), roots (\sqrt[3]{...}), and math symbols.
+ * 1. Clean normal text (NO HTML tags like <p>, <br>, <b>).
+ * 2. Standard KaTeX/LaTeX ($...$) for mathematical/scientific formulas.
  */
-export function standardizeItemHtmlAndMathJax(item: MockTestMcqItem, useMathJax: boolean = true): MockTestMcqItem {
-  const cleaned = cleanMockTestItem(item);
-  if (!useMathJax) {
-    return cleaned;
-  }
-
-  const applyMathJax = (field?: string) => {
-    if (!field || !field.trim()) return '';
-    const withMathJax = convertToMathJaxSyntax(field);
-    return ensureHtmlParagraph(withMathJax);
-  };
-
-  return {
-    ...cleaned,
-    question_hi: applyMathJax(cleaned.question_hi),
-    option1_hi: applyMathJax(cleaned.option1_hi),
-    option2_hi: applyMathJax(cleaned.option2_hi),
-    option3_hi: applyMathJax(cleaned.option3_hi),
-    option4_hi: applyMathJax(cleaned.option4_hi),
-    option5_hi: applyMathJax(cleaned.option5_hi),
-    solution_hi: applyMathJax(cleaned.solution_hi),
-    question_en: applyMathJax(cleaned.question_en),
-    option1_en: applyMathJax(cleaned.option1_en),
-    option2_en: applyMathJax(cleaned.option2_en),
-    option3_en: applyMathJax(cleaned.option3_en),
-    option4_en: applyMathJax(cleaned.option4_en),
-    option5_en: applyMathJax(cleaned.option5_en),
-    solution_en: applyMathJax(cleaned.solution_en),
-    latex_check: 'checked',
-    html_check: 'checked'
-  };
+export function standardizeItemHtmlAndMathJax(item: MockTestMcqItem, _useMathJax: boolean = true): MockTestMcqItem {
+  return cleanMockTestItem(item);
 }
 
 /**
@@ -1402,31 +1354,31 @@ export function convertElementsToMockTestItems(
     let solHi = '';
     let solEn = '';
     if (rawChunkSolution) {
-      solHi = `<p>${rawChunkSolution}</p>`;
-      solEn = `<p>${rawChunkSolution}</p>`;
+      solHi = rawChunkSolution;
+      solEn = rawChunkSolution;
     } else {
-      solHi = cleanCorrectTextHi ? `<p>${cleanCorrectTextHi}</p>` : `<p>विस्तृत हल व व्याख्या उपलब्ध नहीं है।</p>`;
-      solEn = cleanCorrectTextEn ? `<p>${cleanCorrectTextEn}</p>` : `<p>Detailed solution and explanation not available.</p>`;
+      solHi = cleanCorrectTextHi ? cleanCorrectTextHi : 'विस्तृत हल व व्याख्या उपलब्ध नहीं है।';
+      solEn = cleanCorrectTextEn ? cleanCorrectTextEn : 'Detailed solution and explanation not available.';
     }
 
     items.push({
       id: `mt_item_${i + 1}_${Date.now()}`,
       question_r: i + 1,
       question_type: 'MCQ',
-      question_hi: ensureHtmlParagraph(qHindi || qEng),
+      question_hi: qHindi || qEng,
       option1_hi: aHi,
       option2_hi: bHi,
       option3_hi: cHi,
       option4_hi: dHi,
       option5_hi: eHi,
-      solution_hi: ensureHtmlParagraph(solHi),
-      question_en: ensureHtmlParagraph(qEng || qHindi),
+      solution_hi: solHi,
+      question_en: qEng || qHindi,
       option1_en: aEn,
       option2_en: bEn,
       option3_en: cEn,
       option4_en: dEn,
       option5_en: eEn,
-      solution_en: ensureHtmlParagraph(solEn),
+      solution_en: solEn,
       answer,
       set_name: setName,
       difficulty_level: 'medium'
@@ -1485,85 +1437,25 @@ CARRY-OVER CONTINUATION INSTRUCTIONS:
    - If the last question at the bottom of this page is cut off or missing options/answer, extract whatever stem and options are visible.`;
   }
 
-  return `You are a professional Exam Paper Digitizer and MockTest Content Architect.
-Extract ALL multiple-choice questions (MCQs), multiple-select questions (MSQs), and numerical questions (NAT) from this image.${carryOverSection}
+  return `Extract ALL MCQs, MSQs, and NAT questions from this exam image into a strict JSON array.${carryOverSection}
 
-TARGET SCHEMA:
-Extract into a strict JSON array of objects, where each object has these exact 34 fields:
-1. question_r: Question sequence number (1, 2, 3...)
-2. question_hi: Question text in Hindi wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
-3. option1_hi: Option 1 (A) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-4. option2_hi: Option 2 (B) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-5. option3_hi: Option 3 (C) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-6. option4_hi: Option 4 (D) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-7. option5_hi: Option 5 (E) in Hindi (empty string if 4 options)
-8. solution_hi: DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
-9. question_en: Question text in English wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
-10. option1_en: Option 1 (A) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-11. option2_en: Option 2 (B) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-12. option3_en: Option 3 (C) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-13. option4_en: Option 4 (D) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-14. option5_en: Option 5 (E) in English (empty string if 4 options)
-15. solution_en: DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
-16. answer: Correct answer identifier: Single choice MCQ: "A", "B", "C", "D". MSQ: '["3","4"]'. NAT: '{"start":"86","end":"86"}'.
-17. set_name: Exam paper/shift name, e.g. "${setName}"
-18. difficulty_level: "Easy", "Medium", or "Hard"
-19. test_date: Test date in YYYY-MM-DD format if visible, else empty string ""
-20. test_time: Test time (e.g. "4:30 PM - 6:00 PM") if visible, else empty string ""
-21. subject: STRICT ACADEMIC SUBJECT ONLY!
-    STRICT RULE FOR "subject":
-    - You MUST identify and store ONLY the pure academic discipline (e.g. "Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK").
-    - NEVER put exam names, stages, shifts, or dates in "subject" (e.g. DO NOT put "RRB", "NTPC", "Level 01", "Stage I", "Shift-3"). Exam details belong in "subject_level"!
-22. subject_level: Exam level/stage/details (e.g. "RRB Level 01 Stage I 2025" or "SSC CGL Tier 1")
-23. figure_notes: Notes about any diagram/chart in the question, or empty string ""
-24. correction_notes: Notes about any clipping or corrections observed, or empty string ""
-25. source_pdf: Source PDF file name if known, else empty string ""
-26. source_pages: Source page number(s), e.g. "${pageNumber || '1'}"
-27. source_question_reference: Question reference in source, e.g. "Q.1"
-28. latex_check: "checked"
-29. html_check: "checked"
-30. answer_check: "checked"
-31. solution_check: "checked"
-32. hash_figure: Figure hash if any, else empty string ""
-33. manually_review: "checked"
-34. duplicate_statistics: "Unique within this shift; duplicate check completed."
+FORMAT & TYPOGRAPHY RULES:
+1. NO HTML TAGS: Output question stems, options, and solutions as clean normal text. Never output <p>, <br>, <b>, <table>, or <span>. Use simple \\n for line breaks.
+2. LATEX FOR MATH/SCIENCE ONLY: Wrap formulas, equations, fractions, and roots in $...$ (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$, $H_2O$). Keep normal text, units (e.g. km/h), and currency (₹500) as normal plain text.
+3. BOTH LANGUAGES: Provide both Hindi (_hi) and English (_en). If document has only one, translate the counterpart.
+4. YCT SOLUTION: Provide concise 3-5 line step-by-step solution. Do NOT start with 'हल:' or 'Solution:'.
+5. NO EXAM BOILERPLATE: Strip exam dates, shifts, and book publisher watermarks.
 
-YCT EXAM PUBLICATION SOLUTION PATTERN (जैसा प्रश्न वैसा पैटर्न):
-- DYNAMIC PATTERN BY DISCIPLINE:
-  * For MATHEMATICS / NUMERICALS: State given data ("दिया गया है / Given that:"), write formula in standard LaTeX math ($...$), show full step-by-step intermediate calculation without skipping steps so weaker students understand clearly, and conclude with the calculated value.
-  * For REASONING / LOGIC: State the underlying rule/logic, show pattern verification for each term/option, conclude why option is uniquely correct.
-  * For GK / HISTORY / POLITY / GEOGRAPHY: State direct factual context (date, treaty, place, or Article) + 3–4 high-yield connected exam facts or mini-list.
-  * For GENERAL SCIENCE: State scientific cause/reaction/law + practical remedies or discoverers with years.
-  * For LANGUAGE: State grammar rule, meaning, or usage clearly.
-- ACCESSIBLE TO WEAKER STUDENTS: Simple, clear, and direct language.
-- BALANCED MEDIUM LENGTH: Typically 3 to 6 focused lines or 3-5 structured steps/points. Neither a 1-line answer nor an essay.
-- STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', '<b>हल:</b>', 'Solution:', '<b>Solution:</b>', or 'Explanation:'. Start directly with the derivation or explanation in <p>...</p>. NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'.
+TARGET JSON FIELDS FOR EACH OBJECT:
+question_r, question_hi, option1_hi, option2_hi, option3_hi, option4_hi, option5_hi, solution_hi,
+question_en, option1_en, option2_en, option3_en, option4_en, option5_en, solution_en,
+answer (e.g. "A"), set_name ("${setName}"), difficulty_level ("Medium"),
+test_date (""), test_time (""),
+subject (pure academic subject like "Mathematics", "Reasoning", "Physics", "Chemistry", "History", "Geography", "Polity"),
+subject_level (""), figure_notes (""), correction_notes (""), source_pdf (""), source_pages ("${pageNumber || '1'}"), source_question_reference ("Q.1"),
+latex_check ("checked"), html_check ("checked"), answer_check ("checked"), solution_check ("checked"), hash_figure (""), manually_review ("checked"), duplicate_statistics ("Unique within this shift; duplicate check completed.")
 
-MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
-- STRICT KATEX / LATEX FOR ALL MATH & SCIENCE:
-  * ALWAYS enclose mathematical expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units inside standard LaTeX delimiters:
-    - Inline math: \`$ ... $\` (e.g. \`$x^2 + y^2 = 25$\`, \`$\\frac{a}{b}$\`, \`$\\sqrt{x}$\`, \`$\\sin^2\\theta + \\cos^2\\theta = 1$\`, \`$15\\text{ m/s}^2$\`)
-    - Display equations: \`$$ ... $$\` for large standalone equations or multi-step derivations.
-  * Fractions: ALWAYS write as \`$\\frac{numerator}{denominator}$\` (e.g. \`$\\frac{1}{2}$\`, \`$\\frac{60 \\times 9 - 11 \\times 30}{2}$\`). NEVER write broken text like '(1) / (2)'.
-  * Powers & Indices: ALWAYS write as \`$x^2$\`, \`$y^3$\`, \`$10^{-5}$\`, \`$a^{n+1}$\`, \`$x_1$\`.
-  * Roots: ALWAYS write as \`$\\sqrt{x}$\`, \`$\\sqrt[3]{27}$\`, \`$\\sqrt{a^2 + b^2}$\`.
-  * Operators & Symbols: Use standard LaTeX: \`$\\times$\`, \`$\\div$\`, \`$\\pm$\`, \`$\\le$\`, \`$\\ge$\`, \`$\\neq$\`, \`$\\approx$\`, \`$\\degree$\` (or \`^\\circ\`), \`$\\alpha$\`, \`$\\beta$\`, \`$\\theta$\`, \`$\\pi$\`, \`$\\Delta$\`, \`$\\infty$\`.
-- DOLLAR SIGN ($) DISCIPLINE:
-  * Use '$' ONLY for genuine math formulas/variables.
-  * NEVER wrap Indian Rupee currency in dollar signs: write '₹4,800' or 'Rs. 500', NEVER '$₹4800$'.
-  * NEVER wrap plain reasoning puzzle names or people in dollar signs: write P, Q, R, S, A, B, C as plain text, NOT '$P, Q, R$'.
-  * Write normal percentages as '40%' (or '$40\\%$' inside math).
-- SEMANTIC HTML STRUCTURE:
-  * Wrap all question stems, options, and explanations in semantic HTML \`<p>...</p>\`.
-  * Use bold \`<b>...</b>\` or \`<strong>...</strong>\` for emphasis and key takeaways.
-  * Use clean HTML tables \`<table><thead><tr><th>...</th></tr></thead><tbody><tr><td>...</td></tr></tbody></table>\` for matching lists (सूची-I / सूची-II), tabular data, and comparison charts!
-  * Use \`<ol>\` / \`<ul>\` and \`<li>\` for statements (कथन 1, कथन 2).
-  * Use \`<br/>\` for line breaks inside paragraph blocks.
-- STRICT NEGATIVE RULE: DO NOT include previous-year exam tags, shift dates, shift times, paper citations, or book publisher labels in the question text or options!
-  - Examples that MUST BE OMITTED from question/option text: "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT - I (GL) 17/06/2025 (Afternoon)", "[SSC CGL 14/07/2023 (Shift-1)]", "(Shift-2)", "(Morning)", "Youth Competition Times", "Pinnacle".
-  - The question text must be PURELY the question statement!
-- If the original document is only in Hindi or only in English, TRANSLATE and generate the counterpart language so BOTH Hindi and English fields are fully populated!
-- Respond ONLY with the JSON array inside \`\`\`json ... \`\`\` block.`;
+Respond ONLY with the JSON array inside \`\`\`json ... \`\`\`.`;
 }
 
 /**
@@ -1951,12 +1843,12 @@ export function parseAiOutputToMockTestItems(
         if (currentPassageHi && inRange) {
           const snippet = currentPassageHi.slice(0, 25);
           if (!finalQHi.includes(snippet)) {
-            finalQHi = `<p>${currentPassageHi.replace(/\n+/g, '</p><p>')}</p><hr><p>${finalQHi.replace(/^<p>/i, '').replace(/<\/p>$/i, '')}</p>`;
+            finalQHi = `${currentPassageHi}\n---\n${finalQHi}`;
           }
           if (currentPassageEn) {
             const snippetEn = currentPassageEn.slice(0, 25);
             if (!finalQEn.includes(snippetEn)) {
-              finalQEn = `<p>${currentPassageEn.replace(/\n+/g, '</p><p>')}</p><hr><p>${finalQEn.replace(/^<p>/i, '').replace(/<\/p>$/i, '')}</p>`;
+              finalQEn = `${currentPassageEn}\n---\n${finalQEn}`;
             }
           }
           rawObj.passage_hi = currentPassageHi;
@@ -2070,10 +1962,10 @@ export function parseAiOutputToMockTestItems(
           const genericSol = obj.solution || obj.explanation || obj.exp || obj.sol || '';
 
           if (!solHi && genericSol) {
-            solHi = `<p>${stripSolutionPrefix(genericSol)}</p>`;
+            solHi = stripSolutionPrefix(genericSol);
           }
           if (!solEn && genericSol) {
-            solEn = `<p>${stripSolutionPrefix(genericSol)}</p>`;
+            solEn = stripSolutionPrefix(genericSol);
           }
 
           if (!solHi && solEn) solHi = solEn;
@@ -2092,8 +1984,8 @@ export function parseAiOutputToMockTestItems(
             const cHi = correctTextHi ? correctTextHi.replace(/<[^>]*>/g, '').trim() : '';
             const cEn = correctTextEn ? correctTextEn.replace(/<[^>]*>/g, '').trim() : '';
 
-            if (!solHi) solHi = cHi ? `<p>${cHi}</p>` : `<p>विस्तृत हल व व्याख्या उपलब्ध नहीं है।</p>`;
-            if (!solEn) solEn = cEn ? `<p>${cEn}</p>` : `<p>Detailed solution and explanation not available.</p>`;
+            if (!solHi) solHi = cHi ? cHi : 'विस्तृत हल व व्याख्या उपलब्ध नहीं है।';
+            if (!solEn) solEn = cEn ? cEn : 'Detailed solution and explanation not available.';
           }
 
           const candidateSubject = obj.subject || obj.subject_name || obj.topic || '';
@@ -2103,20 +1995,20 @@ export function parseAiOutputToMockTestItems(
             id: `mt_ai_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
             question_r: qNum,
             question_type: qType,
-            question_hi: ensureHtmlParagraph(qHi),
+            question_hi: qHi,
             option1_hi: opt1Hi,
             option2_hi: opt2Hi,
             option3_hi: opt3Hi,
             option4_hi: opt4Hi,
             option5_hi: opt5Hi,
-            solution_hi: ensureHtmlParagraph(solHi),
-            question_en: ensureHtmlParagraph(qEn),
+            solution_hi: solHi,
+            question_en: qEn,
             option1_en: opt1En,
             option2_en: opt2En,
             option3_en: opt3En,
             option4_en: opt4En,
             option5_en: opt5En,
-            solution_en: ensureHtmlParagraph(solEn),
+            solution_en: solEn,
             answer: rawAns,
             set_name: obj.set_name || setName,
             difficulty_level: (obj.difficulty_level || 'Easy').toLowerCase() === 'hard' ? 'hard' : (obj.difficulty_level || 'Easy').toLowerCase() === 'easy' ? 'easy' : 'medium',
@@ -2165,121 +2057,45 @@ export function buildMockTestBridgePrompt(
 ): string {
   let carryOverSection = '';
   if (pendingContext && pendingContext.pendingItems && pendingContext.pendingItems.length > 0) {
-    const pendingJson = JSON.stringify(pendingContext.pendingItems.map(it => ({
-      question_reference: it.source_question_reference || it.question_r,
-      question_hi: it.question_hi || '',
-      question_en: it.question_en || '',
-      option1_hi: it.option1_hi || '',
-      option2_hi: it.option2_hi || '',
-      option3_hi: it.option3_hi || '',
-      option4_hi: it.option4_hi || '',
-      option1_en: it.option1_en || '',
-      option2_en: it.option2_en || '',
-      option3_en: it.option3_en || '',
-      option4_en: it.option4_en || '',
-      answer: it.answer || '',
-      source_pages: it.source_pages || String(pendingContext.sourcePageNumber)
-    })), null, 2);
-
-    carryOverSection = `\n\nCRITICAL: CARRY-OVER CONTEXT FROM PREVIOUS PAGE (Page ${pendingContext.sourcePageNumber}):
-The previous page ended with incomplete question(s) that may continue on this current page:
-${pendingJson}
-
-CARRY-OVER CONTINUATION INSTRUCTIONS:
-1. Carefully inspect the VERY TOP of this page image:
-   - Does this page start with the continuation of any pending question from the previous page?
-     * SCENARIO A: Remaining options C and D, or remainder of question stem.
-     * SCENARIO B (Common in Ghatna Chakra / YCT): The previous page had the question stem and all 4 options, but its 'सही उत्तर:' and 'व्याख्या:' (Answer & Explanation box) were cut off and appear at the VERY TOP of this page!
-   - IF YES:
-     * MERGE the continuation (remaining options OR the answer & explanation box) with the pending question data from above to produce a SINGLE COMPLETE QUESTION.
-     * Set its "source_pages" to "${pendingContext.sourcePageNumber}, ${pageNumber || pendingContext.sourcePageNumber + 1}".
-     * Place this merged question as the FIRST object in the JSON output array.
-     * DO NOT output the continuation or answer/explanation fragment as a detached or separate dummy question!
-   - IF NO:
-     * If the top of this page starts with a brand new question, extract all questions on this page normally.
-2. EXTRACT SUBSEQUENT QUESTIONS:
-   - The question appearing directly below the continuation/explanation (e.g. new question like 'मुख्यमंत्री प्रतिज्ञा योजना...') is a BRAND NEW QUESTION and must be extracted normally as the next item.
-3. INCOMPLETE QUESTIONS AT PAGE BOTTOM:
-   - If the last question at the bottom of this page is cut off or missing options/answer, extract whatever stem and options are visible.`;
+    carryOverSection = `\n(Note: The top of this page may contain the continuation of previous question Q.${pendingContext.sourcePageNumber}).`;
   }
 
-  return `You are a professional Exam Paper Digitizer and MockTest Content Architect.
-Extract ALL multiple-choice questions (MCQs), MSQs, and numerical questions from this exam page image.${carryOverSection}
+  return `You are a professional Exam Paper Digitizer.
+Extract all multiple-choice questions (MCQs) from this exam page into a strict JSON array.${carryOverSection}
 
-STRICT REQUIREMENT: You MUST fill ALL 34 fields for EVERY question in strict JSON format.
-For every question, output an object in a JSON array with these exact 34 fields:
-- "question_r": Sequence number (1, 2, 3...)
-- "question_hi": Question text in Hindi wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
-- "option1_hi": Option 1 (A) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option2_hi": Option 2 (B) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option3_hi": Option 3 (C) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option4_hi": Option 4 (D) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option5_hi": Option 5 (E) in Hindi (or empty string if 4 options)
-- "solution_hi": DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
-- "question_en": Question text in English wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
-- "option1_en": Option 1 (A) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option2_en": Option 2 (B) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option3_en": Option 3 (C) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option4_en": Option 4 (D) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option5_en": Option 5 (E) in English (or empty string if 4 options)
-- "solution_en": DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
-- "answer": Correct answer identifier (e.g. "A", "B", "C", or "D")
-- "set_name": "${setName}"
-- "difficulty_level": "Easy", "Medium", or "Hard"
-- "test_date": Test date in YYYY-MM-DD or empty string ""
-- "test_time": Test time (e.g. "4:30 PM - 6:00 PM") or empty string ""
-- "subject": STRICT ACADEMIC SUBJECT ONLY! (e.g. "Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK"). NEVER put exam name/stage/shift in subject!
-- "subject_level": Exam level/stage (e.g. "RRB Level 01 Stage I 2025")
-- "figure_notes": Diagram notes if any, else empty string ""
-- "correction_notes": Clipping/correction notes if any, else empty string ""
-- "source_pdf": Source PDF name if known, else empty string ""
-- "source_pages": Source page number, e.g. "${pageNumber || '1'}"
-- "source_question_reference": e.g. "Q.98"
-- "latex_check": "checked"
-- "html_check": "checked"
-- "answer_check": "checked"
-- "solution_check": "checked"
-- "hash_figure": ""
-- "manually_review": "checked"
-- "duplicate_statistics": "Unique within this shift; duplicate check completed."
+RULES:
+1. NO HTML TAGS: Output clean normal text without <p>, <b>, <br>, <table>, or <span>. Use natural \\n for line breaks.
+2. LATEX FOR MATH & SCIENCE ONLY:
+   - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
+   - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
+3. Both Hindi and English fields must be filled.
+4. Solutions: Give clear, step-by-step solutions explaining the logic/formula directly. NEVER write "Option A is correct" (options shuffle dynamically).
+5. Correct Answer: Single letter "A", "B", "C", or "D".
 
-CRITICAL RULES & YCT SOLUTION PATTERN (जैसा प्रश्न वैसा पैटर्न):
-1. CRITICAL GADYANSH / READING COMPREHENSION RULE (गद्यांश / काव्यांश / निर्देश):
-   - If this page contains a reading comprehension passage, poem, story, or case study:
-   - YOU MUST NEVER DROP OR OMIT THE PASSAGE! The full passage text MUST be stored and preserved.
-   - Attach complete passage text prepended to each question of that set.
-2. CRITICAL CURRENT AFFAIRS RULE (STRICT LAST 1-YEAR DATA ONLY):
-   - If the question belongs to "Current Affairs", contemporary government schemes, national initiatives, sports tournaments, awards, summits, appointments, union budget, or recent GK:
-   - The data, events, facts, schemes, and statistics MUST STRICTLY BE FROM THE LAST 1 YEAR ONLY (within the last 12 months)!
-   - NEVER generate questions from outdated 2-5 year old events or obsolete records.
-3. STRICT SUBJECT RULE: The "subject" field MUST ONLY contain the academic subject name (like "Current Affairs", "Mathematics", "Reasoning", "Polity"). NEVER include exam names like "RRB", "NTPC", or "Shift" in "subject".
-4. BOTH Hindi and English fields MUST be fully populated!
-5. DYNAMIC PEDAGOGICAL SOLUTION PATTERN:
-   - For Math/Numericals: State given data ("दिया गया है / Given that:"), write formula in standard LaTeX math ($...$), show full step-by-step intermediate calculation without skipping steps, conclude with calculated value.
-   - For Reasoning: State underlying logic/rule, show pattern verification, conclude why option is uniquely correct.
-   - For GK/Polity/History/Geography: State direct factual context (date, treaty, place, or Article) + 3–4 high-yield connected exam facts or mini-list.
-   - For General Science: State scientific principle/reaction/mechanism + practical remedies or discoverers with years.
-   - For Language: State grammar rule, meaning, or usage clearly.
-   - Balanced medium length: 3 to 6 focused lines or 3-5 structured steps/points.
-6. NO SOLUTION PREFIX LABELS & NO FILLER LABELS: Both solution_hi and solution_en MUST start DIRECTLY with the explanation text wrapped in <p>...</p>. DO NOT write '<b>हल:</b>', 'हल:', '<b>Solution:</b>', or 'Solution:'! NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-7. STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
-   - In CBT exams and mock test portals, options (A, B, C, D) are SHUFFLED DYNAMICALLY!
-   - Therefore, YOU MUST NEVER mention option letters (A, B, C, D) or option numbers (1, 2, 3, 4) in solution_hi or solution_en!
-   - NEVER write "सही विकल्प A है।", "अतः विकल्प B सही उत्तर है।", "The correct option is A."
-   - REQUIRED: State the direct fact, formula, or computed numerical value!
-8. MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
-   - ALWAYS enclose mathematical expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units inside standard LaTeX delimiters:
-     * Inline math: \`$ ... $\` (e.g. \`$x^2 + y^2 = 25$\`, \`$\\frac{a}{b}$\`, \`$\\sqrt{x}$\`, \`$\\sin^2\\theta + \\cos^2\\theta = 1$\`, \`$15\\text{ m/s}^2$\`)
-     * Display equations: \`$$ ... $$\` for large standalone equations or multi-step derivations.
-   - Fractions: ALWAYS write as \`$\\frac{numerator}{denominator}$\` (e.g. \`$\\frac{1}{2}$\`, \`$\\frac{60 \\times 9 - 11 \\times 30}{2}$\`). NEVER write broken text like '(1) / (2)'.
-   - Powers & Indices: ALWAYS write as \`$x^2$\`, \`$y^3$\`, \`$10^{-5}$\`, \`$a^{n+1}$\`, \`$x_1$\`.
-   - Roots: ALWAYS write as \`$\\sqrt{x}$\`, \`$\\sqrt[3]{27}$\`, \`$\\sqrt{a^2 + b^2}$\`.
-   - Operators & Symbols: Use standard LaTeX: \`$\\times$\`, \`$\\div$\`, \`$\\pm$\`, \`$\\le$\`, \`$\\ge$\`, \`$\\neq$\`, \`$\\approx$\`, \`$\\degree$\` (or \`^\\circ\`), \`$\\alpha$\`, \`$\\beta$\`, \`$\\theta$\`, \`$\\pi$\`, \`$\\Delta$\`, \`$\\infty$\`.
-   - Dollar Sign ($) Discipline: Use '$' ONLY for genuine math formulas/variables. NEVER wrap currency (write '₹4,800', NOT '$₹4800$') or plain reasoning puzzle names (write P, Q, R, S, NOT '$P, Q, R$').
-   - Semantic HTML Structure: Wrap all questions, options, and explanations in semantic HTML \`<p>...</p>\`. Use bold \`<b>...</b>\` for emphasis. Use clean HTML tables \`<table>...</table>\` for matching lists (सूची-I / सूची-II) or comparison charts!
-9. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options! (e.g. "RRB Tech. - (III) 23/12/2024 (Afternoon)", "NTPC CBT-I", "[SSC CGL 2023]" MUST BE OMITTED).
-10. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.
-11. At the very end after the JSON code block, on a new line, output:
+Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:
+[
+  {
+    "question_r": 1,
+    "question_hi": "...",
+    "question_en": "...",
+    "option1_hi": "...",
+    "option2_hi": "...",
+    "option3_hi": "...",
+    "option4_hi": "...",
+    "option1_en": "...",
+    "option2_en": "...",
+    "option3_en": "...",
+    "option4_en": "...",
+    "answer": "A",
+    "solution_hi": "...",
+    "solution_en": "...",
+    "subject": "General",
+    "difficulty_level": "medium",
+    "source_question_reference": "Q.1"
+  }
+]
+
+At the very end after the JSON code block, on a new line, output:
 ---STUDY_AI_COMPLETE---`;
 }
 
@@ -2292,99 +2108,42 @@ export function buildMockTestSimilarBridgePrompt(
   pendingContext?: PendingMcqContext | null,
   pageNumber?: number
 ): string {
-  let carryOverSection = '';
-  if (pendingContext && pendingContext.pendingItems && pendingContext.pendingItems.length > 0) {
-    carryOverSection = `\n(Note: Continue generating similar practice questions matching the test syllabus).`;
+  return `You are an elite Exam Question Creator.
+The attached exam page questions serve STRICTLY AS CONCEPT REFERENCE. Create BRAND NEW, UNIQUE PRACTICE MCQs (DO NOT copy verbatim).
+
+RULES:
+1. NO HTML TAGS: Output clean normal text without <p>, <b>, <br>, <table>, or <span>. Use natural \\n for line breaks.
+2. LATEX FOR MATH & SCIENCE ONLY:
+   - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
+   - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
+3. Both Hindi and English fields must be filled.
+4. Solutions: Give clear, step-by-step solutions explaining the logic/formula directly. NEVER write "Option A is correct" (options shuffle dynamically).
+5. Correct Answer: Single letter "A", "B", "C", or "D".
+
+Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:
+[
+  {
+    "question_r": 1,
+    "question_hi": "...",
+    "question_en": "...",
+    "option1_hi": "...",
+    "option2_hi": "...",
+    "option3_hi": "...",
+    "option4_hi": "...",
+    "option1_en": "...",
+    "option2_en": "...",
+    "option3_en": "...",
+    "option4_en": "...",
+    "answer": "A",
+    "solution_hi": "...",
+    "solution_en": "...",
+    "subject": "General",
+    "difficulty_level": "medium",
+    "source_question_reference": "Ref-Q.1 (Variant)"
   }
+]
 
-  return `You are an elite Competitive Exam Test-Series Architect, Question Creator, and Educator (SSC CGL, Railway RRB, Banking, UPSC, State PSC).
-
-CRITICAL MISSION - REFERENCE-ONLY MODE (NO VERBATIM COPIES):
-- The attached exam page image contains questions that you MUST USE STRICTLY AS REFERENCE AND CONCEPT BLUEPRINT!
-- ABSOLUTELY DO NOT copy, transcribe, or extract the exact questions from this image!
-- "SAME TO SAME" OR VERBATIM QUESTIONS ARE STRICTLY FORBIDDEN!
-- For each question visible on this exam page:
-  1. Deeply analyze its core academic subject, topic, concept, mathematical theorem/formula, difficulty level, and reasoning pattern.
-  2. GENERATE A BRAND NEW, UNIQUE PRACTICE MCQ based on that underlying topic/concept:
-     * For Math / Quant / Science: Create a fresh problem testing the same mathematical theorem or formula, but with COMPLETELY DIFFERENT numbers, variables, values, and scenarios. Ensure the values calculate cleanly.
-     * For GK / GS / History / Polity / Geography: Test the same historical period, constitutional article/concept, geographical feature, or scientific phenomenon with a FRESH, DISTINCT QUESTION.
-     * For Current Affairs / Contemporary GK: STRICT 1-YEAR WINDOW ONLY! Any question based on current affairs, government schemes, awards, sports, summits, appointments, or budget MUST STRICTLY use researched, verified events and data from the LAST 1 YEAR ONLY (within the last 12 months)! NEVER use outdated 2-5 year old data.
-     * For Reasoning / Logic: Create a new puzzle, series, syllogism, or coding-decoding problem following the identical logic/pattern but with NEW letters, words, or arrangements.
-     * For English / Hindi Language: Test the same grammatical concept or vocabulary standard using DIFFERENT sentences and context.
-  3. Formulate 4 completely fresh, plausible options (A, B, C, D) with authentic distractors.
-  4. Rigorously solve and verify the SINGLE CORRECT ANSWER ("A", "B", "C", or "D").
-  5. Provide an exhaustive, step-by-step pedagogical solution in BOTH Hindi (<p>...</p>) and English (<p>...</p>).
-  6. Set "source_question_reference" to "Ref-Q.X (Variant)" where X corresponds to the reference question sequence on the page.${carryOverSection}
-
-STRICT REQUIREMENT: You MUST fill ALL 34 fields for EVERY question in strict JSON format.
-For every question, output an object in a JSON array with these exact 34 fields:
-- "question_r": Sequence number (1, 2, 3...)
-- "question_hi": Brand new question in Hindi wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
-- "option1_hi": Option 1 (A) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option2_hi": Option 2 (B) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option3_hi": Option 3 (C) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option4_hi": Option 4 (D) in Hindi wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option5_hi": Option 5 (E) in Hindi (or empty string if 4 options)
-- "solution_hi": DYNAMIC STEP-BY-STEP SOLUTION in Hindi formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'हल:' or 'उत्तर:' prefix. NO filler labels!
-- "question_en": Brand new question in English wrapped in semantic HTML (<p>...</p>) with standard KaTeX/LaTeX math ($...$ for inline formulas, $$...$$ for display equations) and clean HTML markup.
-- "option1_en": Option 1 (A) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option2_en": Option 2 (B) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option3_en": Option 3 (C) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option4_en": Option 4 (D) in English wrapped in <p>...</p> (with KaTeX $...$ for mathematical terms/formulas).
-- "option5_en": Option 5 (E) in English (or empty string if 4 options)
-- "solution_en": DYNAMIC STEP-BY-STEP SOLUTION in English formatted in clean HTML (<p>...</p>) with full KaTeX/LaTeX math following YCT Exam Publication Pattern (जैसा प्रश्न वैसा पैटर्न). NO 'Solution:' or 'Explanation:' prefix. NO filler labels!
-- "answer": Correct answer identifier (e.g. "A", "B", "C", or "D")
-- "set_name": "${setName}"
-- "difficulty_level": "Easy", "Medium", or "Hard"
-- "test_date": Test date in YYYY-MM-DD or empty string ""
-- "test_time": Test time (e.g. "4:30 PM - 6:00 PM") or empty string ""
-- "subject": STRICT ACADEMIC SUBJECT ONLY! (e.g. "Current Affairs", "History", "Geography", "Polity", "Economics", "General Science", "Physics", "Chemistry", "Biology", "Mathematics", "Reasoning", "Computer Knowledge", "English", "Hindi", "Environment & Ecology", "Static GK"). NEVER put exam name/stage/shift in subject!
-- "subject_level": Exam level/stage (e.g. "RRB Level 01 Stage I 2025")
-- "figure_notes": Diagram notes if any, else empty string ""
-- "correction_notes": "Generated from reference question concept"
-- "source_pdf": Source PDF name if known, else empty string ""
-- "source_pages": Source page number, e.g. "${pageNumber || '1'}"
-- "source_question_reference": e.g. "Ref-Q.1 (Variant)"
-- "latex_check": "checked"
-- "html_check": "checked"
-- "answer_check": "checked"
-- "solution_check": "checked"
-- "hash_figure": ""
-- "manually_review": "checked"
-- "duplicate_statistics": "Unique generated variant based on reference concept."
-
-CRITICAL RULES & YCT SOLUTION PATTERN (जैसा प्रश्न वैसा पैटर्न):
-1. CRITICAL GADYANSH / READING COMPREHENSION RULE (गद्यांश / काव्यांश / निर्देश):
-   - If this page contains a reading comprehension passage, poem, story, or case study:
-   - YOU MUST NEVER DROP THE PASSAGE! Attach the full passage text to the questions testing that passage.
-2. STRICT SUBJECT RULE: The "subject" field MUST ONLY contain the academic subject name (like "Current Affairs", "Mathematics", "Reasoning", "Polity").
-3. BOTH Hindi and English fields MUST be fully populated!
-4. DYNAMIC PEDAGOGICAL SOLUTION PATTERN:
-   - For Math/Numericals: State given data ("दिया गया है / Given that:"), formula in standard LaTeX math ($...$), complete step-by-step intermediate calculation without skipping steps, conclude with final value.
-   - For Reasoning: State core rule/logic, show step-by-step verification, conclude why option is uniquely correct.
-   - For GK/Polity/History/Geography: State direct factual context (date, treaty, place, or Article) + 3–4 high-yield connected exam facts or mini-list.
-   - For General Science: State scientific principle/reaction/mechanism + practical remedies or discoverers with years.
-   - For Language: State grammar rule, meaning, or usage clearly.
-   - Balanced medium length: 3 to 6 focused lines or 3-5 structured steps/points.
-5. NO SOLUTION PREFIX LABELS & NO FILLER LABELS: Both solution_hi and solution_en MUST start DIRECTLY with the explanation text wrapped in <p>...</p>. DO NOT write '<b>हल:</b>', 'हल:', '<b>Solution:</b>', or 'Solution:'! NEVER include filler labels like 'Key Point:', 'Detailed Explanation:', 'Additional Information:', or 'Important Exam Point:'!
-6. STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
-   - In CBT exams and mock test portals, options (A, B, C, D) are SHUFFLED DYNAMICALLY!
-   - Therefore, YOU MUST NEVER mention option letters (A, B, C, D) or option numbers (1, 2, 3, 4) in solution_hi or solution_en!
-   - NEVER write "सही विकल्प A है।", "अतः विकल्प B सही उत्तर है।", "The correct option is A."
-   - REQUIRED: Conclude by directly stating the scientific fact, historical name, formula, or computed numerical value!
-7. MATHEMATICAL & SCIENTIFIC FORMULAS (STRICT KATEX / LATEX & SEMANTIC HTML STANDARD):
-   - ALWAYS enclose mathematical expressions, formulas, variables, equations, fractions, square roots, powers, indices, trigonometry, and units inside standard LaTeX delimiters:
-     * Inline math: \`$ ... $\` (e.g. \`$x^2 + y^2 = 25$\`, \`$\\frac{a}{b}$\`, \`$\\sqrt{x}$\`, \`$\\sin^2\\theta + \\cos^2\\theta = 1$\`, \`$15\\text{ m/s}^2$\`)
-     * Display equations: \`$$ ... $$\` for large standalone equations or multi-step derivations.
-   - Fractions: ALWAYS write as \`$\\frac{numerator}{denominator}$\` (e.g. \`$\\frac{1}{2}$\`, \`$\\frac{60 \\times 9 - 11 \\times 30}{2}$\`). NEVER write broken text like '(1) / (2)'.
-   - Powers & Indices: ALWAYS write as \`$x^2$\`, \`$y^3$\`, \`$10^{-5}$\`, \`$a^{n+1}$\`, \`$x_1$\`.
-   - Roots: ALWAYS write as \`$\\sqrt{x}$\`, \`$\\sqrt[3]{27}$\`, \`$\\sqrt{a^2 + b^2}$\`.
-   - Operators & Symbols: Use standard LaTeX: \`$\\times$\`, \`$\\div$\`, \`$\\pm$\`, \`$\\le$\`, \`$\\ge$\`, \`$\\neq$\`, \`$\\approx$\`, \`$\\degree$\` (or \`^\\circ\`), \`$\\alpha$\`, \`$\\beta$\`, \`$\\theta$\`, \`$\\pi$\`, \`$\\Delta$\`, \`$\\infty$\`.
-   - Dollar Sign ($) Discipline: Use '$' ONLY for genuine math formulas/variables. NEVER wrap currency (write '₹4,800', NOT '$₹4800$') or plain reasoning puzzle names (write P, Q, R, S, NOT '$P, Q, R$').
-   - Semantic HTML Structure: Wrap all questions, options, and explanations in semantic HTML \`<p>...</p>\`. Use bold \`<b>...</b>\` for emphasis. Use clean HTML tables \`<table>...</table>\` for matching lists or comparison charts!
-8. STRICT NEGATIVE RULE: DO NOT include exam shift citations, previous-year question tags, dates, or source book labels in the question text or options!
-9. Output ONLY the JSON array inside \`\`\`json ... \`\`\` block.
-10. At the very end after the JSON code block, on a new line, output:
+At the very end after the JSON code block, on a new line, output:
 ---STUDY_AI_COMPLETE---`;
 }
 

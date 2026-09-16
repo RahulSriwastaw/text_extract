@@ -313,10 +313,13 @@ export function cleanMocktestText(text: string): string {
   res = res.replace(/⅓/g, '$\\frac{1}{3}$');
   res = res.replace(/⅔/g, '$\\frac{2}{3}$');
 
-  // 22. Clean consecutive <br> and paragraph starts
-  res = res.replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>');
-  res = res.replace(/<p>\s*<br\s*\/?>/gi, '<p>');
-  res = res.replace(/[ \t]{2,}/g, ' ');
+  // 22. Strip all HTML tags completely (user requested pure normal text without HTML, only LaTeX for math)
+  res = res
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
+    .replace(/<\/?(?:p|b|strong|i|em|span|div|table|thead|tbody|tr|td|th|ul|ol|li|hr)[^>]*>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ');
 
   return res.trim();
 }

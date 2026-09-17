@@ -1,20 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import {
-  X,
-  Key,
-  ShieldCheck,
-  Sparkles,
-  CheckCircle2,
-  AlertCircle,
-  ExternalLink,
-  Loader2,
-  LogOut,
+import { 
+  X, 
+  Key, 
+  ShieldCheck, 
+  Sparkles, 
+  CheckCircle2, 
+  AlertCircle, 
+  ExternalLink, 
+  Loader2, 
+  LogOut, 
   Lock,
-  Zap
+  Chrome,
+  HelpCircle,
+  Zap,
+  Info,
+  Radio,
+  Cpu,
+  RefreshCw,
+  MessageSquare,
+  Bot,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAiSettings, saveAiSettings, clearAiCredentials, AiSettings } from '../services/aiDbService';
 import { testGeminiApiKey, parseUserApiKeys } from '../services/userGeminiService';
+import { 
+  pingStudyAiExtension, 
+  getStoredAiProvider, 
+  setStoredAiProvider, 
+  resetStudyAiSession,
+  BridgeStatus, 
+  AiProvider 
+} from '../services/studyAiBridgeService';
 
 interface GeminiConnectModalProps {
   isOpen: boolean;
@@ -22,19 +39,90 @@ interface GeminiConnectModalProps {
   onConnected?: () => void;
 }
 
+const PROVIDERS: { id: AiProvider; name: string; url: string; badge: string; desc: string }[] = [
+  {
+    id: 'gemini',
+    name: 'Google Gemini',
+    url: 'https://gemini.google.com/app',
+    badge: 'Recommended',
+    desc: 'Gemini 2.5 Flash / Pro via web interface. Native image & PDF vision.'
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek AI',
+    url: 'https://chat.deepseek.com/',
+    badge: 'High Accuracy',
+    desc: 'DeepSeek R1 / V3 reasoning models with full Markdown/LaTeX.'
+  },
+  {
+    id: 'chatgpt',
+    name: 'ChatGPT (OpenAI)',
+    url: 'https://chatgpt.com/',
+    badge: 'Free Tier',
+    desc: 'GPT-4o mini / GPT-4o web chat session in browser.'
+  },
+  {
+    id: 'claude',
+    name: 'Claude (Anthropic)',
+    url: 'https://claude.ai/',
+    badge: 'Alternative',
+    desc: 'Claude 3.5 Sonnet free browser chat thread.'
+  }
+];
+
 const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose, onConnected }) => {
-  const [activeTab, setActiveTab] = useState<'chrome_key' | 'oauth'>('chrome_key');
+  const [activeTab, setActiveTab] = useState<'extension' | 'chrome_key' | 'oauth'>('extension');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [clientIdInput, setClientIdInput] = useState('');
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  
+  // Extension bridge state
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
+  const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
+  const [isCheckingBridge, setIsCheckingBridge] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       loadSettings();
+      checkBridge();
     }
   }, [isOpen]);
+
+  const checkBridge = async () => {
+    setIsCheckingBridge(true);
+    try {
+      const status = await pingStudyAiExtension(1200);
+      setBridgeStatus(status);
+      const stored = getStoredAiProvider();
+      if (stored) {
+        setSelectedProvider(stored);
+      } else if (status.provider) {
+        setSelectedProvider(status.provider);
+      }
+    } catch {
+      setBridgeStatus({ connected: false });
+    } finally {
+      setIsCheckingBridge(false);
+    }
+  };
+
+  const handleProviderSelect = (provider: AiProvider) => {
+    setSelectedProvider(provider);
+    setStoredAiProvider(provider);
+    setBridgeStatus(prev => ({ ...prev, provider }));
+    setStatusMessage({
+      type: 'success',
+      text: `Active model switched to ${provider.toUpperCase()}! Extraction will run via your active ${provider.toUpperCase()} tab.`
+    });
+  };
+
+  const handleResetSession = async () => {
+    await resetStudyAiSession();
+    await checkBridge();
+    setStatusMessage({ type: 'info', text: 'Extension AI chat session reset successfully.' });
+  };
 
   const loadSettings = async () => {
     const s = await getAiSettings();
@@ -173,8 +261,11 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                   <div>
                     <h3 className="text-base font-bold text-white font-display flex items-center gap-2">
                       Connect AI Engine
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        Zero Token Cost
+                      </span>
                     </h3>
-                    <p className="text-xs text-slate-400">Connect your Gemini account to start extracting</p>
+                    <p className="text-xs text-slate-400">Unlimited Extraction via Browser Extension or API</p>
                   </div>
                 </div>
                 <button
@@ -185,8 +276,36 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                 </button>
               </div>
 
-              {/* Status Alert if Connected */}
-              {isConnected ? (
+              {/* Status Alert if Extension is Connected */}
+              {bridgeStatus.connected ? (
+                <div className="m-5 mb-0 p-3.5 bg-emerald-500/10 border border-emerald-500/25 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                        TextExtract Pro Bridge Active ({bridgeStatus.version || 'v2.0.0'})
+                        <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 rounded text-emerald-300 font-mono">
+                          {selectedProvider.toUpperCase()}
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-emerald-400/80">
+                        Zero API keys required. Extraction runs directly in your active browser tab!
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={checkBridge}
+                    disabled={isCheckingBridge}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-white/5 hover:bg-white/10 text-slate-300 text-xs rounded-lg border border-white/10 transition-all"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isCheckingBridge ? 'animate-spin' : ''}`} />
+                    Ping
+                  </button>
+                </div>
+              ) : isConnected ? (
                 <div className="m-5 mb-0 p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
                     <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
@@ -213,6 +332,18 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                 <div className="flex p-1 bg-white/[0.04] border border-white/[0.06] rounded-xl gap-1">
                   <button
                     type="button"
+                    onClick={() => setActiveTab('extension')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
+                      activeTab === 'extension'
+                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white shadow'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>TextExtract Pro Bridge (100% Free)</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setActiveTab('chrome_key')}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
                       activeTab === 'chrome_key'
@@ -237,7 +368,143 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                   </button>
                 </div>
 
-                {/* Tab 1: Chrome Google AI Studio Key */}
+                {/* Tab 1: Extension Bridge (Free Unlimited) */}
+                {activeTab === 'extension' && (
+                  <div className="space-y-4">
+                    <div className="p-3.5 bg-gradient-to-r from-white/[0.03] to-white/[0.01] border border-white/[0.08] rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-xs font-bold text-white">
+                          <Zap className="w-4 h-4 text-[#FF884D]" />
+                          <span>Choose Your Browser AI Provider:</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400">Zero tokens consumed</span>
+                      </div>
+
+                      {/* Providers grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {PROVIDERS.map((p) => {
+                          const isSelected = selectedProvider === p.id;
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => handleProviderSelect(p.id)}
+                              className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'bg-[#FF6B2B]/10 border-[#FF6B2B] text-white shadow-md'
+                                  : 'bg-white/[0.02] border-white/[0.06] text-slate-300 hover:bg-white/[0.05] hover:border-white/[0.12]'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-bold flex items-center gap-1.5">
+                                  <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-[#FF6B2B]' : 'bg-slate-500'}`} />
+                                  {p.name}
+                                </span>
+                                <span className="text-[9px] px-1.5 py-0.5 bg-white/10 rounded font-medium text-slate-300">
+                                  {p.badge}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-tight">
+                                {p.desc}
+                              </p>
+                              <div className="mt-2 pt-2 border-t border-white/[0.04] flex items-center justify-between text-[10px]">
+                                <a
+                                  href={p.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[#FF884D] hover:underline flex items-center gap-0.5"
+                                >
+                                  Open {p.name} Web
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                </a>
+                                {isSelected && (
+                                  <span className="text-emerald-400 font-bold flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3" /> Selected
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Download & Install helper banner */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-gradient-to-r from-[#FF6B2B]/15 to-[#FF884D]/10 border border-[#FF6B2B]/30 rounded-xl gap-2">
+                      <div>
+                        <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <Download className="w-4 h-4 text-[#FF884D]" />
+                          Download TextExtract Pro Bridge (v2.2.0 ZIP)
+                        </p>
+                        <p className="text-[11px] text-slate-300">
+                          Autonomous multi-page digitizer · Gemini, DeepSeek, ChatGPT & Claude
+                        </p>
+                      </div>
+                      <a
+                        href="/textextract-pro-bridge.zip"
+                        download="textextract-pro-bridge.zip"
+                        className="px-3.5 py-1.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] hover:opacity-90 text-white text-xs font-bold rounded-lg shadow flex items-center gap-1.5 transition-all shrink-0"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download .ZIP
+                      </a>
+                    </div>
+
+                    {/* How to load extension guide */}
+                    <div className="p-3.5 bg-white/[0.02] border border-white/[0.06] rounded-xl space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-white">
+                        <span className="flex items-center gap-1.5">
+                          <Bot className="w-4 h-4 text-emerald-400" />
+                          How to load TextExtract Pro Bridge Extension:
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                          bridgeStatus.connected 
+                            ? 'bg-emerald-500/20 text-emerald-300' 
+                            : 'bg-amber-500/20 text-amber-300'
+                        }`}>
+                          {bridgeStatus.connected ? 'Extension Active ✓' : 'Setup Required'}
+                        </span>
+                      </div>
+
+                      <ol className="text-[11px] text-slate-300 space-y-1.5 list-decimal list-inside leading-relaxed">
+                        <li>
+                          Upar diye gaye button se <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge.zip</code> download karke <strong>Extract / Unzip</strong> karein (ya project ka <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge</code> folder use karein).
+                        </li>
+                        <li>
+                          Chrome me <code className="px-1.5 py-0.5 bg-white/10 rounded text-[#FF884D] font-mono">chrome://extensions</code> open karein aur top-right me <strong>Developer mode</strong> ON karein.
+                        </li>
+                        <li>
+                          <strong>Load unpacked</strong> par click karein aur <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge</code> folder select karein.
+                        </li>
+                        <li>
+                          Browser me apne pasandeeda model ka tab logged-in open rakhein (<a href={PROVIDERS.find(p => p.id === selectedProvider)?.url} target="_blank" rel="noreferrer" className="text-[#FF884D] underline font-bold">{PROVIDERS.find(p => p.id === selectedProvider)?.name}</a>).
+                        </li>
+                      </ol>
+
+                      <div className="pt-2 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={checkBridge}
+                          disabled={isCheckingBridge}
+                          className="flex-1 flex items-center justify-center gap-2 py-2 bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.1] text-white rounded-xl text-xs font-bold transition-all"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isCheckingBridge ? 'animate-spin' : ''}`} />
+                          {isCheckingBridge ? 'Checking Extension...' : 'Test / Check Extension Connection'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleResetSession}
+                          className="px-3 py-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-slate-300 rounded-xl text-xs font-semibold transition-all"
+                          title="Clear active chat thread"
+                        >
+                          Reset Session
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Chrome Google AI Studio Key */}
                 {activeTab === 'chrome_key' && (
                   <div className="space-y-3.5">
                     <div className="p-3.5 bg-gradient-to-r from-white/[0.03] to-white/[0.01] border border-white/[0.08] rounded-xl space-y-2.5">

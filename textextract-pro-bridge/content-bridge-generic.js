@@ -1,10 +1,10 @@
 /**
  * TextExtract Pro Bridge — generic content script for DeepSeek / ChatGPT / Claude
- * Version: 2.1.0
+ * Version: 2.2.0
  */
 
 (function () {
-  const EXT_VER = "2.1.0";
+  const EXT_VER = "2.2.0";
   if (window.__tfStudyAiGenericVer === EXT_VER) return;
   window.__tfStudyAiGenericVer = EXT_VER;
   const LOG = (...a) => console.log("[TextExtract Bridge Gen]", ...a);

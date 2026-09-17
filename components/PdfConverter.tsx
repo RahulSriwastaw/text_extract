@@ -16,6 +16,9 @@ import GeminiConnectModal from './GeminiConnectModal';
 import GeminiSettingsModal from './GeminiSettingsModal';
 import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { saveExtractedDocument } from '../services/aiDbService';
+import { useAuthState } from 'react-firebase-hooks/auth';
+import { auth } from '../services/firebase';
+import { addHistoryItem, getHistoryItems, deleteHistoryItem, clearAllHistory } from '../services/historyService';
 import { 
   extractWithStudyAiBridge, 
   captureFromStudyAiBridge,
@@ -53,6 +56,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const [includeImages, setIncludeImages] = useState<boolean>(false);
   const [optionArrangement, setOptionArrangement] = useState<OptionArrangement>(OptionArrangement.VERTICAL);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [user] = useAuthState(auth);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(true);
@@ -130,7 +134,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     setUserGeminiAuth({ isAuthenticated: auth.isAuthenticated, authType: auth.authType });
   };
 
-  // Load history on mount
+  // Load history on mount (device-local fallback)
   useEffect(() => {
     const savedHistory = localStorage.getItem('conversion_history');
     if (savedHistory) {
@@ -138,7 +142,15 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     }
   }, []);
 
-  // Save history to localStorage
+  // When signed in, pull cloud history and use it as the source of truth
+  useEffect(() => {
+    if (!user) return;
+    getHistoryItems(user.uid)
+      .then((items) => setHistory(items))
+      .catch((e) => console.error('[history] Failed to load cloud history:', e));
+  }, [user]);
+
+  // Save history to localStorage (always, so logged-out usage still works)
   useEffect(() => {
     try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
   }, [history]);
@@ -159,7 +171,15 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         };
 
         const docId = generateId();
-        setHistory(prev => [{ ...newItem, id: docId } as HistoryItem, ...prev].slice(0, 20));
+        const fullHistoryItem = { ...newItem, id: docId } as HistoryItem;
+        setHistory(prev => [fullHistoryItem, ...prev].slice(0, 20));
+
+        // Sync to the user's cloud account so history survives across devices
+        if (user) {
+          addHistoryItem(user.uid, fullHistoryItem).catch((e) =>
+            console.error('[history] Failed to save to cloud:', e)
+          );
+        }
 
         // Save to browser IndexedDB (100% local device storage)
         const fullText = completedElements.map(e => e.type === 'text' ? (e.content || '') : '').join('\n\n');
@@ -915,6 +935,16 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
   const handleDeleteHistoryItem = (id: string) => {
     setHistory(prev => prev.filter(item => item.id !== id));
+    if (user) {
+      deleteHistoryItem(user.uid, id).catch((e) => console.error('[history] Failed to delete from cloud:', e));
+    }
+  };
+
+  const handleClearAllHistory = () => {
+    setHistory([]);
+    if (user) {
+      clearAllHistory(user.uid).catch((e) => console.error('[history] Failed to clear cloud history:', e));
+    }
   };
 
   const hasCompletedPages = pages.some(p => p.status === 'done' && (p.extractedText || p.elements));
@@ -1635,7 +1665,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           onClose={() => setIsHistoryOpen(false)}
           onSelectItem={handleSelectHistoryItem}
           onDeleteItem={handleDeleteHistoryItem}
-          onClearAll={() => setHistory([])}
+          onClearAll={handleClearAllHistory}
         />
 
         <McqSidebar 

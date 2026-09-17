@@ -169,6 +169,10 @@ export function pingStudyAiExtension(timeoutMs = 1500): Promise<BridgeStatus> {
       if (!resolved) {
         resolved = true;
         cleanup();
+        console.warn(
+          '[TextExtract Bridge] No PONG received within', timeoutMs, 'ms. Either the extension is not installed/enabled, ' +
+          'or it needs a reload (chrome://extensions) + a hard refresh of this tab. Open DevTools console for "[TextExtract Bridge]" logs from the extension itself.'
+        );
         resolve({ ...cachedStatus, connected: false });
       }
     }, timeoutMs);

@@ -1,10 +1,10 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.1.0
+ * Version: 2.2.0
  */
 
 (function() {
-  const EXT_VER = "2.1.0";
+  const EXT_VER = "2.2.0";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   window.__tfStudyAiGeminiVer = EXT_VER;
   window.__tfStudyAiGeminiBound = true;

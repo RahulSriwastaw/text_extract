@@ -7,6 +7,7 @@ import GeminiConnectModal from './GeminiConnectModal';
 import AiHistoryDrawer from './AiHistoryDrawer';
 import GeminiSettingsModal from './GeminiSettingsModal';
 import MocktestStudioModal from './MocktestStudioModal';
+import LoginButton from './LoginButton';
 
 interface NavbarProps {
   totalKeys?: number;
@@ -188,6 +189,9 @@ const Navbar: React.FC<NavbarProps> = ({
               >
                 <Settings className="w-3.5 h-3.5" />
               </button>
+
+              {/* Login / Account */}
+              <LoginButton />
             </div>
           </div>
         </div>

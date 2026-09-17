@@ -4,8 +4,11 @@ import MocktestExtractor from './components/MocktestExtractor';
 import QaPageStitcher from './components/QaPageStitcher';
 import ErrorBoundary from './components/ErrorBoundary';
 import LandingPage from './components/LandingPage';
+import LoginPage from './components/LoginPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
+import { useCurrentUser } from './services/authService';
+import { Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export type ActiveTool = 'landing' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
@@ -14,12 +17,13 @@ function App() {
   const [activeTool, setActiveTool] = useState<ActiveTool>('landing');
   const [isAdmin, setIsAdmin] = useState(false);
   const [preloadedPages, setPreloadedPages] = useState<string[]>([]);
+  const [user, authLoading] = useCurrentUser();
 
   useEffect(() => {
     // Check for admin path or param
     const isPathAdmin = window.location.pathname === '/admin-secure-v3-panel-x92';
     const params = new URLSearchParams(window.location.search);
-    
+
     if (isPathAdmin || params.get('admin') === 'true') {
       setIsAdmin(true);
     }
@@ -29,6 +33,28 @@ function App() {
     return (
       <ErrorBoundary>
         <AdminPanel />
+      </ErrorBoundary>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0B0D13] flex items-center justify-center">
+        <motion.div
+          animate={{ scale: [1, 1.08, 1], opacity: [0.7, 1, 0.7] }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+          className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] flex items-center justify-center shadow-lg shadow-[#FF6B2B]/30"
+        >
+          <Sparkles className="w-7 h-7 text-white" />
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <ErrorBoundary>
+        <LoginPage />
       </ErrorBoundary>
     );
   }

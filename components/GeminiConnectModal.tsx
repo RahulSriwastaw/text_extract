@@ -18,8 +18,7 @@ import {
   Cpu,
   RefreshCw,
   MessageSquare,
-  Bot,
-  Download
+  Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAiSettings, saveAiSettings, clearAiCredentials, AiSettings } from '../services/aiDbService';
@@ -429,25 +428,17 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                       </div>
                     </div>
 
-                    {/* Download & Install helper banner */}
+                    {/* Manual distribution notice (no public download) */}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-gradient-to-r from-[#FF6B2B]/15 to-[#FF884D]/10 border border-[#FF6B2B]/30 rounded-xl gap-2">
                       <div>
                         <p className="text-xs font-bold text-white flex items-center gap-1.5">
-                          <Download className="w-4 h-4 text-[#FF884D]" />
-                          Download TextExtract Pro Bridge (v2.2.0 ZIP)
+                          <Bot className="w-4 h-4 text-[#FF884D]" />
+                          TextExtract Pro Bridge Extension
                         </p>
                         <p className="text-[11px] text-slate-300">
-                          Autonomous multi-page digitizer · Gemini, DeepSeek, ChatGPT & Claude
+                          Yeh extension public download ke liye available nahi hai. Extension file hamari team se manually lein, phir neeche diye steps follow karein.
                         </p>
                       </div>
-                      <a
-                        href="/textextract-pro-bridge.zip"
-                        download="textextract-pro-bridge.zip"
-                        className="px-3.5 py-1.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] hover:opacity-90 text-white text-xs font-bold rounded-lg shadow flex items-center gap-1.5 transition-all shrink-0"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Download .ZIP
-                      </a>
                     </div>
 
                     {/* How to load extension guide */}
@@ -468,7 +459,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
 
                       <ol className="text-[11px] text-slate-300 space-y-1.5 list-decimal list-inside leading-relaxed">
                         <li>
-                          Upar diye gaye button se <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge.zip</code> download karke <strong>Extract / Unzip</strong> karein (ya project ka <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge</code> folder use karein).
+                          Hamari team se mili <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge</code> extension file ko <strong>Extract / Unzip</strong> karein.
                         </li>
                         <li>
                           Chrome me <code className="px-1.5 py-0.5 bg-white/10 rounded text-[#FF884D] font-mono">chrome://extensions</code> open karein aur top-right me <strong>Developer mode</strong> ON karein.

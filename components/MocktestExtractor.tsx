@@ -1667,37 +1667,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
         {/* Row 2: Streamlined AI Engine, Provider & Concurrency Strip */}
         <div className="p-2.5 rounded-xl bg-black/40 border border-white/[0.06] flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-          {/* Left: Engine Switcher */}
+          {/* Left: Mode Switcher */}
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Engine:</span>
-            <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
-              <button
-                type="button"
-                onClick={() => setAiEngine('bridge')}
-                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                  aiEngine === 'bridge'
-                    ? 'bg-emerald-500 text-black shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Zap className="w-3 h-3" />
-                <span>Extension Bridge</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAiEngine('api')}
-                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                  aiEngine === 'api'
-                    ? 'bg-blue-500 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Key className="w-3 h-3" />
-                <span>Direct Gemini API</span>
-              </button>
-            </div>
-
-            <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
 
             {/* Mode Switcher: Exact PDF vs Reference Mode (New Questions) */}
             <div className="flex items-center gap-1.5">
@@ -1732,60 +1703,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
               </div>
             </div>
 
-            {/* Provider / Bridge / API Controls */}
-            {aiEngine === 'bridge' ? (
-              <div className="flex items-center gap-2">
-                <select
-                  value={selectedProvider}
-                  onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
-                  className="px-2 py-0.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-300 font-bold focus:outline-none"
-                >
-                  <option value="gemini">Gemini</option>
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="chatgpt">ChatGPT</option>
-                  <option value="claude">Claude</option>
-                </select>
-
-                {bridgeStatus.connected ? (
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-md text-[11px] font-bold">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Connected
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setAiEngine('api')}
-                      className="text-[10px] text-slate-500 hover:text-rose-400 underline transition-colors"
-                      title="Disconnect Bridge"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowConnectModal(true)}
-                    className="px-2.5 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold rounded-lg text-xs transition-all"
-                  >
-                    Connect Bridge
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-blue-400 font-medium flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Direct API Active
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowSettingsModal(true)}
-                  className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 rounded-lg text-[11px] font-semibold transition-all"
-                >
-                  <Settings className="w-3 h-3" />
-                  <span>Configure Key</span>
-                </button>
-              </div>
-            )}
+            {/* Provider / API Controls */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-blue-400 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Direct API Active
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(true)}
+                className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 rounded-lg text-[11px] font-semibold transition-all"
+              >
+                <Settings className="w-3 h-3" />
+                <span>Configure Key</span>
+              </button>
+            </div>
           </div>
 
           {/* Right: Parallel Batch & One-Shot Toggle */}

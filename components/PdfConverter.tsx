@@ -69,8 +69,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const [totalKeys, setTotalKeys] = useState(1);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressData | null>(null);
 
-  // Study AI Chrome Extension Bridge state
-  const [aiEngine, setAiEngine] = useState<'extension' | 'api'>('extension');
+  // Study AI Chrome Extension Bridge state (kept for internal/dev use; not offered publicly)
+  const [aiEngine, setAiEngine] = useState<'extension' | 'api'>('api');
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
   const [bridgeProgressMsg, setBridgeProgressMsg] = useState<string | null>(null);
   const isUsingBridge = aiEngine === 'extension' && bridgeStatus.connected;
@@ -989,10 +989,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
               <button 
                 onClick={() => setShowGeminiConnect(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[#FF6B2B]/15 hover:bg-[#FF6B2B]/25 border border-[#FF6B2B]/30 text-[#FF884D] rounded-[6px] transition-colors shadow-sm"
-                title="Connect AI Bridge or Gemini account"
+                title="Connect your Gemini account"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Connect AI Engine (Free)</span>
+                <span>Connect AI Engine</span>
               </button>
             )}
           </div>
@@ -1313,68 +1313,6 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
                                 {appState !== AppState.ANALYZING ? (
                                     <div className="flex flex-wrap items-center gap-2 flex-1 sm:flex-none">
-                                        {/* AI Engine Switcher */}
-                                        <div className="flex items-center gap-1 p-1 bg-white/[0.03] border border-white/[0.08] rounded-xl">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setAiEngine('extension');
-                                                    if (!bridgeStatus.connected) {
-                                                        setShowGeminiConnect(true);
-                                                    }
-                                                }}
-                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                                    aiEngine === 'extension'
-                                                        ? bridgeStatus.connected
-                                                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow'
-                                                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                                        : 'text-slate-400 hover:text-white'
-                                                }`}
-                                                title={bridgeStatus.connected ? "Zero Token Extension Mode Active" : "Extension not detected - click to connect"}
-                                            >
-                                                <Bot className="w-3.5 h-3.5" />
-                                                <span className="hidden sm:inline">Free Bridge</span>
-                                                <span className={`text-[9px] px-1 py-0.2 rounded font-bold ${bridgeStatus.connected ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                                                    {bridgeStatus.connected ? '0 Tokens' : 'Connect'}
-                                                </span>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setAiEngine('api')}
-                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                                    aiEngine === 'api'
-                                                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white shadow'
-                                                        : 'text-slate-400 hover:text-white'
-                                                }`}
-                                                title="Direct Gemini API (Uses API Keys)"
-                                            >
-                                                <Zap className="w-3.5 h-3.5" />
-                                                <span className="hidden sm:inline">API Mode</span>
-                                            </button>
-                                        </div>
-
-                                        {/* AI Model Selector for Free Bridge */}
-                                        {aiEngine === 'extension' && (
-                                            <div className="flex items-center gap-1.5 px-2 py-1 bg-white/[0.03] border border-white/[0.08] rounded-xl">
-                                                <span className="text-[10px] text-slate-400 font-bold uppercase hidden md:inline">Model:</span>
-                                                <select
-                                                    value={getStoredAiProvider()}
-                                                    onChange={(e) => {
-                                                        const newModel = e.target.value as AiProvider;
-                                                        setStoredAiProvider(newModel);
-                                                        setBridgeStatus(prev => ({ ...prev, provider: newModel }));
-                                                    }}
-                                                    className="bg-[#0B0D13] border border-emerald-500/30 text-emerald-300 text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-400 cursor-pointer"
-                                                    title="Select AI Model (Gemini, DeepSeek, ChatGPT, Claude)"
-                                                >
-                                                    <option value="gemini" className="bg-[#121524] text-white">⚡ Gemini Web</option>
-                                                    <option value="deepseek" className="bg-[#121524] text-white">🧠 DeepSeek Web</option>
-                                                    <option value="chatgpt" className="bg-[#121524] text-white">💬 ChatGPT Web</option>
-                                                    <option value="claude" className="bg-[#121524] text-white">🎭 Claude Web</option>
-                                                </select>
-                                            </div>
-                                        )}
-
                                         <label className="px-3.5 py-2 text-slate-200 bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all">
                                             <Plus className="w-4 h-4 text-[#FF6B2B]" />
                                             ADD

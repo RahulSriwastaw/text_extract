@@ -141,11 +141,30 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     }
   }, []);
 
-  // When signed in, pull cloud history and use it as the source of truth
+  // When signed in, merge cloud history with whatever is already showing
+  // (e.g. items saved locally before login) instead of blindly overwriting
+  // it — an empty/slow cloud fetch must never wipe out visible history.
   useEffect(() => {
     if (!user) return;
     getHistoryItems(user.uid)
-      .then((items) => setHistory(items))
+      .then((cloudItems) => {
+        setHistory((localItems) => {
+          const cloudIds = new Set(cloudItems.map((i) => i.id));
+          const localOnly = localItems.filter((i) => !cloudIds.has(i.id));
+
+          // Anything that only exists locally (e.g. saved before this login)
+          // gets pushed up to the cloud so it isn't lost on the next device.
+          localOnly.forEach((item) => {
+            addHistoryItem(user.uid, item).catch((e) =>
+              console.error('[history] Failed to migrate local item to cloud:', e)
+            );
+          });
+
+          return [...cloudItems, ...localOnly]
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+            .slice(0, 20);
+        });
+      })
       .catch((e) => console.error('[history] Failed to load cloud history:', e));
   }, [user]);
 

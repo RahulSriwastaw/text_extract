@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Layers, History, Settings, CheckCircle2, Shield, Bot, Zap, FileSpreadsheet, FileText, Split } from 'lucide-react';
+import { Sparkles, Layers, History, Settings, CheckCircle2, Shield, Bot, Zap, FileSpreadsheet, FileText, Split, LayoutGrid } from 'lucide-react';
 import { motion } from 'motion/react';
 import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { subscribeToExtensionStatus, pingStudyAiExtension, BridgeStatus } from '../services/studyAiBridgeService';
@@ -9,10 +9,12 @@ import GeminiSettingsModal from './GeminiSettingsModal';
 import MocktestStudioModal from './MocktestStudioModal';
 import LoginButton from './LoginButton';
 
+type NavTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
+
 interface NavbarProps {
   totalKeys?: number;
-  activeTool?: 'landing' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
-  onSelectTool?: (tool: 'landing' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher') => void;
+  activeTool?: NavTool;
+  onSelectTool?: (tool: NavTool) => void;
 }
 
 const Navbar: React.FC<NavbarProps> = ({ 
@@ -72,6 +74,20 @@ const Navbar: React.FC<NavbarProps> = ({
 
             {/* Middle Mode Switcher Tabs (Segmented Control) */}
             <div className="flex items-center p-1 bg-black/60 border border-white/[0.08] rounded-xl gap-0.5 shadow-inner">
+              <button
+                type="button"
+                onClick={() => onSelectTool?.('tools')}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                  activeTool === 'tools'
+                    ? 'bg-white text-black shadow-md font-bold'
+                    : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">All Tools</span>
+                <span className="sm:hidden">Tools</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => onSelectTool?.('text-converter')}

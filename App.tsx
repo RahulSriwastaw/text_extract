@@ -4,6 +4,7 @@ import MocktestExtractor from './components/MocktestExtractor';
 import QaPageStitcher from './components/QaPageStitcher';
 import ErrorBoundary from './components/ErrorBoundary';
 import LandingPage from './components/LandingPage';
+import ToolsPage from './components/ToolsPage';
 import LoginPage from './components/LoginPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
@@ -11,7 +12,7 @@ import { useCurrentUser } from './services/authService';
 import { Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-export type ActiveTool = 'landing' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
+export type ActiveTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
 
 function App() {
   const [activeTool, setActiveTool] = useState<ActiveTool>('landing');
@@ -74,7 +75,21 @@ function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
-              <LandingPage 
+              <LandingPage
+                onExploreTools={() => setActiveTool('tools')}
+              />
+            </motion.div>
+          )}
+
+          {activeTool === 'tools' && (
+            <motion.div
+              key="tools"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <ToolsPage
+                onBack={() => setActiveTool('landing')}
                 onStartTextConverter={() => setActiveTool('text-converter')}
                 onStartMcqExtractor={() => setActiveTool('mcq-extractor')}
                 onStartQaStitcher={() => setActiveTool('qa-stitcher')}

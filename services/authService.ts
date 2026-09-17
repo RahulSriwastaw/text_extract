@@ -1,4 +1,5 @@
-import { signInWithPopup, signOut, User } from 'firebase/auth';
+import { useEffect, useState } from 'react';
+import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db, googleProvider } from './firebase';
 
@@ -11,6 +12,7 @@ export interface UserProfile {
 }
 
 async function ensureUserProfile(user: User): Promise<void> {
+  if (!db) return;
   const ref = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
 
@@ -32,6 +34,9 @@ async function ensureUserProfile(user: User): Promise<void> {
 }
 
 export async function signInWithGoogle(): Promise<User> {
+  if (!auth) {
+    throw new Error('Login is not configured on this deployment yet.');
+  }
   const result = await signInWithPopup(auth, googleProvider);
   try {
     await ensureUserProfile(result.user);
@@ -42,5 +47,34 @@ export async function signInWithGoogle(): Promise<User> {
 }
 
 export async function signOutUser(): Promise<void> {
+  if (!auth) return;
   await signOut(auth);
+}
+
+/**
+ * Safe replacement for react-firebase-hooks' useAuthState: that hook reads
+ * `auth.currentUser` synchronously, which throws if `auth` is null (i.e. when
+ * Firebase env vars aren't configured on this deployment).
+ */
+export function useCurrentUser(): [User | null, boolean] {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(!!auth);
+
+  useEffect(() => {
+    if (!auth) {
+      setLoading(false);
+      return;
+    }
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (u) => {
+        setUser(u);
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+    return unsubscribe;
+  }, []);
+
+  return [user, loading];
 }

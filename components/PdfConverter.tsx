@@ -16,8 +16,7 @@ import GeminiConnectModal from './GeminiConnectModal';
 import GeminiSettingsModal from './GeminiSettingsModal';
 import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { saveExtractedDocument } from '../services/aiDbService';
-import { useAuthState } from 'react-firebase-hooks/auth';
-import { auth } from '../services/firebase';
+import { useCurrentUser } from '../services/authService';
 import { addHistoryItem, getHistoryItems, deleteHistoryItem, clearAllHistory } from '../services/historyService';
 import { 
   extractWithStudyAiBridge, 
@@ -56,7 +55,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const [includeImages, setIncludeImages] = useState<boolean>(false);
   const [optionArrangement, setOptionArrangement] = useState<OptionArrangement>(OptionArrangement.VERTICAL);
   const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [user] = useAuthState(auth);
+  const [user] = useCurrentUser();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(true);

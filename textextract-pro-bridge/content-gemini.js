@@ -909,83 +909,47 @@
   function scrapeBestReply(preferLast, minIndex = 0, expectedMarker = null) {
     const nodes = getModelResponseNodes();
     
-    // Priority 1: If expectedMarker is provided, search all candidate nodes (from newest backwards) for this exact marker!
+    // Priority 1: When expectedMarker is specified, strictly check if candidate turns have reached completion!
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
       const candidates = (nodes.length > minIndex) ? nodes.slice(minIndex) : nodes;
       for (let i = candidates.length - 1; i >= 0; i--) {
         const turn = candidates[i];
         const turnText = (turn.innerText || turn.textContent || "").trim();
         if (turnText.includes(expectedMarker)) {
-          const codeBlocks = deepQueryAll("code-block, pre, code, [class*='code']", turn);
-          for (let c = codeBlocks.length - 1; c >= 0; c--) {
-            const cText = (codeBlocks[c].innerText || codeBlocks[c].textContent || "").trim();
-            if (cText.length > 20) {
-              const qs = extractQuestionsFromText(cText);
-              if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-            }
-          }
-          const qs = extractQuestionsFromText(turnText);
-          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-          const j = extractJsonCandidate(turnText);
-          if (j) return j;
+          // Model outputted the completion marker! Return complete raw text so caller can extract all MCQs!
           return turnText;
         }
       }
-    }
-
-    // When extracting for a subsequent page (minIndex > 0), focus STRICTLY on turns >= minIndex
-    if (nodes.length > minIndex) {
-      const newNodes = nodes.slice(minIndex);
-      for (let i = newNodes.length - 1; i >= 0; i--) {
-        const turn = newNodes[i];
-        const codeBlocks = deepQueryAll("code-block, pre, code, [class*='code']", turn);
-        for (let c = codeBlocks.length - 1; c >= 0; c--) {
-          const cText = (codeBlocks[c].innerText || codeBlocks[c].textContent || "").trim();
-          if (cText.length > 20) {
-            const qs = extractQuestionsFromText(cText);
-            if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-          }
-        }
-        const text = (turn.innerText || turn.textContent || "").trim();
-        if (text.length > 10) {
-          const qs = extractQuestionsFromText(text);
-          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-          const j = extractJsonCandidate(text);
-          if (j) return j;
-        }
-      }
-      if (newNodes.length) {
-        const last = newNodes[newNodes.length - 1];
+      // If expectedMarker is not yet present, return the active streaming turn's RAW text.
+      // CRITICAL: NEVER return partial synthetic JSON while streaming, which causes premature termination!
+      if (nodes.length > minIndex) {
+        const last = nodes[nodes.length - 1];
         return (last.innerText || last.textContent || "").trim();
       }
+      return "";
     }
 
-    // If waiting for Page 2+ but the new turn has not yet rendered, DO NOT scrape old turns!
+    // When minIndex > 0 (subsequent page), return raw text of turns >= minIndex
+    if (nodes.length > minIndex) {
+      const last = nodes[nodes.length - 1];
+      return (last.innerText || last.textContent || "").trim();
+    }
+
+    // If waiting for Page 2+ but new turn has not yet rendered, do NOT scrape old turns!
     if (minIndex > 0) {
       return "";
     }
 
     // Fallback for initial chat or when model-response tag isn't recognized
+    if (nodes.length) {
+      const last = nodes[nodes.length - 1];
+      return (last.innerText || last.textContent || "").trim();
+    }
+
     const codeNodes = [ ...deepQueryAll("code-block"), ...deepQueryAll("code"), ...deepQueryAll("pre"), ...deepQueryAll('[class*="code"]') ];
     const codeTexts = codeNodes.map(n => (n.innerText || n.textContent || "").trim()).filter(t => t.length > 10 && !isOurPromptText(t));
     if (codeTexts.length) {
-      for (let i = codeTexts.length - 1; i >= 0; i--) {
-        const qs = extractQuestionsFromText(codeTexts[i]);
-        if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-      }
       return codeTexts[codeTexts.length - 1];
-    }
-
-    if (nodes.length) {
-      const texts = nodes.map(n => (n.innerText || n.textContent || "").trim()).filter(t => t.length > 20 && !isOurPromptText(t));
-      if (texts.length) {
-        for (let i = texts.length - 1; i >= 0; i--) {
-          const qs = extractQuestionsFromText(texts[i]);
-          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-          if (extractJsonCandidate(texts[i])) return texts[i];
-        }
-        return texts[texts.length - 1];
-      }
     }
 
     const main = document.querySelector("main") || document.querySelector("chat-app-orchestrator") || document.body;
@@ -1093,23 +1057,27 @@
 
         // Criterion 1: Completion marker found AND not generating AND at least 2.5s stillness
         if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2500) {
-          const j = extractJsonCandidate(blob) || "[]";
+          const qs = extractQuestionsFromText(blob);
+          const finalJson = qs.length ? JSON.stringify(qs, null, 2) : (extractJsonCandidate(blob) || "[]");
           cleanup();
-          progress(requestId, "done", `Completion marker verified — complete response captured (${blob.length} chars)`, adminTabId);
-          return resolve(j + "\n" + (expectedMarker || COMPLETE_MARKER));
+          progress(requestId, "done", `All ${qs.length} MCQs completely captured (${blob.length} chars)`, adminTabId);
+          return resolve(finalJson + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
-        // Criterion 2: Balanced JSON array AND not generating AND at least 6s of complete stillness
-        const isBalanced = isJsonCompleteAndBalanced(blob);
-        const json = extractJsonCandidate(blob);
-        if (isBalanced && json && json !== "[]" && stillDurationMs >= 6000) {
-          cleanup();
-          progress(requestId, "done", `Complete balanced JSON captured (${json.length} chars)`, adminTabId);
-          return resolve(json);
+        // Criterion 2: Balanced JSON array AND not generating AND at least 10s of complete stillness
+        // CRITICAL: If expectedMarker is expected, NEVER resolve early via Criterion 2! The model was instructed to output the marker at the very end of all questions!
+        if (!expectedMarker) {
+          const isBalanced = isJsonCompleteAndBalanced(blob);
+          const json = extractJsonCandidate(blob);
+          if (isBalanced && json && json !== "[]" && stillDurationMs >= 10000) {
+            cleanup();
+            progress(requestId, "done", `Complete balanced JSON captured (${json.length} chars)`, adminTabId);
+            return resolve(json);
+          }
         }
 
-        // While text changed recently (< 6.0 seconds), keep waiting for next chunk
-        if (stillDurationMs < 6000) {
+        // While text changed recently (< 8.0 seconds), keep waiting for next chunk
+        if (stillDurationMs < 8000) {
           if (Date.now() - lastProgressAt > 2000) {
             lastProgressAt = Date.now();
             progress(requestId, "stream", `Verifying output stability… (${blob.length} chars, still ${Math.round(stillDurationMs / 1000)}s)`, adminTabId);
@@ -1117,24 +1085,25 @@
           return;
         }
 
-        // Criterion 3 (Fallback): Only after 15 full seconds of absolute stillness without generating
-        if (stillDurationMs >= 15000 && blob.length > 50) {
+        // Criterion 3 (Fallback): Only after 25 full seconds of absolute stillness without generating
+        if (stillDurationMs >= 25000 && blob.length > 50) {
           cleanup();
-          if (json && json !== "[]") {
-            progress(requestId, "done", `Captured ${json.length} chars JSON (stream stabilized)`, adminTabId);
-            return resolve(json);
-          }
           const qs = extractQuestionsFromText(blob);
           if (qs.length) {
-            progress(requestId, "done", `Captured ${qs.length} MCQ objects (stream stabilized)`, adminTabId);
-            return resolve(JSON.stringify(qs));
+            progress(requestId, "done", `Captured all ${qs.length} MCQ objects (stream completed)`, adminTabId);
+            return resolve(JSON.stringify(qs, null, 2));
+          }
+          const json = extractJsonCandidate(blob);
+          if (json && json !== "[]") {
+            progress(requestId, "done", `Captured ${json.length} chars JSON (stream completed)`, adminTabId);
+            return resolve(json);
           }
           const objs = extractBalancedObjects(blob);
           if (objs.length) {
-            progress(requestId, "done", `Captured ${objs.length} objects (stream stabilized)`, adminTabId);
+            progress(requestId, "done", `Captured ${objs.length} objects (stream completed)`, adminTabId);
             return resolve(`[\n${objs.join(",\n")}\n]`);
           }
-          progress(requestId, "done", `Captured ${blob.length} chars reply (stream stabilized)`, adminTabId);
+          progress(requestId, "done", `Captured ${blob.length} chars reply (stream completed)`, adminTabId);
           return resolve(blob);
         }
       };

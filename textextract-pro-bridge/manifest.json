@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TextExtract Pro Bridge — AI Document Digitizer",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "High-performance multi-AI document & MCQ digitizer bridge for TextExtract (Gemini, ChatGPT, DeepSeek, Claude). 100% Free & Zero-Token.",
   "author": "TextExtract",
   "permissions": ["tabs", "scripting", "clipboardRead", "clipboardWrite", "storage"],

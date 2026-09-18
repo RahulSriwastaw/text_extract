@@ -617,13 +617,14 @@
       for (let i = candidates.length - 1; i >= 0; i--) {
         const text = (candidates[i].innerText || candidates[i].textContent || "").trim();
         if (text.includes(expectedMarker)) {
-          const qs = extractQuestionsFromText(text);
-          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-          const j = extractJsonCandidate(text);
-          if (j) return j;
           return text;
         }
       }
+      if (turns.length > minIndex) {
+        const last = turns[turns.length - 1];
+        return (last.innerText || last.textContent || "").trim();
+      }
+      return "";
     }
 
     if (turns.length > minIndex) {
@@ -716,13 +717,14 @@
       for (let i = candidates.length - 1; i >= 0; i--) {
         const t = (candidates[i].innerText || candidates[i].textContent || "").trim();
         if (t.includes(expectedMarker)) {
-          const qs = extractQuestionsFromText(t);
-          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
-          const j = extractJsonCandidate(t);
-          if (j) return j;
           return t;
         }
       }
+      if (turns.length > minIndex) {
+        const last = turns[turns.length - 1];
+        return (last.innerText || last.textContent || "").trim();
+      }
+      return "";
     }
 
     if (turns.length > minIndex) {
@@ -938,23 +940,27 @@
 
         // Criterion 1: Real completion marker + not generating + at least 2.5s stillness
         if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2500) {
-          const j = extractJsonCandidate(blob) || "[]";
+          const qs = extractQuestionsFromText(blob);
+          const finalJson = qs.length ? JSON.stringify(qs, null, 2) : (extractJsonCandidate(blob) || "[]");
           cleanup();
-          progress(requestId, "done", `Completion marker verified — complete (${blob.length} chars)`, adminTabId);
-          return resolve(j + "\n" + (expectedMarker || COMPLETE_MARKER));
+          progress(requestId, "done", `Completion marker verified — all ${qs.length} MCQs captured (${blob.length} chars)`, adminTabId);
+          return resolve(finalJson + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
-        // Criterion 2: Balanced JSON array + not generating + at least 6s of complete stillness
-        const isBalanced = isJsonCompleteAndBalanced(blob);
-        const json = extractJsonCandidate(blob);
-        if (isBalanced && json && json !== "[]" && stillDurationMs >= 6000) {
-          cleanup();
-          progress(requestId, "done", `Captured complete balanced JSON (${json.length} chars)`, adminTabId);
-          return resolve(json);
+        // Criterion 2: Balanced JSON array + not generating + at least 10s of complete stillness
+        // CRITICAL: If expectedMarker is expected, DO NOT exit early on Criterion 2!
+        if (!expectedMarker) {
+          const isBalanced = isJsonCompleteAndBalanced(blob);
+          const json = extractJsonCandidate(blob);
+          if (isBalanced && json && json !== "[]" && stillDurationMs >= 10000) {
+            cleanup();
+            progress(requestId, "done", `Captured complete balanced JSON (${json.length} chars)`, adminTabId);
+            return resolve(json);
+          }
         }
 
-        // Keep waiting while text changed recently (< 6.0s)
-        if (stillDurationMs < 6000) {
+        // Keep waiting while text changed recently (< 8.0s)
+        if (stillDurationMs < 8000) {
           if (Date.now() - lastProgressAt > 2000) {
             lastProgressAt = Date.now();
             progress(requestId, "stream", `Verifying output stability… (${blob.length} chars, still ${Math.round(stillDurationMs / 1000)}s)`, adminTabId);
@@ -962,9 +968,15 @@
           return;
         }
 
-        // Criterion 3 (Fallback): Only after 15 full seconds of stillness without generating
-        if (stillDurationMs >= 15000 && blob.length > 50) {
+        // Criterion 3 (Fallback): Only after 25 full seconds of stillness without generating
+        if (stillDurationMs >= 25000 && blob.length > 50) {
           cleanup();
+          const qs = extractQuestionsFromText(blob);
+          if (qs.length) {
+            progress(requestId, "done", `Captured all ${qs.length} MCQs (stream stabilized)`, adminTabId);
+            return resolve(JSON.stringify(qs, null, 2));
+          }
+          const json = extractJsonCandidate(blob);
           if (json && json !== "[]") {
             progress(requestId, "done", `Captured ${json.length} chars JSON (stream stabilized)`, adminTabId);
             return resolve(json);

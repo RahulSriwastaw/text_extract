@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { 
   X, Download, Sparkles, Plus, Trash2, Copy, Check, FileSpreadsheet, 
   Upload, Eye, Edit3, ChevronDown, ChevronUp, AlertCircle, AlertTriangle,
-  CheckCircle2, Loader2, BookOpen, Layers, ArrowUpDown, MessageSquare
+  CheckCircle2, Loader2, BookOpen, Layers, ArrowUpDown, MessageSquare, FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MockTestMcqItem, QuestionType, DifficultyLevel } from '../types';
@@ -21,6 +21,7 @@ import {
   autoRecoverItemOptionsFromStem,
   repairMockTestItemWithAi
 } from '../services/mocktestService';
+import { downloadMcqAsDocx } from '../services/mcqDocxService';
 
 interface MocktestStudioModalProps {
   isOpen: boolean;
@@ -47,6 +48,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
   const [isRepairingAll, setIsRepairingAll] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLevel>('medium');
+  const [isGeneratingDocx, setIsGeneratingDocx] = useState(false);
+  const [docxLang, setDocxLang] = useState<'hi' | 'en' | 'both'>('both');
   const [activeChatQuestion, setActiveChatQuestion] = useState<MockTestMcqItem | null>(null);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview');
@@ -219,6 +222,23 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
     downloadMockTestCsv(items, finalFileName, answerFormat);
   };
 
+  const handleDownloadDocx = async () => {
+    if (isGeneratingDocx || items.length === 0) return;
+    setIsGeneratingDocx(true);
+    try {
+      const safeBase = (setName || 'mocktest').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'mocktest';
+      await downloadMcqAsDocx(
+        items,
+        { language: docxLang, includeSolution: true, includeAnswer: true, setName },
+        `${safeBase}.docx`
+      );
+    } catch (e: any) {
+      alert(`DOCX generation failed: ${e?.message || e}`);
+    } finally {
+      setIsGeneratingDocx(false);
+    }
+  };
+
   const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -288,6 +308,29 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                 <Download className="w-3.5 h-3.5" />
                 Download CSV ({items.length})
               </button>
+
+              {/* DOCX Download with language selector */}
+              <div className="flex items-center gap-0">
+                <select
+                  value={docxLang}
+                  onChange={e => setDocxLang(e.target.value as 'hi' | 'en' | 'both')}
+                  className="h-8 px-2 text-[10px] font-bold bg-indigo-700/80 text-white border border-indigo-500/40 rounded-l-xl focus:outline-none cursor-pointer"
+                  title="Language for DOCX"
+                >
+                  <option value="both">Hi+En</option>
+                  <option value="hi">Hindi</option>
+                  <option value="en">English</option>
+                </select>
+                <button
+                  onClick={handleDownloadDocx}
+                  disabled={isGeneratingDocx || items.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-r-xl text-xs font-bold shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-50"
+                  title="Download as Word DOCX with native LaTeX math equations"
+                >
+                  {isGeneratingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                  {isGeneratingDocx ? 'Generating…' : 'Download DOCX'}
+                </button>
+              </div>
 
               <button
                 onClick={onClose}
@@ -954,6 +997,15 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
               >
                 <Download className="w-3.5 h-3.5" />
                 Export .CSV
+              </button>
+              <button
+                onClick={handleDownloadDocx}
+                disabled={isGeneratingDocx || items.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs transition-all disabled:opacity-50"
+                title="Download Word DOCX with LaTeX math"
+              >
+                {isGeneratingDocx ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
+                Export .DOCX
               </button>
             </div>
           </div>

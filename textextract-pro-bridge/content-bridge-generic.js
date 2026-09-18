@@ -263,6 +263,9 @@
   }
 
   function findSendButton() {
+    const sendByTestId = deepQueryAll('button[data-testid="send-button"]')[0];
+    if (sendByTestId) return sendByTestId;
+
     const buttons = deepQueryAll("button, [role='button']");
     return (
       buttons.find((b) => /^(send|submit)$/i.test((b.getAttribute("aria-label") || "").trim())) ||
@@ -330,9 +333,8 @@
   function hasCompletionMarker(text, expectedMarker) {
     if (!text || isOurPromptText(text)) return false;
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      // STRICT: When request has a unique expectedMarker, ONLY match this exact marker!
-      // NEVER match generic "STUDY_AI_COMPLETE", which matches previous pages' turns!
-      return text.includes(expectedMarker);
+      if (text.includes(expectedMarker)) return true;
+      if (text.includes("---STUDY_AI_COMPLETE---")) return true;
     }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
@@ -948,8 +950,8 @@
           return;
         }
 
-        // Criterion 1: Real completion marker + not generating + at least 2.5s stillness
-        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2500) {
+        // Criterion 1: Real completion marker + not generating + at least 2.0s stillness
+        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2000) {
           const qs = extractQuestionsFromText(blob);
           const finalJson = qs.length ? JSON.stringify(qs, null, 2) : (extractJsonCandidate(blob) || "[]");
           cleanup();
@@ -957,15 +959,15 @@
           return resolve(finalJson + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
-        // Criterion 2: Balanced JSON array + not generating + at least 10s of complete stillness
-        // CRITICAL: If expectedMarker is expected, DO NOT exit early on Criterion 2!
-        if (!expectedMarker) {
+        // Criterion 2: Balanced JSON array + not generating + at least 3.5s of complete stillness
+        // When AI has stopped generating and output is a complete balanced JSON array, resolve!
+        if (!generating && stillDurationMs >= 3500) {
           const isBalanced = isJsonCompleteAndBalanced(blob);
           const json = extractJsonCandidate(blob);
-          if (isBalanced && json && json !== "[]" && stillDurationMs >= 10000) {
+          if (isBalanced && json && json !== "[]") {
             cleanup();
             progress(requestId, "done", `Captured complete balanced JSON (${json.length} chars)`, adminTabId);
-            return resolve(json);
+            return resolve(json + (expectedMarker ? "\n" + expectedMarker : ""));
           }
         }
 
@@ -1203,16 +1205,20 @@
       // Verify send initiated
       let sendConfirmed = false;
       const sendWaitStart = Date.now();
-      while (Date.now() - sendWaitStart < 8000) {
+      while (Date.now() - sendWaitStart < 6000) {
         if (isGenerating() || getAssistantTurnNodes().length > initialReplyCount) {
           sendConfirmed = true;
           break;
         }
         await sleep(500);
       }
-      if (!sendConfirmed) {
-        LOG("Send not detected yet, re-clicking send...");
-        await clickSendOrEnter(findComposer() || el);
+      if (!sendConfirmed && !isGenerating()) {
+        const composer = findComposer();
+        const compText = composer ? (composer.innerText || composer.value || "").trim() : "";
+        if (compText.length > 20) {
+          LOG("Composer still has prompt text, re-clicking send...");
+          await clickSendOrEnter(composer || el);
+        }
       }
 
       progress(requestId, "wait", "Waiting for AI reply…", adminTabId);

@@ -1,12 +1,12 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.3.5
+ * Version: 2.3.6
  */
 
 (function() {
   const PAGE = "tf-study-ai";
   const EXT = "tf-study-ai-extension";
-  const VERSION = "2.3.5";
+  const VERSION = "2.3.6";
   const LOG = "[TextExtract Bridge]";
   let port = null;
   let portTimer = null;
@@ -95,7 +95,7 @@
     ensureKeepalive();
 
     if (!isExtensionValid()) {
-      console.warn(LOG, "chrome.runtime is invalid (extension was reloaded/updated). Refresh this page to reconnect.");
+      console.log(LOG, "chrome.runtime context invalidated (extension was reloaded/updated). Refresh page to reconnect.");
       if (data.type === "PING") {
         window.postMessage({
           source: EXT,
@@ -109,7 +109,7 @@
           type: "STUDY_AI_RESULT",
           requestId: data.requestId,
           ok: false,
-          error: "Extension context invalidated. Please refresh this web page."
+          error: "Extension was reloaded. Please refresh (F5) this webpage to reconnect."
         }, "*");
       }
       return;
@@ -122,7 +122,7 @@
         }, res => {
           const lastErr = chrome.runtime?.lastError;
           if (lastErr) {
-            console.warn(LOG, "background did not respond to STUDY_AI_PING:", lastErr.message);
+            console.log(LOG, "background did not respond to STUDY_AI_PING:", lastErr.message);
           } else {
             console.log(LOG, "background responded to PING, ok:", !!res?.ok, "version:", res?.version);
           }
@@ -136,7 +136,7 @@
           }, "*");
         });
       } catch (e) {
-        console.error(LOG, "sendMessage threw:", e && e.message);
+        console.log(LOG, "sendMessage threw:", e && e.message);
         window.postMessage({
           source: EXT,
           type: "PONG",

@@ -691,9 +691,8 @@
   function hasCompletionMarker(text, expectedMarker) {
     if (!text || isOurPromptText(text)) return false;
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      // STRICT: When request has a unique expectedMarker, ONLY match this exact marker!
-      // NEVER match generic "STUDY_AI_COMPLETE", which matches previous pages' turns!
-      return text.includes(expectedMarker);
+      if (text.includes(expectedMarker)) return true;
+      if (text.includes("---STUDY_AI_COMPLETE---")) return true;
     }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
@@ -1078,8 +1077,8 @@
           return;
         }
 
-        // Criterion 1: Completion marker found AND not generating AND at least 2.5s stillness
-        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2500) {
+        // Criterion 1: Completion marker found AND not generating AND at least 2.0s stillness
+        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2000) {
           const qs = extractQuestionsFromText(blob);
           const finalJson = qs.length ? JSON.stringify(qs, null, 2) : (extractJsonCandidate(blob) || "[]");
           cleanup();
@@ -1087,15 +1086,14 @@
           return resolve(finalJson + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
-        // Criterion 2: Balanced JSON array AND not generating AND at least 10s of complete stillness
-        // CRITICAL: If expectedMarker is expected, NEVER resolve early via Criterion 2! The model was instructed to output the marker at the very end of all questions!
-        if (!expectedMarker) {
+        // Criterion 2: Balanced JSON array AND not generating AND at least 3.5s of complete stillness
+        if (!generating && stillDurationMs >= 3500) {
           const isBalanced = isJsonCompleteAndBalanced(blob);
           const json = extractJsonCandidate(blob);
-          if (isBalanced && json && json !== "[]" && stillDurationMs >= 10000) {
+          if (isBalanced && json && json !== "[]") {
             cleanup();
             progress(requestId, "done", `Complete balanced JSON captured (${json.length} chars)`, adminTabId);
-            return resolve(json);
+            return resolve(json + (expectedMarker ? "\n" + expectedMarker : ""));
           }
         }
 

@@ -509,14 +509,21 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           prompt = `${prompt}\n\nRAW EXAM DOCUMENT TEXT TO EXTRACT:\n\`\`\`\n${page.rawTextContent}\n\`\`\``;
         }
 
+        const isJpeg = page.imageUrl?.startsWith('data:image/jpeg') || page.imageUrl?.includes('/9j/');
+        const imgExt = isJpeg ? 'jpg' : 'png';
+        const imgMime = isJpeg ? 'image/jpeg' : 'image/png';
+        const pageFileName = page.imageUrl
+          ? `mocktest_page_${page.pageNumber}.${imgExt}`
+          : `mocktest_page_${page.pageNumber}.txt`;
+
         const { rawText, elements } = await extractWithStudyAiBridge({
           base64Image: page.imageUrl || undefined,
-          fileName: page.fileName || `mocktest_page_${page.pageNumber}.txt`,
-          mimeType: page.imageUrl ? 'image/png' : 'text/plain',
+          fileName: pageFileName,
+          mimeType: page.imageUrl ? imgMime : 'text/plain',
           skipPdf: !page.imageUrl,
           prompt,
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
-          continueChat: pageIndex > 0,
+          continueChat: false,
           onProgress: (step, detail) => {
             const msg = detail || `${step.toUpperCase()}...`;
             setLiveStatusText(`[Page ${page.pageNumber}] ${msg}`);
@@ -528,9 +535,14 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         const startIndex = extractedMcqs.length + 1;
         rawExtractedItems = parseAiOutputToMockTestItems(rawText, setName, startIndex);
 
-        // 2. Fallback: if JSON parse produced nothing, convert elements
+        // 2. Fallback: if JSON parse produced nothing, convert elements only if real items exist
         if (rawExtractedItems.length === 0 && elements && elements.length > 0) {
           rawExtractedItems = convertElementsToMockTestItems(elements, setName);
+        }
+
+        // 3. Strict Check: If no MCQs found, do NOT insert dummy mock questions!
+        if (rawExtractedItems.length === 0) {
+          throw new Error(`Page ${page.pageNumber}: No MCQs could be extracted. Please check the page image.`);
         }
       } else {
         // Direct API mode

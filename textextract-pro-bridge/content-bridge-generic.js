@@ -323,8 +323,11 @@
     return streamIndicators.length > 0;
   }
 
-  function hasCompletionMarker(text) {
-    if (!text) return false;
+  function hasCompletionMarker(text, expectedMarker) {
+    if (!text || isOurPromptText(text)) return false;
+    if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
+      return text.includes(expectedMarker);
+    }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
            u.includes("STUDY_AI_COMPLETE") || 
@@ -587,25 +590,42 @@
   }
 
   function getAssistantTurnNodes() {
+    let turns = [];
     if (/deepseek\.com/i.test(location.href)) {
-      const ds = deepQueryAll(".ds-markdown, [class*='ds-markdown'], [class*='message-content']");
-      return ds.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+      turns = deepQueryAll(".ds-markdown, [class*='message-content']");
+    } else if (/chatgpt\.com/i.test(location.href)) {
+      turns = deepQueryAll('[data-message-author-role="assistant"], article [class*="agent-turn"]');
+    } else if (/claude\.ai/i.test(location.href)) {
+      turns = deepQueryAll('[data-is-streaming], [class*="font-claude-message"]');
+    } else {
+      turns = deepQueryAll('[data-message-author-role="assistant"], .markdown');
     }
-    if (/chatgpt\.com/i.test(location.href)) {
-      const turns = deepQueryAll('[data-message-author-role="assistant"], article [class*="agent-turn"], .markdown.prose');
-      return turns.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+    if (!turns.length) {
+      turns = deepQueryAll("pre code, pre");
     }
-    if (/claude\.ai/i.test(location.href)) {
-      const turns = deepQueryAll('[data-is-streaming], [class*="font-claude-message"], .standard-markdown');
-      return turns.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
-    }
-    const general = deepQueryAll('[data-message-author-role="assistant"], .markdown, .prose');
-    if (general.length) return general.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
-    return deepQueryAll("pre code, pre");
+    turns = turns.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+    // Filter out nested child nodes so 1 assistant response = 1 turn node
+    return turns.filter((node, idx, arr) => !arr.some(other => other !== node && other.contains(node)));
   }
 
-  function scrapeDeepSeek(minIndex = 0) {
+  function scrapeDeepSeek(minIndex = 0, expectedMarker = null) {
     const turns = getAssistantTurnNodes();
+    
+    // Priority 1: Match expectedMarker if provided
+    if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
+      const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : turns;
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        const text = (candidates[i].innerText || candidates[i].textContent || "").trim();
+        if (text.includes(expectedMarker)) {
+          const qs = extractQuestionsFromText(text);
+          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
+          const j = extractJsonCandidate(text);
+          if (j) return j;
+          return text;
+        }
+      }
+    }
+
     if (turns.length > minIndex) {
       const newTurns = turns.slice(minIndex);
       for (let i = newTurns.length - 1; i >= 0; i--) {
@@ -685,10 +705,26 @@
     return body;
   }
 
-  function scrapeBestReply(minIndex = 0) {
-    if (/deepseek\.com/i.test(location.href)) return scrapeDeepSeek(minIndex);
+  function scrapeBestReply(minIndex = 0, expectedMarker = null) {
+    if (/deepseek\.com/i.test(location.href)) return scrapeDeepSeek(minIndex, expectedMarker);
 
     const turns = getAssistantTurnNodes();
+
+    // Priority 1: Match expectedMarker if provided
+    if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
+      const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : turns;
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        const t = (candidates[i].innerText || candidates[i].textContent || "").trim();
+        if (t.includes(expectedMarker)) {
+          const qs = extractQuestionsFromText(t);
+          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
+          const j = extractJsonCandidate(t);
+          if (j) return j;
+          return t;
+        }
+      }
+    }
+
     if (turns.length > minIndex) {
       const newTurns = turns.slice(minIndex);
       for (let i = newTurns.length - 1; i >= 0; i--) {
@@ -826,7 +862,7 @@
     return seenSquareOpen && squareDepth === 0 && curlyDepth === 0;
   }
 
-  function waitForJsonReplyLive(timeoutMs, requestId, baseline, adminTabId, initialReplyCount = 0) {
+  function waitForJsonReplyLive(timeoutMs, requestId, baseline, adminTabId, initialReplyCount = 0, expectedMarker = null) {
     return new Promise((resolve, reject) => {
       let lastBlobText = "";
       let lastChangeTime = Date.now();
@@ -843,11 +879,11 @@
       const tick = () => {
         if (Date.now() - started > timeoutMs) {
           cleanup();
-          const blob = scrapeBestReply(initialReplyCount);
+          const blob = scrapeBestReply(initialReplyCount, expectedMarker);
           const j = extractJsonCandidate(blob);
           if (j && j !== "[]") return resolve(j);
           if (j === "[]" && hasStandaloneCompletion(blob)) {
-            return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
+            return resolve("```json\n[]\n```\n" + (expectedMarker || COMPLETE_MARKER));
           }
           if (j) return resolve(j);
           if (blob && blob.length > 80 && !isOurPromptText(blob)) return resolve(blob);
@@ -860,11 +896,16 @@
         const turns = getAssistantTurnNodes();
         const hasNewTurn = turns.length > initialReplyCount;
 
-        // If after 7 seconds no new turn appeared and not generating, retry clicking send
-        if (!hasNewTurn && !generating && Date.now() - started > 7000 && !sentRetryClick) {
-          sentRetryClick = true;
+        // Only retry send if prompt is still in composer (>30 chars), send button is enabled, and 20s elapsed without generating
+        if (!hasNewTurn && !generating && Date.now() - started > 20000 && !sentRetryClick) {
           const composer = findComposer();
-          if (composer) clickSendOrEnter(composer);
+          const compText = composer ? (composer.innerText || composer.value || "").trim() : "";
+          const sendBtn = findSendButton();
+          const sendDisabled = sendBtn?.disabled || sendBtn?.getAttribute("aria-disabled") === "true";
+          if (compText.length > 30 && sendBtn && !sendDisabled) {
+            sentRetryClick = true;
+            clickSendOrEnter(composer);
+          }
         }
 
         if (!hasNewTurn) {
@@ -875,7 +916,7 @@
           return;
         }
 
-        const blob = scrapeBestReply(initialReplyCount);
+        const blob = scrapeBestReply(initialReplyCount, expectedMarker);
         if (!blob) return;
 
         // Track text changes and stillness
@@ -896,13 +937,11 @@
         }
 
         // Criterion 1: Real completion marker + not generating + at least 2.5s stillness
-        if (hasCompletionMarker(blob) && stillDurationMs >= 2500) {
-          const j = extractJsonCandidate(blob);
-          if (!j || j === "[]") {
-            cleanup();
-            progress(requestId, "done", "Completion marker verified — complete", adminTabId);
-            return resolve("```json\n[]\n```\n" + COMPLETE_MARKER);
-          }
+        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2500) {
+          const j = extractJsonCandidate(blob) || "[]";
+          cleanup();
+          progress(requestId, "done", `Completion marker verified — complete (${blob.length} chars)`, adminTabId);
+          return resolve(j + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
         // Criterion 2: Balanced JSON array + not generating + at least 6s of complete stillness
@@ -950,14 +989,37 @@
   }
 
   async function pastePdf(job) {
-    if (!job?.fileBase64 || !job.fileName) return false;
+    if (!job?.fileBase64) return false;
     try {
       const raw = String(job.fileBase64).replace(/^data:[^;]+;base64,/, "");
+
+      // Auto-detect actual file type from binary signature
+      let detectedMime = job.mimeType || "image/png";
+      let detectedExt = "png";
+      if (raw.startsWith("/9j/") || raw.startsWith("/9J/")) {
+        detectedMime = "image/jpeg";
+        detectedExt = "jpg";
+      } else if (raw.startsWith("iVBORw")) {
+        detectedMime = "image/png";
+        detectedExt = "png";
+      } else if (raw.startsWith("JVBERi0")) {
+        detectedMime = "application/pdf";
+        detectedExt = "pdf";
+      } else if (raw.startsWith("UklGR")) {
+        detectedMime = "image/webp";
+        detectedExt = "webp";
+      }
+
+      let finalName = job.fileName || `page.${detectedExt}`;
+      if (detectedMime?.startsWith("image/") && (finalName.toLowerCase().endsWith(".txt") || !finalName.includes("."))) {
+        finalName = finalName.replace(/\.txt$/i, "") + `.${detectedExt}`;
+      }
+
       const binary = atob(raw);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const file = new File([bytes], job.fileName || "page.png", {
-        type: job.mimeType || "image/png",
+      const file = new File([bytes], finalName, {
+        type: detectedMime,
       });
 
       // Clear existing composer attachments if any
@@ -1082,7 +1144,8 @@
       progress(requestId, "send", "Sending…", adminTabId);
       await clickSendOrEnter(findComposer() || el);
       progress(requestId, "wait", "Waiting for AI reply…", adminTabId);
-      const text = await waitForJsonReplyLive(180000, requestId, baseline, adminTabId, initialReplyCount);
+      const expectedMarker = job.expectedMarker || msg.expectedMarker || null;
+      const text = await waitForJsonReplyLive(180000, requestId, baseline, adminTabId, initialReplyCount, expectedMarker);
       progress(requestId, "done", `Captured ${text.length} chars`, adminTabId);
       await reportSafe(requestId, text, adminTabId);
     } finally {

@@ -494,7 +494,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             mimeType: 'image/png',
             prompt,
             provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
-            continueChat: i > 0,
+            continueChat: false,
             onProgress: (step, detail) => {
               const msg = detail || `${step.toUpperCase()}...`;
               setBridgeProgressMsg(`Page ${i + 1}/${pagesToProcess.length}: ${msg}`);
@@ -675,7 +675,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           mimeType: 'image/png',
           prompt,
           provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
-          continueChat: true,
+          continueChat: false,
           onProgress: (_step, detail) => {
             setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: detail || undefined } : p));
           }

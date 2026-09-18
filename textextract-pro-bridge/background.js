@@ -1,6 +1,6 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.2.0
+ * Version: 2.3.1
  * Copyright (c) Shivajee Kumar. All rights reserved.
  */
 
@@ -24,14 +24,14 @@ const PROVIDERS = {
     home: "https://chatgpt.com/",
     match: [ "https://chatgpt.com/*", "https://chat.openai.com/*" ],
     script: "content-bridge-generic.js",
-    chatUrlOk: u => /(chatgpt\.com|chat\.openai\.com)/i.test(u || "")
+    chatUrlOk: u => /chatgpt\.com\/c\//i.test(u || "") || /chat\.openai\.com\/c\//i.test(u || "")
   },
   claude: {
     id: "claude",
     home: "https://claude.ai/new",
     match: [ "https://claude.ai/*" ],
     script: "content-bridge-generic.js",
-    chatUrlOk: u => /claude\.ai/i.test(u || "")
+    chatUrlOk: u => /claude\.ai\/chat\//i.test(u || "")
   }
 };
 
@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.2.0";
+const EXT_VERSION = "2.3.1";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 
@@ -158,6 +158,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const pdfKey = msg.fileName ? `${msg.fileName}:${(msg.fileBase64 || "").length}` : session.pdfKey;
         const job = {
           requestId: requestId,
+          expectedMarker: msg.expectedMarker || null,
           prompt: msg.prompt,
           fileName: skipPdf ? null : msg.fileName || null,
           fileBase64: skipPdf ? null : msg.fileBase64 || null,
@@ -453,11 +454,13 @@ async function kickBridge(tabId, requestId, type, adminTabId, extra = {}) {
   const payload = {
     type: type,
     requestId: requestId,
+    expectedMarker: job?.expectedMarker || extra.expectedMarker || null,
     adminTabId: adminTabId,
     provider: providerId,
     fullChat: !!(extra.fullChat || job?.fullChat),
     jobLite: job ? {
       prompt: job.prompt,
+      expectedMarker: job.expectedMarker || null,
       fileName: job.fileName,
       mimeType: job.mimeType,
       pdfOnClipboard: job.pdfOnClipboard,
@@ -469,6 +472,7 @@ async function kickBridge(tabId, requestId, type, adminTabId, extra = {}) {
       fileBase64: jobs.get(requestId)?.fileBase64 || job?.fileBase64 || null
     } : {
       adminTabId: adminTabId,
+      expectedMarker: extra.expectedMarker || null,
       fullChat: !!extra.fullChat,
       provider: providerId
     },

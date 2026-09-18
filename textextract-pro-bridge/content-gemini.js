@@ -126,11 +126,16 @@
   }
 
   function getModelResponseNodes() {
-    const list = deepQueryAll("model-response");
-    if (list.length) return list;
-    const byRole = deepQueryAll('[data-message-author-role="model"]');
-    if (byRole.length) return byRole;
-    return deepQueryAll(".model-response-text, .response-content");
+    let list = deepQueryAll("model-response");
+    if (!list.length) {
+      list = deepQueryAll('[data-message-author-role="model"]');
+    }
+    if (!list.length) {
+      list = deepQueryAll(".model-response-text, .response-content");
+    }
+    // Filter out prompt text and deduplicate nested child nodes to ensure 1 node per response turn
+    list = list.filter(m => !isOurPromptText(m.innerText || m.textContent || ""));
+    return list.filter((node, idx, arr) => !arr.some(other => other !== node && other.contains(node)));
   }
 
   function snapshotReplyFingerprint() {
@@ -199,7 +204,8 @@
       progress(requestId, "send", "Sending to Gemini…", adminTabId);
       await clickSendOrEnter(el);
       progress(requestId, "wait", "Waiting for Gemini reply…", adminTabId);
-      const text = await waitForJsonReplyLive(18e4, requestId, baseline, adminTabId, initialReplyCount);
+      const expectedMarker = job.expectedMarker || msg.expectedMarker || null;
+      const text = await waitForJsonReplyLive(18e4, requestId, baseline, adminTabId, initialReplyCount, expectedMarker);
       progress(requestId, "done", `Captured ${text.length} chars`, adminTabId);
       report(requestId, true, text, null, adminTabId);
     } finally {
@@ -337,11 +343,35 @@
   function base64ToFile(base64, fileName, mimeType) {
     try {
       const raw = String(base64).replace(/^data:[^;]+;base64,/, "");
+
+      // Auto-detect actual file type from binary signature
+      let detectedMime = mimeType;
+      let detectedExt = "png";
+      if (raw.startsWith("/9j/") || raw.startsWith("/9J/")) {
+        detectedMime = "image/jpeg";
+        detectedExt = "jpg";
+      } else if (raw.startsWith("iVBORw")) {
+        detectedMime = "image/png";
+        detectedExt = "png";
+      } else if (raw.startsWith("JVBERi0")) {
+        detectedMime = "application/pdf";
+        detectedExt = "pdf";
+      } else if (raw.startsWith("UklGR")) {
+        detectedMime = "image/webp";
+        detectedExt = "webp";
+      }
+
+      let finalName = fileName || `page.${detectedExt}`;
+      // CRITICAL: If the file is an image but fileName was mistakenly given .txt extension, fix it to real image extension!
+      if (detectedMime && detectedMime.startsWith("image/") && (finalName.toLowerCase().endsWith(".txt") || !finalName.includes("."))) {
+        finalName = finalName.replace(/\.txt$/i, "") + `.${detectedExt}`;
+      }
+
       const binary = atob(raw);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return new File([ bytes ], fileName || "paper.pdf", {
-        type: mimeType || "application/pdf"
+      return new File([ bytes ], finalName, {
+        type: detectedMime || "image/png"
       });
     } catch (e) {
       LOG("base64 fail", e);
@@ -386,26 +416,26 @@
     if (!file) return false;
 
     clearComposerAttachments();
-    await sleep(150);
+    await sleep(200);
 
     el.scrollIntoView({ block: "center" });
     el.click();
     el.focus();
     await sleep(200);
 
-    // 1. Try HTML5 native Drag & Drop directly on composer (works without clipboard permissions)
-    await tryDropFile(el, file);
-    await sleep(500);
-    if (await waitForAttachment(job.fileName, 2500)) return true;
-
-    // 2. Try native hidden file input assignment
+    // Method 1: Try native hidden file input assignment (most reliable & clean)
     const viaInput = await tryFileInputAssign(file);
     if (viaInput) {
-      await sleep(600);
-      if (await waitForAttachment(job.fileName, 3000)) return true;
+      if (await waitForAttachment(file.name, 4000)) return true;
     }
 
-    // 3. Try clipboard write + paste ONLY IF wroteClip succeeded with the NEW file
+    // Method 2: Try HTML5 native Drag & Drop directly on composer
+    const dropped = await tryDropFile(el, file);
+    if (dropped) {
+      if (await waitForAttachment(file.name, 4000)) return true;
+    }
+
+    // Method 3: Try clipboard write + paste ONLY IF not yet attached
     let wroteClip = false;
     const fileMime = file.type || "image/png";
     try {
@@ -423,8 +453,7 @@
     }
     if (wroteClip) {
       await focusAndPaste(el);
-      await sleep(600);
-      if (await waitForAttachment(job.fileName, 3000)) return true;
+      if (await waitForAttachment(file.name, 4000)) return true;
     }
 
     return true;
@@ -581,11 +610,6 @@
       throw new Error("Could not inject prompt into Gemini input. Click the chat box once, then retry.");
     }
   }
-  function hasCompletionMarker(text) {
-    if (!text || isOurPromptText(text)) return false;
-    const lines = String(text).split(/\n/).map(l => l.trim()).filter(Boolean);
-    return lines.some(l => l.toUpperCase() === COMPLETE_MARKER);
-  }
   async function clickSendOrEnter(el) {
     for (let attempt = 0; attempt < 25; attempt++) {
       const send = findSendButton();
@@ -647,8 +671,11 @@
     return streamIndicators.length > 0;
   }
 
-  function hasCompletionMarker(text) {
-    if (!text) return false;
+  function hasCompletionMarker(text, expectedMarker) {
+    if (!text || isOurPromptText(text)) return false;
+    if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
+      return text.includes(expectedMarker);
+    }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
            u.includes("STUDY_AI_COMPLETE") || 
@@ -879,9 +906,33 @@
     return null;
   }
 
-  function scrapeBestReply(preferLast, minIndex = 0) {
+  function scrapeBestReply(preferLast, minIndex = 0, expectedMarker = null) {
     const nodes = getModelResponseNodes();
     
+    // Priority 1: If expectedMarker is provided, search all candidate nodes (from newest backwards) for this exact marker!
+    if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
+      const candidates = (nodes.length > minIndex) ? nodes.slice(minIndex) : nodes;
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        const turn = candidates[i];
+        const turnText = (turn.innerText || turn.textContent || "").trim();
+        if (turnText.includes(expectedMarker)) {
+          const codeBlocks = deepQueryAll("code-block, pre, code, [class*='code']", turn);
+          for (let c = codeBlocks.length - 1; c >= 0; c--) {
+            const cText = (codeBlocks[c].innerText || codeBlocks[c].textContent || "").trim();
+            if (cText.length > 20) {
+              const qs = extractQuestionsFromText(cText);
+              if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
+            }
+          }
+          const qs = extractQuestionsFromText(turnText);
+          if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
+          const j = extractJsonCandidate(turnText);
+          if (j) return j;
+          return turnText;
+        }
+      }
+    }
+
     // When extracting for a subsequent page (minIndex > 0), focus STRICTLY on turns >= minIndex
     if (nodes.length > minIndex) {
       const newNodes = nodes.slice(minIndex);
@@ -916,7 +967,7 @@
 
     // Fallback for initial chat or when model-response tag isn't recognized
     const codeNodes = [ ...deepQueryAll("code-block"), ...deepQueryAll("code"), ...deepQueryAll("pre"), ...deepQueryAll('[class*="code"]') ];
-    const codeTexts = codeNodes.map(n => (n.innerText || n.textContent || "").trim()).filter(t => t.length > 10);
+    const codeTexts = codeNodes.map(n => (n.innerText || n.textContent || "").trim()).filter(t => t.length > 10 && !isOurPromptText(t));
     if (codeTexts.length) {
       for (let i = codeTexts.length - 1; i >= 0; i--) {
         const qs = extractQuestionsFromText(codeTexts[i]);
@@ -926,7 +977,7 @@
     }
 
     if (nodes.length) {
-      const texts = nodes.map(n => (n.innerText || n.textContent || "").trim()).filter(t => t.length > 20);
+      const texts = nodes.map(n => (n.innerText || n.textContent || "").trim()).filter(t => t.length > 20 && !isOurPromptText(t));
       if (texts.length) {
         for (let i = texts.length - 1; i >= 0; i--) {
           const qs = extractQuestionsFromText(texts[i]);
@@ -972,7 +1023,7 @@
     return seenSquareOpen && squareDepth === 0 && curlyDepth === 0;
   }
 
-  function waitForJsonReplyLive(timeoutMs, requestId, baselineFingerprint, adminTabId, initialReplyCount = 0) {
+  function waitForJsonReplyLive(timeoutMs, requestId, baselineFingerprint, adminTabId, initialReplyCount = 0, expectedMarker = null) {
     return new Promise((resolve, reject) => {
       let lastBlobText = "";
       let lastChangeTime = Date.now();
@@ -989,7 +1040,7 @@
       const checkState = () => {
         if (Date.now() - started > timeoutMs) {
           cleanup();
-          const blob = scrapeBestReply(true, initialReplyCount);
+          const blob = scrapeBestReply(true, initialReplyCount, expectedMarker);
           const j = extractJsonCandidate(blob);
           if (j) return resolve(j);
           if (blob && blob.length > 80) return resolve(blob);
@@ -1000,11 +1051,16 @@
         const nodes = getModelResponseNodes();
         const hasNewTurn = nodes.length > initialReplyCount;
 
-        // If after 7 seconds no new turn appeared and not generating, retry clicking send
-        if (!hasNewTurn && !generating && Date.now() - started > 7000 && !sentRetryClick) {
-          sentRetryClick = true;
+        // Only retry send if prompt is still in composer (>30 chars), send button is enabled, and 20s elapsed without generating
+        if (!hasNewTurn && !generating && Date.now() - started > 20000 && !sentRetryClick) {
           const composer = findComposer();
-          if (composer) clickSendOrEnter(composer);
+          const compText = composer ? (composer.innerText || composer.value || "").trim() : "";
+          const sendBtn = findSendButton();
+          const sendDisabled = sendBtn?.disabled || sendBtn?.getAttribute("aria-disabled") === "true";
+          if (compText.length > 30 && sendBtn && !sendDisabled) {
+            sentRetryClick = true;
+            clickSendOrEnter(composer);
+          }
         }
 
         if (!hasNewTurn) {
@@ -1015,7 +1071,7 @@
           return;
         }
 
-        const blob = scrapeBestReply(true, initialReplyCount);
+        const blob = scrapeBestReply(true, initialReplyCount, expectedMarker);
         if (!blob) return;
 
         // Track text changes and stillness
@@ -1036,11 +1092,11 @@
         }
 
         // Criterion 1: Completion marker found AND not generating AND at least 2.5s stillness
-        if (hasCompletionMarker(blob) && stillDurationMs >= 2500) {
+        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2500) {
           const j = extractJsonCandidate(blob) || "[]";
           cleanup();
           progress(requestId, "done", `Completion marker verified — complete response captured (${blob.length} chars)`, adminTabId);
-          return resolve(j + "\n" + COMPLETE_MARKER);
+          return resolve(j + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
         // Criterion 2: Balanced JSON array AND not generating AND at least 6s of complete stillness

@@ -328,8 +328,17 @@ export async function extractWithStudyAiBridge(
   }
 
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const expectedMarker = `---STUDY_AI_COMPLETE_${requestId}---`;
   const provider = options.provider || getStoredAiProvider();
   const timeoutMs = options.timeoutMs || 300000; // 5 min timeout for slow AI chats
+
+  // Inject unique request-scoped completion marker to eliminate cross-page turn collisions
+  let promptWithMarker = options.prompt || '';
+  if (promptWithMarker.includes('---STUDY_AI_COMPLETE---')) {
+    promptWithMarker = promptWithMarker.replace(/---STUDY_AI_COMPLETE---/g, expectedMarker);
+  } else if (!promptWithMarker.includes(expectedMarker)) {
+    promptWithMarker = `${promptWithMarker}\n\nAt the very end after the JSON code block, on a new line, output:\n${expectedMarker}`;
+  }
 
   return new Promise((resolve, reject) => {
     let timer: NodeJS.Timeout | null = null;
@@ -388,7 +397,8 @@ export async function extractWithStudyAiBridge(
       source: PAGE_SOURCE,
       type: 'EXTRACT_REQUEST',
       requestId,
-      prompt: options.prompt,
+      expectedMarker,
+      prompt: promptWithMarker,
       fileName: options.fileName || 'page.png',
       fileBase64: cleanBase64,
       mimeType: options.mimeType || 'image/png',
@@ -588,6 +598,12 @@ export function parseExtensionOutputToElements(raw: string): ExtractedElement[] 
         content: typeof item === 'string' ? item : JSON.stringify(item),
       };
     });
+  }
+
+  // Check if raw text is conversational refusal/error or lacks real content
+  const isErrorOrRefusal = /(?:cannot extract|binary JPEG|corrupted|JFIF|no readable text|I am sorry|I apologize|no questions|cannot read|unable to)/i.test(raw);
+  if (isErrorOrRefusal || raw.trim().length < 10) {
+    return [];
   }
 
   // Pure text fallback

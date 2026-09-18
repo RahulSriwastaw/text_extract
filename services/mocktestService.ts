@@ -1189,7 +1189,16 @@ export function convertElementsToMockTestItems(
   }
 
   if (splits.length === 0) {
-    // Fallback: entire text as single question item
+    // Strictly verify if fullText actually contains a valid question (has options like (a), (b), (1), (2) or Answer:)
+    const hasOptions = /(?:\([a-e1-5]\)|[a-e1-5]\s*[\.\)]|\boption\s*[1-4]\b)/i.test(fullText);
+    const isErrorOrRefusal = /(?:cannot extract|binary JPEG|corrupted|JFIF|no readable text|I am sorry|I apologize|no questions|cannot read|unable to)/i.test(fullText);
+    
+    // If it's conversational refusal, error message, or lacks question options, DO NOT create dummy data!
+    if (isErrorOrRefusal || !hasOptions || fullText.length < 25) {
+      return [];
+    }
+
+    // Only if it's a real single question without standard Q# prefix:
     items.push({
       id: `mt_item_1`,
       question_r: 1,
@@ -2036,7 +2045,12 @@ export function parseAiOutputToMockTestItems(
       }
     }
 
-  // Fallback: convert raw elements/text
+  // Fallback: convert raw elements/text ONLY IF it actually contains question content
+  const isErrorOrRefusal = /(?:cannot extract|binary JPEG|corrupted|JFIF|no readable text|I am sorry|I apologize|no questions|cannot read|unable to|valid question)/i.test(rawText);
+  if (isErrorOrRefusal || !/(?:\([a-e1-5]\)|[a-e1-5]\s*[\.\)]|\boption\s*[1-4]\b|Q(?:uestion)?\.?\s*\d+)/i.test(rawText)) {
+    return []; // Production-ready: NEVER return dummy data from errors or refusal messages!
+  }
+
   const fakeElement: ExtractedElement = {
     id: `raw_${Date.now()}`,
     type: 'text',

@@ -265,8 +265,8 @@ export async function repairContentLatex(
   userKey?: string,
   runAIFn?: (action: (client: any) => Promise<any>, userKey?: string) => Promise<any>,
   callGeminiFn?: (client: any, pModel: string, fModel: string, contents: any[], config?: any, label?: string) => Promise<string>,
-  primaryModel: string = 'gemini-2.5-flash',
-  fallbackModel: string = 'gemini-2.5-flash'
+  primaryModel: string = 'gemini-3.5-flash',
+  fallbackModel: string = 'gemini-flash-latest'
 ): Promise<LatexRepairResponse> {
   if (!content || !content.trim()) {
     return {

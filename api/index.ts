@@ -23,11 +23,11 @@ try {
 } catch (e) {}
 
 export const getPrimaryModel = (): string => {
-  return 'gemini-2.5-flash';
+  return 'gemini-3.5-flash';
 };
 
 export const getFallbackModel = (): string => {
-  return 'gemini-2.5-flash';
+  return 'gemini-flash-latest';
 };
 
 const app = express();
@@ -361,18 +361,20 @@ const reportKeyError = (key: string, error: any) => {
     return { type: 'DEAD', isDaily: false };
   }
 
-  // 2. Daily Quota Exhaustion (Free tier 20 RPD on gemini-2.5-flash)
-  const isDailyLimit = errorStr.includes("PERDAY") || 
+  // 2. Daily Quota Exhaustion vs temporary rate limits
+  // Note: If error contains 'RETRY IN', 'RETRYDELAY' or 'RETRYINFO', it is a temporary burst rate limit, NOT a 24h daily lockout!
+  const hasShortRetry = errorStr.includes("RETRY IN") || errorStr.includes("RETRYDELAY") || errorStr.includes("RETRYINFO");
+  const isDailyLimit = !hasShortRetry && (
+                       errorStr.includes("PERDAY") || 
                        errorStr.includes("PER_DAY") || 
                        errorStr.includes("PERMODEL-FREETIER") || 
-                       errorStr.includes("GENERATE_CONTENT_FREE_TIER_REQUESTS") ||
-                       (errorStr.includes("RESOURCE_EXHAUSTED") && errorStr.includes("LIMIT: 20"));
+                       errorStr.includes("GENERATE_CONTENT_FREE_TIER_REQUESTS"));
 
   if (isDailyLimit) {
-    // Quarantine key for 4 hours so it is NEVER retried in this session
-    const quarantineDurationMs = 4 * 60 * 60 * 1000;
+    // Quarantine key for 15 minutes before re-checking
+    const quarantineDurationMs = 15 * 60 * 1000;
     dailyExhaustedKeys.set(key, now + quarantineDurationMs);
-    console.warn(`[API-Rotate] Key ${keyPrefix} reached DAILY QUOTA LIMIT! Quarantined for 4 hours. Immediately switching to next key.`);
+    console.warn(`[API-Rotate] Key ${keyPrefix} reached daily limit. Quarantined for 15m. Switching to next key.`);
     return { type: 'DAILY_EXHAUSTED', isDaily: true };
   }
 
@@ -516,21 +518,26 @@ const safeExtractResponseText = (response: any): string => {
 };
 
 /**
- * Strictly calls gemini-2.5-flash only.
- * Throws a retryable error if model produces empty output, so runAIAction can retry with a different key.
+ * Calls Gemini models with automatic multi-model fallback (gemini-flash-latest -> gemini-3.5-flash -> gemini-3.1-flash-lite).
+ * Throws a retryable error if all models produce empty output or fail, so runAIAction can retry with a different key.
  */
 export const callGeminiWithFallback = async (
   client: any,
-  _primaryModel: string,
-  _fallbackModel: string,
+  primaryModel: string = getPrimaryModel(),
+  fallbackModel: string = getFallbackModel(),
   contents: any[] | string,
   config: Record<string, any> = {},
   label = 'AI call'
 ): Promise<string> => {
-  // STRICT: User mandated using ONLY gemini-2.5-flash
-  const modelToUse = 'gemini-2.5-flash';
+  const modelsToTry = [
+    primaryModel || getPrimaryModel(),
+    fallbackModel || getFallbackModel(),
+    'gemini-flash-latest',
+    'gemini-3.5-flash',
+    'gemini-3.1-flash-lite'
+  ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-  // Optimize token usage and speed: disable heavy thinking tokens for gemini-2.5-flash
+  // Optimize token usage and speed: disable heavy thinking tokens
   const effectiveConfig = {
     ...config,
     thinkingConfig: config.thinkingConfig !== undefined ? config.thinkingConfig : { thinkingBudget: 0 }
@@ -538,17 +545,38 @@ export const callGeminiWithFallback = async (
 
   const effectiveContents = typeof contents === 'string' ? [{ text: contents }] : contents;
 
-  const response = await client.models.generateContent({
-    model: modelToUse,
-    contents: effectiveContents,
-    config: effectiveConfig
-  });
-  const text = safeExtractResponseText(response);
-  if (text) {
-    return text;
+  let lastErr: any = null;
+  for (const modelToUse of modelsToTry) {
+    try {
+      const response = await client.models.generateContent({
+        model: modelToUse,
+        contents: effectiveContents,
+        config: effectiveConfig
+      });
+      const text = safeExtractResponseText(response);
+      if (text) {
+        return text;
+      }
+      throw new Error(`[${label}] Model ${modelToUse} returned empty output.`);
+    } catch (err: any) {
+      lastErr = err;
+      const errStr = (err?.message || String(err)).toUpperCase();
+      if (
+        errStr.includes('404') ||
+        errStr.includes('429') ||
+        errStr.includes('RESOURCE_EXHAUSTED') ||
+        errStr.includes('503') ||
+        errStr.includes('UNAVAILABLE') ||
+        errStr.includes('EMPTY OUTPUT')
+      ) {
+        console.warn(`[${label}] Model ${modelToUse} failed (${err?.message?.slice(0, 100)}). Trying fallback model...`);
+        continue;
+      }
+      throw err;
+    }
   }
 
-  throw new Error(`[${label}] Model ${modelToUse} returned empty output.`);
+  throw lastErr || new Error(`[${label}] All models returned empty output.`);
 };
 
 const cleanBilingualDuplicates = (text: string): string => {
@@ -1291,8 +1319,8 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
 
       const responseText = await callGeminiWithFallback(
         client,
-        'gemini-2.5-flash',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         contents,
         generateConfig,
         '/api/extract'
@@ -1425,8 +1453,8 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
     const fallbackModel = getFallbackModel();
     const responseText = await callGeminiWithFallback(
       client,
-      'gemini-2.5-flash',
-      'gemini-2.5-flash',
+      primaryModel,
+      fallbackModel,
       [{ text: prompt }],
       {
         temperature: 0.1,
@@ -1953,8 +1981,8 @@ Output ONLY a valid JSON array of objects:
 
       const responseText = await callGeminiWithFallback(
         client,
-        'gemini-2.5-flash',
-        'gemini-2.5-flash',
+        getPrimaryModel(),
+        getFallbackModel(),
         contents,
         {
           temperature: generateSimilar ? 0.35 : 0.1,
@@ -2548,12 +2576,13 @@ app.post('/api/latex/repair', async (req, res) => {
     }
 
     // Single content string repair
-    if (typeof content !== 'string') {
+    const contentToRepair = content || req.body.text || '';
+    if (typeof contentToRepair !== 'string' || !contentToRepair.trim()) {
       return res.status(400).json({ error: "Missing 'content' or 'item' in request body." });
     }
 
     const result = await repairContentLatex(
-      content,
+      contentToRepair,
       contentType,
       selectedFormula,
       userKey,

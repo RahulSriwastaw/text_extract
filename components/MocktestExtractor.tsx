@@ -77,6 +77,7 @@ interface PageQueueItem {
   rawTextContent?: string;
   sourceType?: 'pdf' | 'image' | 'docx' | 'text';
   fileName?: string;
+  expectedMarker?: string;
 }
 
 export function splitTextIntoDocumentPages(text: string, maxQuestionsPerPage = 10): string[] {
@@ -544,6 +545,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
           continueChat: pageIndex > 0,
           chatUrl: documentChatUrl || undefined,
+          pageNumber: page.pageNumber,
           silent: true,
           onProgress: (step, detail) => {
             const msg = detail || `${step.toUpperCase()}...`;
@@ -554,6 +556,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
         if ((bridgeRes as any).chatUrl) {
           setDocumentChatUrl((bridgeRes as any).chatUrl);
+        }
+        if ((bridgeRes as any).expectedMarker) {
+          page.expectedMarker = (bridgeRes as any).expectedMarker;
+          setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: (bridgeRes as any).expectedMarker } : p));
         }
         const { rawText, elements } = bridgeRes;
 
@@ -1083,7 +1089,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         provider,
         fullChat: false,
         chatUrl: documentChatUrl || undefined,
-        pageNumber: page.pageNumber
+        pageNumber: page.pageNumber,
+        expectedMarker: page.expectedMarker || undefined
       });
       if (!rawText || !rawText.trim()) {
         throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');

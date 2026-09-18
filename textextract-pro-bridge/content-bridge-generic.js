@@ -616,6 +616,138 @@
     return turns.filter((node, idx, arr) => !arr.some(other => other !== node && other.contains(node)));
   }
 
+  function getUserPromptNodes() {
+    let nodes = [];
+    if (/deepseek\.com/i.test(location.href)) {
+      const sideList = deepQueryAll(".ds-virtual-list-visible-items div._81e7b5e, div._81e7b5e");
+      if (sideList.length) {
+        nodes = sideList;
+      } else {
+        nodes = deepQueryAll("div._72b6158, [class*='user-message'], [class*='user-prompt']");
+      }
+    } else if (/chatgpt\.com/i.test(location.href)) {
+      nodes = deepQueryAll('[data-message-author-role="user"]');
+    } else if (/claude\.ai/i.test(location.href)) {
+      nodes = deepQueryAll('[data-is-streaming="false"][class*="user"], [class*="font-user-message"]');
+    } else {
+      nodes = deepQueryAll('[data-message-author-role="user"], [class*="user"]');
+    }
+    const withPrompt = nodes.filter((n) => {
+      const t = (n.innerText || n.textContent || "").trim();
+      return isOurPromptText(t) || t.includes("Exam Paper Digitizer") || t.includes("STUDY_AI_COMPLETE");
+    });
+    const pool = withPrompt.length ? withPrompt : nodes;
+    return pool.filter((node, idx, arr) => !arr.some((other) => other !== node && other.contains(node)));
+  }
+
+  async function findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId) {
+    const pNum = Number(targetPageNumber) || null;
+    const expMarker = expectedMarker ? String(expectedMarker).trim() : null;
+    const reqId = requestId ? String(requestId).trim() : null;
+
+    LOG(`[TurnPairing] Searching reply for Page: ${pNum}, marker: ${expMarker}, reqId: ${reqId}`);
+
+    const assistantTurns = getAssistantTurnNodes();
+    LOG(`[TurnPairing] Found ${assistantTurns.length} assistant turn nodes`);
+
+    // --- PRIORITY 1: Direct match in Assistant Output (marker or page signature) ---
+    if (expMarker) {
+      for (let i = assistantTurns.length - 1; i >= 0; i--) {
+        const text = (assistantTurns[i].innerText || assistantTurns[i].textContent || "").trim();
+        if (text.includes(expMarker)) {
+          LOG(`[TurnPairing] Priority 1: Found direct marker match on assistant turn #${i}`);
+          return text;
+        }
+      }
+    }
+    if (pNum) {
+      const pageTag = `_P${pNum}_`;
+      for (let i = assistantTurns.length - 1; i >= 0; i--) {
+        const text = (assistantTurns[i].innerText || assistantTurns[i].textContent || "").trim();
+        if (text.includes(pageTag)) {
+          LOG(`[TurnPairing] Priority 1b: Found direct page tag (${pageTag}) in assistant turn #${i}`);
+          return text;
+        }
+      }
+    }
+
+    // --- PRIORITY 2: User Prompt to Assistant Turn 1-to-1 Pairing ---
+    const userNodes = getUserPromptNodes();
+    LOG(`[TurnPairing] Found ${userNodes.length} user prompt nodes`);
+    let matchedIndex = -1;
+
+    if (userNodes.length > 0) {
+      for (let i = 0; i < userNodes.length; i++) {
+        const uText = (userNodes[i].innerText || userNodes[i].textContent || "").trim();
+        if (expMarker && uText.includes(expMarker)) {
+          matchedIndex = i;
+          LOG(`[TurnPairing] Priority 2: User prompt #${i} matches expectedMarker`);
+          break;
+        }
+        if (reqId && uText.includes(reqId)) {
+          matchedIndex = i;
+          LOG(`[TurnPairing] Priority 2: User prompt #${i} matches reqId`);
+          break;
+        }
+        if (pNum && (uText.includes(`[PAGE ${pNum} `) || uText.includes(`_P${pNum}_`))) {
+          matchedIndex = i;
+          LOG(`[TurnPairing] Priority 2: User prompt #${i} matches page tag P${pNum}`);
+          break;
+        }
+      }
+
+      // In DeepSeek: clicking the matching item in the left virtual list jumps directly to that turn
+      if (matchedIndex >= 0 && /deepseek\.com/i.test(location.href)) {
+        try {
+          if (userNodes[matchedIndex]) {
+            LOG(`[TurnPairing] DeepSeek: Clicking user turn #${matchedIndex} to activate response view`);
+            userNodes[matchedIndex].click();
+            await sleep(500);
+          }
+        } catch (e) {
+          LOG("[TurnPairing] DeepSeek turn click error:", e);
+        }
+        const updatedTurns = getAssistantTurnNodes();
+        if (updatedTurns.length > matchedIndex && updatedTurns[matchedIndex]) {
+          const t = (updatedTurns[matchedIndex].innerText || updatedTurns[matchedIndex].textContent || "").trim();
+          if (t.length > 20 && !isOurPromptText(t)) return t;
+        }
+      }
+
+      if (matchedIndex >= 0 && matchedIndex < assistantTurns.length) {
+        const t = (assistantTurns[matchedIndex].innerText || assistantTurns[matchedIndex].textContent || "").trim();
+        if (t.length > 20 && !isOurPromptText(t)) {
+          LOG(`[TurnPairing] Priority 2: Returning paired assistant turn #${matchedIndex}`);
+          return t;
+        }
+      }
+    }
+
+    // --- PRIORITY 3: Positional Page Index Mapping (Page 1 -> Turn 0, Page 2 -> Turn 1, etc.) ---
+    if (pNum && pNum > 0) {
+      const targetIdx = pNum - 1;
+      if (targetIdx < assistantTurns.length) {
+        const t = (assistantTurns[targetIdx].innerText || assistantTurns[targetIdx].textContent || "").trim();
+        if (t.length > 20 && !isOurPromptText(t)) {
+          LOG(`[TurnPairing] Priority 3: Returning positional turn #${targetIdx} for Page ${pNum}`);
+          return t;
+        }
+      }
+    }
+
+    // --- PRIORITY 4: Fallback to latest assistant turn or best reply ---
+    if (assistantTurns.length > 0) {
+      const last = assistantTurns[assistantTurns.length - 1];
+      const t = (last.innerText || last.textContent || "").trim();
+      if (t.length > 20 && !isOurPromptText(t)) {
+        LOG("[TurnPairing] Priority 4: Returning latest assistant turn");
+        return t;
+      }
+    }
+
+    return scrapeBestReply();
+  }
+
   function scrapeDeepSeek(minIndex = 0, expectedMarker = null) {
     const turns = getAssistantTurnNodes();
     
@@ -1253,45 +1385,42 @@
       }
       await sleep(400);
 
-      const expectedMarker = msg.expectedMarker || job.expectedMarker;
-      if (expectedMarker && !fullChat) {
-        const turns = getAssistantTurnNodes();
-        for (let i = turns.length - 1; i >= 0; i--) {
-          const t = (turns[i].innerText || turns[i].textContent || "").trim();
-          if (t.includes(expectedMarker)) {
-            const qs = extractQuestionsFromText(t);
-            if (qs.length) return "```json\n" + JSON.stringify(qs, null, 2) + "\n```";
-            const j = extractJsonCandidate(t);
-            if (j) return "```json\n" + j + "\n```";
-            return t;
-          }
+      const targetPageNumber = msg.pageNumber || job.pageNumber || null;
+      const expectedMarker = msg.expectedMarker || job.expectedMarker || null;
+      const requestId = msg.requestId || job.requestId || null;
+
+      let replyText = "";
+      if (!fullChat) {
+        replyText = await findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId);
+      } else {
+        const allQs = scrapeAllQuestionJson();
+        if (allQs.length) {
+          progress(msg.requestId, "done", `Found ${allQs.length} question(s)`, adminTabId);
+          return "```json\n" + JSON.stringify(allQs, null, 2) + "\n```";
         }
+        replyText = scrapeBestReply();
       }
 
-      // Prefer recovered question objects (handles bare `json` label + truncated dumps)
-      const allQs = scrapeAllQuestionJson();
-      if (allQs.length) {
-        progress(msg.requestId, "done", `Found ${allQs.length} question(s)`, adminTabId);
-        return "```json\n" + JSON.stringify(allQs, null, 2) + "\n```";
+      if (!replyText || replyText.length < 20) throw new Error("No reply to capture yet.");
+      if (isOurPromptText(replyText) && !extractJsonCandidate(replyText)) {
+        throw new Error("Only prompt text found — wait for AI reply, then Capture again.");
+      }
+      if (hasStandaloneCompletion(replyText) && !/"question"\s*:/i.test(replyText)) {
+        return "```json\n[]\n```\n" + (expectedMarker || COMPLETE_MARKER);
       }
 
-      const blob = scrapeBestReply();
-      if (fullChat) {
-        const loose = extractJsonCandidate(blob);
-        if (loose && loose !== "[]") return "```json\n" + loose + "\n```";
+      const qs = extractQuestionsFromText(replyText);
+      if (qs.length) {
+        progress(msg.requestId, "done", `Captured ${qs.length} question(s) for Page ${targetPageNumber || ""}`, adminTabId);
+        return "```json\n" + JSON.stringify(qs, null, 2) + "\n```";
       }
-      if (!blob || blob.length < 20) throw new Error("No reply to capture yet.");
-      if (isOurPromptText(blob) && !extractJsonCandidate(blob)) {
-        throw new Error("Only prompt text found — wait for DeepSeek reply, then Capture again.");
-      }
-      if (hasStandaloneCompletion(blob) && !/"question"\s*:/i.test(blob)) {
-        return "```json\n[]\n```\n" + COMPLETE_MARKER;
-      }
-      const j = extractJsonCandidate(blob);
+
+      const j = extractJsonCandidate(replyText);
       if (j && j !== "[]") return "```json\n" + j + "\n```";
-      if (/"question"\s*:/i.test(blob)) return blob;
+      if (/"question"\s*:/i.test(replyText)) return replyText;
+
       throw new Error(
-        "No questions found in chat DOM. Click DeepSeek Copy on the JSON, then Paste JSON in admin.",
+        "No questions found in chat DOM for this page. Click AI Copy on the JSON, then Paste JSON in admin."
       );
     } finally {
       stopHb();

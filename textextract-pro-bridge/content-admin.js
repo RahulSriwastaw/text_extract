@@ -181,6 +181,7 @@
           type: "STUDY_AI_START",
           requestId: data.requestId,
           expectedMarker: data.expectedMarker || null,
+          pageNumber: data.pageNumber || null,
           prompt: data.prompt,
           fileName: data.fileName,
           fileBase64: data.fileBase64,

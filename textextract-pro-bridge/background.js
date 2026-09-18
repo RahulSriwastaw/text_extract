@@ -159,6 +159,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const job = {
           requestId: requestId,
           expectedMarker: msg.expectedMarker || null,
+          pageNumber: msg.pageNumber || null,
           prompt: msg.prompt,
           fileName: skipPdf ? null : msg.fileName || null,
           fileBase64: skipPdf ? null : msg.fileBase64 || null,
@@ -471,6 +472,7 @@ async function kickBridge(tabId, requestId, type, adminTabId, extra = {}) {
     jobLite: job ? {
       prompt: job.prompt,
       expectedMarker: job.expectedMarker || null,
+      pageNumber: job.pageNumber || null,
       fileName: job.fileName,
       mimeType: job.mimeType,
       pdfOnClipboard: job.pdfOnClipboard,

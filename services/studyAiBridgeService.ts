@@ -41,6 +41,7 @@ export interface ExtractWithBridgeOptions {
   silent?: boolean;
   chatUrl?: string;
   timeoutMs?: number;
+  pageNumber?: number;
   onProgress?: (step: string, detail?: string) => void;
 }
 
@@ -327,13 +328,19 @@ export async function extractWithStudyAiBridge(
     );
   }
 
+  const pNum = options.pageNumber;
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const expectedMarker = `---STUDY_AI_COMPLETE_${requestId}---`;
+  const expectedMarker = pNum 
+    ? `---STUDY_AI_COMPLETE_P${pNum}_${requestId}---` 
+    : `---STUDY_AI_COMPLETE_${requestId}---`;
   const provider = options.provider || getStoredAiProvider();
   const timeoutMs = options.timeoutMs || 300000; // 5 min timeout for slow AI chats
 
   // Inject unique request-scoped completion marker to eliminate cross-page turn collisions
   let promptWithMarker = options.prompt || '';
+  if (pNum && !promptWithMarker.includes(`[PAGE ${pNum}`)) {
+    promptWithMarker = `[PAGE ${pNum} DOCUMENT EXTRACTION]\n` + promptWithMarker;
+  }
   if (promptWithMarker.includes('---STUDY_AI_COMPLETE---')) {
     promptWithMarker = promptWithMarker.replace(/---STUDY_AI_COMPLETE---/g, expectedMarker);
   } else if (!promptWithMarker.includes(expectedMarker)) {
@@ -371,7 +378,7 @@ export async function extractWithStudyAiBridge(
 
         const rawText = data.text || '';
         const elements = parseExtensionOutputToElements(rawText);
-        resolve({ rawText, elements });
+        resolve({ rawText, elements, expectedMarker, chatUrl: data.chatUrl } as any);
       }
     };
 
@@ -398,6 +405,7 @@ export async function extractWithStudyAiBridge(
       type: 'EXTRACT_REQUEST',
       requestId,
       expectedMarker,
+      pageNumber: pNum || null,
       prompt: promptWithMarker,
       fileName: options.fileName || 'page.png',
       fileBase64: cleanBase64,

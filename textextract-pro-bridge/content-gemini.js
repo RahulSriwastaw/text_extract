@@ -138,6 +138,86 @@
     return list.filter((node, idx, arr) => !arr.some(other => other !== node && other.contains(node)));
   }
 
+  function getUserQueryNodes() {
+    let nodes = deepQueryAll("user-query, [data-message-author-role='user'], .user-query, [class*='user-query']");
+    const withPrompt = nodes.filter(n => {
+      const t = (n.innerText || n.textContent || "").trim();
+      return isOurPromptText(t) || t.includes("Exam Paper Digitizer") || t.includes("STUDY_AI_COMPLETE");
+    });
+    const pool = withPrompt.length ? withPrompt : nodes;
+    return pool.filter((node, idx, arr) => !arr.some(other => other !== node && other.contains(node)));
+  }
+
+  function findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId) {
+    const pNum = Number(targetPageNumber) || null;
+    const expMarker = expectedMarker ? String(expectedMarker).trim() : null;
+    const reqId = requestId ? String(requestId).trim() : null;
+
+    LOG(`[GeminiTurnPairing] Page: ${pNum}, marker: ${expMarker}, reqId: ${reqId}`);
+    const modelTurns = getModelResponseNodes();
+
+    // Priority 1: Direct marker match in model-response
+    if (expMarker) {
+      for (let i = modelTurns.length - 1; i >= 0; i--) {
+        const turnText = (modelTurns[i].innerText || modelTurns[i].textContent || "").trim();
+        if (turnText.includes(expMarker)) {
+          LOG(`[GeminiTurnPairing] Priority 1: Direct marker match on turn #${i}`);
+          return turnText;
+        }
+      }
+    }
+    if (pNum) {
+      const pageTag = `_P${pNum}_`;
+      for (let i = modelTurns.length - 1; i >= 0; i--) {
+        const turnText = (modelTurns[i].innerText || modelTurns[i].textContent || "").trim();
+        if (turnText.includes(pageTag)) {
+          LOG(`[GeminiTurnPairing] Priority 1b: Found page tag (${pageTag}) in turn #${i}`);
+          return turnText;
+        }
+      }
+    }
+
+    // Priority 2: User-query to Model-response pairing
+    const userNodes = getUserQueryNodes();
+    let matchedIndex = -1;
+    if (userNodes.length > 0) {
+      for (let i = 0; i < userNodes.length; i++) {
+        const uText = (userNodes[i].innerText || userNodes[i].textContent || "").trim();
+        if (expMarker && uText.includes(expMarker)) { matchedIndex = i; break; }
+        if (reqId && uText.includes(reqId)) { matchedIndex = i; break; }
+        if (pNum && (uText.includes(`[PAGE ${pNum} `) || uText.includes(`_P${pNum}_`))) { matchedIndex = i; break; }
+      }
+      if (matchedIndex >= 0 && matchedIndex < modelTurns.length) {
+        const t = (modelTurns[matchedIndex].innerText || modelTurns[matchedIndex].textContent || "").trim();
+        if (t.length > 20 && !isOurPromptText(t)) {
+          LOG(`[GeminiTurnPairing] Priority 2: Paired model turn #${matchedIndex}`);
+          return t;
+        }
+      }
+    }
+
+    // Priority 3: Positional Page Index Mapping (Page 1 -> Turn 0, Page 2 -> Turn 1, etc.)
+    if (pNum && pNum > 0) {
+      const targetIdx = pNum - 1;
+      if (targetIdx < modelTurns.length) {
+        const t = (modelTurns[targetIdx].innerText || modelTurns[targetIdx].textContent || "").trim();
+        if (t.length > 20 && !isOurPromptText(t)) {
+          LOG(`[GeminiTurnPairing] Priority 3: Positional turn #${targetIdx} for Page ${pNum}`);
+          return t;
+        }
+      }
+    }
+
+    // Priority 4: Latest model turn
+    if (modelTurns.length > 0) {
+      const last = modelTurns[modelTurns.length - 1];
+      const t = (last.innerText || last.textContent || "").trim();
+      if (t.length > 20 && !isOurPromptText(t)) return t;
+    }
+
+    return scrapeBestReply(true);
+  }
+
   function snapshotReplyFingerprint() {
     const nodes = getModelResponseNodes();
     if (!nodes.length) return "0:";
@@ -235,26 +315,31 @@
         progress(msg.requestId, "done", `Full chat packed ${packed.length} chars`, adminTabId);
         return packed;
       }
-      const expectedMarker = msg.expectedMarker || job.expectedMarker;
+      const targetPageNumber = msg.pageNumber || job.pageNumber || null;
+      const expectedMarker = msg.expectedMarker || job.expectedMarker || null;
+      const requestId = msg.requestId || job.requestId || null;
+
       let text = "";
-      if (expectedMarker) {
-        const nodes = getModelResponseNodes();
-        for (let i = nodes.length - 1; i >= 0; i--) {
-          const turnText = (nodes[i].innerText || nodes[i].textContent || "").trim();
-          if (turnText.includes(expectedMarker)) {
-            text = turnText;
-            break;
-          }
+      if (!fullChat) {
+        text = findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId);
+      } else {
+        await scrollChatToLoadAll(msg.requestId, adminTabId);
+        const packed = scrapeAllJsonFromChat(msg.requestId, adminTabId);
+        if (!packed || packed.length < 20) {
+          throw new Error("No JSON found in this chat. Open the extract thread, wait for replies, then Recapture complete chat.");
         }
+        progress(msg.requestId, "done", `Full chat packed ${packed.length} chars`, adminTabId);
+        return packed;
       }
-      if (!text) {
-        text = scrapeBestReply(true);
-      }
+
       if (!text || text.length < 20) {
-        throw new Error("No reply on bridge tab. Let generation finish, then Capture again.");
+        throw new Error("No reply on bridge tab for this page. Let generation finish, then Capture again.");
       }
       const qs = extractQuestionsFromText(text);
-      if (qs.length) return "```json\n" + JSON.stringify(qs, null, 2) + "\n```";
+      if (qs.length) {
+        progress(msg.requestId, "done", `Captured ${qs.length} question(s) for Page ${targetPageNumber || ""}`, adminTabId);
+        return "```json\n" + JSON.stringify(qs, null, 2) + "\n```";
+      }
       return extractJsonCandidate(text) || text;
     } finally {
       stopHb();

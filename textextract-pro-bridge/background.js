@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.3.4";
+const EXT_VERSION = "2.3.5";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 
@@ -367,9 +367,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function saveJob(job) {
   jobs.set(job.requestId, job);
   try {
+    if (job.fileBase64) {
+      await chrome.storage.local.set({ [`img_${job.requestId}`]: job.fileBase64 });
+    }
     const data = await chrome.storage.session.get(JOBS_KEY);
     const all = data[JOBS_KEY] || {};
-    all[job.requestId] = job;
+    // Store metadata in session storage without huge base64 payload to prevent quota errors
+    const { fileBase64: _omitted, ...jobMeta } = job;
+    all[job.requestId] = jobMeta;
     const cutoff = Date.now() - 30 * 60 * 1e3;
     for (const [k, v] of Object.entries(all)) {
       if (!v?.createdAt || v.createdAt < cutoff) delete all[k];
@@ -378,30 +383,27 @@ async function saveJob(job) {
       [JOBS_KEY]: all
     });
   } catch (e) {
-    try {
-      if (job.fileBase64) {
-        await chrome.storage.local.set({ [`img_${job.requestId}`]: job.fileBase64 });
-      }
-    } catch {}
+    console.warn("saveJob storage error:", e);
   }
 }
 
 async function getJob(requestId) {
   if (!requestId) return null;
-  if (jobs.has(requestId)) {
-    const mem = jobs.get(requestId);
-    if (mem?.fileBase64) return mem;
-  }
+  let job = jobs.get(requestId);
+  if (job?.fileBase64) return job;
+
   try {
-    const data = await chrome.storage.session.get(JOBS_KEY);
-    let job = data[JOBS_KEY]?.[requestId] || jobs.get(requestId) || null;
-    if (job) {
-      if (!job.fileBase64) {
-        const localData = await chrome.storage.local.get(`img_${requestId}`);
-        if (localData[`img_${requestId}`]) {
-          job.fileBase64 = localData[`img_${requestId}`];
-        }
+    if (!job) {
+      const data = await chrome.storage.session.get(JOBS_KEY);
+      job = data[JOBS_KEY]?.[requestId] || null;
+    }
+    if (job && !job.fileBase64) {
+      const localData = await chrome.storage.local.get(`img_${requestId}`);
+      if (localData[`img_${requestId}`]) {
+        job.fileBase64 = localData[`img_${requestId}`];
       }
+    }
+    if (job) {
       jobs.set(requestId, job);
       return job;
     }
@@ -418,6 +420,8 @@ async function deleteJob(requestId) {
     await chrome.storage.session.set({
       [JOBS_KEY]: all
     });
+  } catch {}
+  try {
     await chrome.storage.local.remove(`img_${requestId}`);
   } catch {}
 }

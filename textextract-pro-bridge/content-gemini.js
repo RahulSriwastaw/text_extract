@@ -691,12 +691,9 @@
   function hasCompletionMarker(text, expectedMarker) {
     if (!text || isOurPromptText(text)) return false;
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      if (text.includes(expectedMarker)) return true;
-      const u = String(text).toUpperCase();
-      if (u.includes("STUDY_AI_COMPLETE") || u.includes("YOUR_TEST_SERIES_JSON_COMPLETED")) {
-        return true;
-      }
-      return false;
+      // STRICT: When request has a unique expectedMarker, ONLY match this exact marker!
+      // NEVER match generic "STUDY_AI_COMPLETE", which matches previous pages' turns!
+      return text.includes(expectedMarker);
     }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
@@ -933,7 +930,7 @@
     
     // Priority 1: When expectedMarker is specified, strictly check if candidate turns have reached completion!
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      const candidates = (nodes.length > minIndex) ? nodes.slice(minIndex) : nodes;
+      const candidates = (nodes.length > minIndex) ? nodes.slice(minIndex) : [];
       for (let i = candidates.length - 1; i >= 0; i--) {
         const turn = candidates[i];
         const turnText = (turn.innerText || turn.textContent || "").trim();
@@ -1036,8 +1033,8 @@
         const generating = isGenerating();
         const nodes = getModelResponseNodes();
         let hasNewTurn = nodes.length > initialReplyCount;
-        const markerCheck = expectedMarker ? scrapeBestReply(true, initialReplyCount, expectedMarker) : "";
-        if (hasCompletionMarker(markerCheck, expectedMarker)) {
+        const markerCheck = (expectedMarker && hasNewTurn) ? scrapeBestReply(true, initialReplyCount, expectedMarker) : "";
+        if (expectedMarker && markerCheck && hasCompletionMarker(markerCheck, expectedMarker)) {
           hasNewTurn = true;
         }
 

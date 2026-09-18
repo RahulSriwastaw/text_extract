@@ -304,11 +304,15 @@
   }
 
   function isGenerating() {
+    const stopByTestId = deepQueryAll('[data-testid="stop-button"]');
+    if (stopByTestId.length > 0) return true;
+
     const buttons = deepQueryAll("button, [role='button']");
     const hasStop = buttons.some((b) => {
       const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.textContent || "")).toLowerCase();
-      if (/stop generating|stop response|cancel response/i.test(al)) return true;
+      if (/stop generating|stop response|cancel response|stop streaming/i.test(al)) return true;
       if (al === "stop") return true;
+      if (b.getAttribute("data-testid") === "stop-button") return true;
       if (b.querySelector(".ds-icon-stop") || b.querySelector("[class*='stop-icon']") || b.querySelector("svg[data-icon='stop']")) return true;
       return false;
     });
@@ -318,7 +322,7 @@
       '.streaming, [data-is-streaming="true"], [class*="streaming"], .typing-indicator, ' +
       'span.cursor, .blinking-cursor, mat-progress-bar, mat-progress-spinner, ' +
       '[aria-label*="Thinking" i], .thinking-container, .thinking-process, [data-test-id*="thinking"], ' +
-      '.result-streaming, [class*="loading-spinner"]'
+      '.result-streaming, [class*="loading-spinner"], [data-testid*="loading"]'
     );
     return streamIndicators.length > 0;
   }
@@ -326,12 +330,9 @@
   function hasCompletionMarker(text, expectedMarker) {
     if (!text || isOurPromptText(text)) return false;
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      if (text.includes(expectedMarker)) return true;
-      const u = String(text).toUpperCase();
-      if (u.includes("STUDY_AI_COMPLETE") || u.includes("YOUR_TEST_SERIES_JSON_COMPLETED")) {
-        return true;
-      }
-      return false;
+      // STRICT: When request has a unique expectedMarker, ONLY match this exact marker!
+      // NEVER match generic "STUDY_AI_COMPLETE", which matches previous pages' turns!
+      return text.includes(expectedMarker);
     }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
@@ -618,7 +619,7 @@
     
     // Priority 1: Match expectedMarker if provided
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : turns;
+      const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : [];
       for (let i = candidates.length - 1; i >= 0; i--) {
         const text = (candidates[i].innerText || candidates[i].textContent || "").trim();
         if (hasCompletionMarker(text, expectedMarker)) {
@@ -718,7 +719,7 @@
 
     // Priority 1: Match expectedMarker if provided
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : turns;
+      const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : [];
       for (let i = candidates.length - 1; i >= 0; i--) {
         const t = (candidates[i].innerText || candidates[i].textContent || "").trim();
         if (hasCompletionMarker(t, expectedMarker)) {
@@ -902,8 +903,8 @@
         const generating = isGenerating();
         const turns = getAssistantTurnNodes();
         let hasNewTurn = turns.length > initialReplyCount;
-        const markerCheck = expectedMarker ? scrapeBestReply(initialReplyCount, expectedMarker) : "";
-        if (hasCompletionMarker(markerCheck, expectedMarker)) {
+        const markerCheck = (expectedMarker && hasNewTurn) ? scrapeBestReply(initialReplyCount, expectedMarker) : "";
+        if (expectedMarker && markerCheck && hasCompletionMarker(markerCheck, expectedMarker)) {
           hasNewTurn = true;
         }
 
@@ -1047,24 +1048,15 @@
       try {
         const composer = findComposer();
         const container = composer?.closest('form, [class*="composer"], main') || document;
-        const removeBtns = deepQueryAll('button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="close" i]', container);
+        const removeBtns = deepQueryAll(
+          'button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="close" i], button[data-testid*="remove"]',
+          container
+        );
         for (const btn of removeBtns) btn.click();
+        if (removeBtns.length > 0) await sleep(400);
       } catch {}
 
-      // 1. Try HTML5 native Drag & Drop directly on composer
-      const el = findComposer();
-      if (el) {
-        try {
-          const dt = new DataTransfer();
-          dt.items.add(file);
-          const evInit = { bubbles: true, cancelable: true, dataTransfer: dt };
-          el.dispatchEvent(new DragEvent("dragenter", evInit));
-          el.dispatchEvent(new DragEvent("dragover", evInit));
-          el.dispatchEvent(new DragEvent("drop", evInit));
-        } catch {}
-      }
-
-      // 2. Try file input assign
+      // 1. Try file input assign first (cleanest React file upload)
       let inputs = deepQueryAll('input[type="file"]');
       if (!inputs.length) {
         const attachBtns = deepQueryAll('button, [role="button"]').filter((b) => {
@@ -1093,16 +1085,34 @@
         input.files = dt.files;
         input.dispatchEvent(new Event("change", { bubbles: true }));
         input.dispatchEvent(new Event("input", { bubbles: true }));
+        LOG("Attached via input[type=file]:", finalName);
         return true;
       }
 
-      // 3. Try clipboard write if window is active
+      // 2. Fallback: Try HTML5 native Drag & Drop directly on composer
+      const el = findComposer();
+      if (el) {
+        try {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const evInit = { bubbles: true, cancelable: true, dataTransfer: dt };
+          el.dispatchEvent(new DragEvent("dragenter", evInit));
+          el.dispatchEvent(new DragEvent("dragover", evInit));
+          el.dispatchEvent(new DragEvent("drop", evInit));
+          LOG("Attached via HTML5 drop:", finalName);
+          return true;
+        } catch {}
+      }
+
+      // 3. Fallback: Try clipboard write if window is active
       try {
         window.focus();
         await navigator.clipboard.write([ new ClipboardItem({ [file.type]: file }) ]);
         if (el) {
           el.focus();
           document.execCommand("paste");
+          LOG("Attached via clipboard paste:", finalName);
+          return true;
         }
       } catch {}
 
@@ -1111,6 +1121,26 @@
       LOG("pdf paste failed", e);
       return false;
     }
+  }
+
+  async function waitForAttachmentReady(timeoutMs = 30000) {
+    const start = Date.now();
+    await sleep(1000);
+    while (Date.now() - start < timeoutMs) {
+      const uploading = deepQueryAll(
+        '[class*="upload-progress"], [class*="uploading"], [aria-label*="uploading" i], ' +
+        '[class*="file-uploading"], .animate-spin, svg[class*="loading"], [data-testid*="loading"]'
+      );
+      if (uploading.length > 0) {
+        LOG("Attachment upload still in progress in chat UI, waiting...");
+        await sleep(600);
+        continue;
+      }
+      // Give UI 1s to finalize attached state
+      await sleep(1000);
+      return true;
+    }
+    return false;
   }
 
   async function runExtract(msg) {
@@ -1156,15 +1186,35 @@
       const initialReplyCount = getAssistantTurnNodes().length;
       const baseline = `${(scrapeBestReply(initialReplyCount) || "").length}:${(scrapeBestReply(initialReplyCount) || "").slice(-400)}`;
       if (!skipPdf && job.fileBase64) {
-        progress(requestId, "pdf", "Attaching image…", adminTabId);
-        await pastePdf(job);
-        await sleep(1000);
+        progress(requestId, "pdf", `Attaching image for page (${job.fileName || 'page'})…`, adminTabId);
+        const attached = await pastePdf(job);
+        if (attached) {
+          progress(requestId, "pdf", "Waiting for image upload to complete…", adminTabId);
+          await waitForAttachmentReady(30000);
+        }
+        await sleep(800);
       }
       progress(requestId, "prompt", "Injecting prompt…", adminTabId);
       await injectPrompt(el, job.prompt);
-      await sleep(400);
+      await sleep(600);
       progress(requestId, "send", "Sending…", adminTabId);
       await clickSendOrEnter(findComposer() || el);
+
+      // Verify send initiated
+      let sendConfirmed = false;
+      const sendWaitStart = Date.now();
+      while (Date.now() - sendWaitStart < 8000) {
+        if (isGenerating() || getAssistantTurnNodes().length > initialReplyCount) {
+          sendConfirmed = true;
+          break;
+        }
+        await sleep(500);
+      }
+      if (!sendConfirmed) {
+        LOG("Send not detected yet, re-clicking send...");
+        await clickSendOrEnter(findComposer() || el);
+      }
+
       progress(requestId, "wait", "Waiting for AI reply…", adminTabId);
       const expectedMarker = job.expectedMarker || msg.expectedMarker || null;
       const text = await waitForJsonReplyLive(180000, requestId, baseline, adminTabId, initialReplyCount, expectedMarker);

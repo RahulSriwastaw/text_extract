@@ -619,6 +619,14 @@
     return turns.filter((node, idx, arr) => !arr.some(other => other !== node && other.contains(node)));
   }
 
+  function snapshotReplyFingerprint() {
+    const turns = getAssistantTurnNodes();
+    if (!turns.length) return "0:";
+    const last = turns[turns.length - 1];
+    const text = (last.innerText || last.textContent || "").trim();
+    return `${turns.length}:${text.length}:${text.slice(-120)}`;
+  }
+
   function getUserPromptNodes() {
     let nodes = [];
     if (/deepseek\.com/i.test(location.href)) {
@@ -1360,7 +1368,7 @@
       if (!el) throw new Error("Composer not found — login first.");
       const skipPdf = !!job.skipPdf && !job.fileBase64;
       const initialReplyCount = getAssistantTurnNodes().length;
-      const baseline = `${(scrapeBestReply(initialReplyCount) || "").length}:${(scrapeBestReply(initialReplyCount) || "").slice(-400)}`;
+      const baseline = snapshotReplyFingerprint();
       if (!skipPdf && job.fileBase64) {
         progress(requestId, "pdf", `Attaching image for page (${job.fileName || 'page'})…`, adminTabId);
         const attached = await pastePdf(job);

@@ -1091,7 +1091,7 @@
     let esc = false;
     let squareDepth = 0;
     let curlyDepth = 0;
-    let seenSquareOpen = false;
+    let seenOpen = false;
 
     for (let i = 0; i < t.length; i++) {
       const c = t[i];
@@ -1099,13 +1099,13 @@
       if (c === "\\") { esc = true; continue; }
       if (c === '"') { inStr = !inStr; continue; }
       if (!inStr) {
-        if (c === "[") { squareDepth++; seenSquareOpen = true; }
+        if (c === "[") { squareDepth++; seenOpen = true; }
         else if (c === "]") { squareDepth--; }
-        else if (c === "{") { curlyDepth++; }
+        else if (c === "{") { curlyDepth++; seenOpen = true; }
         else if (c === "}") { curlyDepth--; }
       }
     }
-    return seenSquareOpen && squareDepth === 0 && curlyDepth === 0;
+    return seenOpen && squareDepth === 0 && curlyDepth === 0;
   }
 
   function waitForJsonReplyLive(timeoutMs, requestId, baselineFingerprint, adminTabId, initialReplyCount = 0, expectedMarker = null) {
@@ -1180,8 +1180,8 @@
           return;
         }
 
-        // Criterion 1: Completion marker found AND not generating AND at least 2.0s stillness
-        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 2000) {
+        // Criterion 1: Completion marker found AND not generating AND at least 1.0s stillness
+        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 1000) {
           const qs = extractQuestionsFromText(blob);
           const finalJson = qs.length ? JSON.stringify(qs, null, 2) : (extractJsonCandidate(blob) || "[]");
           cleanup();
@@ -1189,8 +1189,14 @@
           return resolve(finalJson + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
-        // Criterion 2: Balanced JSON array AND not generating AND at least 3.5s of complete stillness
-        if (!generating && stillDurationMs >= 3500) {
+        // Criterion 2: Fast resolve when Gemini is NOT generating and has 1.5s stillness with valid questions/JSON
+        if (!generating && stillDurationMs >= 1500) {
+          const qs = extractQuestionsFromText(blob);
+          if (qs.length > 0) {
+            cleanup();
+            progress(requestId, "done", `Captured ${qs.length} MCQ question(s) (${blob.length} chars)`, adminTabId);
+            return resolve(JSON.stringify(qs, null, 2) + (expectedMarker ? "\n" + expectedMarker : ""));
+          }
           const isBalanced = isJsonCompleteAndBalanced(blob);
           const json = extractJsonCandidate(blob);
           if (isBalanced && json && json !== "[]") {
@@ -1200,35 +1206,33 @@
           }
         }
 
-        // While text changed recently (< 8.0 seconds), keep waiting for next chunk
-        if (stillDurationMs < 8000) {
-          if (Date.now() - lastProgressAt > 2000) {
-            lastProgressAt = Date.now();
-            progress(requestId, "stream", `Verifying output stability… (${blob.length} chars, still ${Math.round(stillDurationMs / 1000)}s)`, adminTabId);
-          }
+        // While text changed recently (< 3.0 seconds), keep waiting for next chunk
+        if (stillDurationMs < 3000) {
           return;
         }
 
-        // Criterion 3 (Fallback): Only after 25 full seconds of absolute stillness without generating
-        if (stillDurationMs >= 25000 && blob.length > 50) {
+        // Criterion 3 (Fallback): Fast 4.0s stillness fallback without generating
+        if (stillDurationMs >= 4000 && blob.length > 30) {
           cleanup();
           const qs = extractQuestionsFromText(blob);
           if (qs.length) {
-            progress(requestId, "done", `Captured all ${qs.length} MCQ objects (stream completed)`, adminTabId);
+            progress(requestId, "done", `Captured all ${qs.length} MCQ objects`, adminTabId);
             return resolve(JSON.stringify(qs, null, 2));
           }
           const json = extractJsonCandidate(blob);
           if (json && json !== "[]") {
-            progress(requestId, "done", `Captured ${json.length} chars JSON (stream completed)`, adminTabId);
+            progress(requestId, "done", `Captured ${json.length} chars JSON`, adminTabId);
             return resolve(json);
           }
           const objs = extractBalancedObjects(blob);
           if (objs.length) {
-            progress(requestId, "done", `Captured ${objs.length} objects (stream completed)`, adminTabId);
+            progress(requestId, "done", `Captured ${objs.length} objects`, adminTabId);
             return resolve(`[\n${objs.join(",\n")}\n]`);
           }
-          progress(requestId, "done", `Captured ${blob.length} chars reply (stream completed)`, adminTabId);
-          return resolve(blob);
+          if (!isOurPromptText(blob)) {
+            progress(requestId, "done", `Captured ${blob.length} chars reply`, adminTabId);
+            return resolve(blob);
+          }
         }
       };
 

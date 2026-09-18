@@ -6,7 +6,7 @@
 (function() {
   const PAGE = "tf-study-ai";
   const EXT = "tf-study-ai-extension";
-  const VERSION = "2.3.7";
+  const VERSION = "2.3.8";
   const LOG = "[TextExtract Bridge]";
   let port = null;
   let portTimer = null;

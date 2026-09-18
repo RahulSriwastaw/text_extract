@@ -17,7 +17,7 @@ const PROVIDERS = {
     home: "https://chat.deepseek.com/",
     match: [ "https://chat.deepseek.com/*" ],
     script: "content-bridge-generic.js",
-    chatUrlOk: u => /chat\.deepseek\.com\/a\/chat\/s\//i.test(u || "")
+    chatUrlOk: u => /chat\.deepseek\.com\/(?:a\/)?chat/i.test(u || "")
   },
   chatgpt: {
     id: "chatgpt",
@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.3.6";
+const EXT_VERSION = "2.3.7";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 
@@ -81,6 +81,8 @@ chrome.runtime.onConnect.addListener(port => {
     adminTabIds.add(port.sender.tab.id);
   }
   port.onDisconnect.addListener(() => {
+    void chrome.runtime?.lastError;
+    try { if (port.error) void port.error; } catch {}
     alivePorts.delete(port);
   });
   try {
@@ -88,7 +90,9 @@ chrome.runtime.onConnect.addListener(port => {
       type: "HELLO",
       version: EXT_VERSION
     });
-  } catch {}
+  } catch (e) {
+    void chrome.runtime?.lastError;
+  }
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
@@ -160,6 +164,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           requestId: requestId,
           expectedMarker: msg.expectedMarker || null,
           pageNumber: msg.pageNumber || null,
+          totalPages: msg.totalPages || null,
           prompt: msg.prompt,
           fileName: skipPdf ? null : msg.fileName || null,
           fileBase64: skipPdf ? null : msg.fileBase64 || null,
@@ -230,6 +235,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           requestId: requestId,
           expectedMarker: msg.expectedMarker || null,
           pageNumber: msg.pageNumber || null,
+          totalPages: msg.totalPages || null,
           adminTabId: adminTabId,
           createdAt: Date.now(),
           fullChat: fullChat,
@@ -252,6 +258,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           fullChat: fullChat,
           expectedMarker: msg.expectedMarker || null,
           pageNumber: msg.pageNumber || null,
+          totalPages: msg.totalPages || null,
           provider: providerId
         });
         sendResponse({

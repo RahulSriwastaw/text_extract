@@ -16,10 +16,13 @@
     try {
       port = chrome.runtime.connect({ name: "study-ai-keepalive" });
       port.onDisconnect.addListener(() => {
+        void chrome.runtime?.lastError;
+        try { if (port?.error) void port.error; } catch {}
         port = null;
         setTimeout(connectKeepalive, 1200);
       });
     } catch {
+      void chrome.runtime?.lastError;
       setTimeout(connectKeepalive, 2000);
     }
   }
@@ -640,12 +643,13 @@
     return pool.filter((node, idx, arr) => !arr.some((other) => other !== node && other.contains(node)));
   }
 
-  async function findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId) {
+  async function findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId, totalPages) {
     const pNum = Number(targetPageNumber) || null;
     const expMarker = expectedMarker ? String(expectedMarker).trim() : null;
     const reqId = requestId ? String(requestId).trim() : null;
+    const totPages = Number(totalPages) || null;
 
-    LOG(`[TurnPairing] Searching reply for Page: ${pNum}, marker: ${expMarker}, reqId: ${reqId}`);
+    LOG(`[TurnPairing] Searching reply for Page: ${pNum}/${totPages}, marker: ${expMarker}, reqId: ${reqId}`);
 
     const assistantTurns = getAssistantTurnNodes();
     LOG(`[TurnPairing] Found ${assistantTurns.length} assistant turn nodes`);
@@ -677,6 +681,7 @@
     let matchedIndex = -1;
 
     if (userNodes.length > 0) {
+      // Step 2A: Content match
       for (let i = 0; i < userNodes.length; i++) {
         const uText = (userNodes[i].innerText || userNodes[i].textContent || "").trim();
         if (expMarker && uText.includes(expMarker)) {
@@ -696,21 +701,40 @@
         }
       }
 
-      // In DeepSeek: clicking the matching item in the left virtual list jumps directly to that turn
+      // Step 2B: Mathematical relative index match if not found by text
+      if (matchedIndex === -1 && pNum && pNum > 0) {
+        const total = totPages || pNum;
+        if (pNum <= total && userNodes.length >= (total - pNum + 1)) {
+          matchedIndex = userNodes.length - (total - pNum + 1);
+          LOG(`[TurnPairing] Priority 2B: Relative index ${matchedIndex} for Page ${pNum}/${total}`);
+        } else if (pNum - 1 < userNodes.length) {
+          matchedIndex = pNum - 1;
+        } else {
+          matchedIndex = userNodes.length - 1;
+        }
+      }
+
+      // DeepSeek: Clicking the user prompt in the virtual list / sidebar activates and scrolls to that turn
       if (matchedIndex >= 0 && /deepseek\.com/i.test(location.href)) {
         try {
           if (userNodes[matchedIndex]) {
-            LOG(`[TurnPairing] DeepSeek: Clicking user turn #${matchedIndex} to activate response view`);
+            LOG(`[TurnPairing] DeepSeek: Clicking user turn #${matchedIndex}`);
             userNodes[matchedIndex].click();
-            await sleep(500);
+            await sleep(600);
           }
         } catch (e) {
           LOG("[TurnPairing] DeepSeek turn click error:", e);
         }
-        const updatedTurns = getAssistantTurnNodes();
-        if (updatedTurns.length > matchedIndex && updatedTurns[matchedIndex]) {
-          const t = (updatedTurns[matchedIndex].innerText || updatedTurns[matchedIndex].textContent || "").trim();
-          if (t.length > 20 && !isOurPromptText(t)) return t;
+
+        // After activating turn, check visible assistant turns or code blocks
+        const activeTurns = getAssistantTurnNodes();
+        for (let i = activeTurns.length - 1; i >= 0; i--) {
+          const t = (activeTurns[i].innerText || activeTurns[i].textContent || "").trim();
+          if (t.length > 20 && !isOurPromptText(t)) {
+            const qs = extractQuestionsFromText(t);
+            if (qs.length) return t;
+            if (extractJsonCandidate(t)) return t;
+          }
         }
       }
 
@@ -737,11 +761,14 @@
 
     // --- PRIORITY 4: Fallback to latest assistant turn or best reply ---
     if (assistantTurns.length > 0) {
-      const last = assistantTurns[assistantTurns.length - 1];
-      const t = (last.innerText || last.textContent || "").trim();
-      if (t.length > 20 && !isOurPromptText(t)) {
-        LOG("[TurnPairing] Priority 4: Returning latest assistant turn");
-        return t;
+      for (let i = assistantTurns.length - 1; i >= 0; i--) {
+        const last = assistantTurns[i];
+        const t = (last.innerText || last.textContent || "").trim();
+        if (t.length > 20 && !isOurPromptText(t)) {
+          const qs = extractQuestionsFromText(t);
+          if (qs.length) return t;
+          if (extractJsonCandidate(t)) return t;
+        }
       }
     }
 
@@ -780,6 +807,14 @@
       }
       const last = newTurns[newTurns.length - 1];
       return (last.innerText || last.textContent || "").trim();
+    }
+    // If turns.length <= minIndex (e.g. virtual scrolling unmounted previous turns in DeepSeek), check latest turn
+    if (turns.length > 0) {
+      const last = turns[turns.length - 1];
+      const lastText = (last.innerText || last.textContent || "").trim();
+      if (lastText.length > 20 && !isOurPromptText(lastText)) {
+        return lastText;
+      }
     }
     if (minIndex > 0) return "";
 
@@ -1037,6 +1072,10 @@
         const generating = isGenerating();
         const turns = getAssistantTurnNodes();
         let hasNewTurn = turns.length > initialReplyCount;
+        const currentFingerprint = snapshotReplyFingerprint();
+        if (currentFingerprint !== baseline || generating) {
+          hasNewTurn = true;
+        }
         const markerCheck = (expectedMarker && hasNewTurn) ? scrapeBestReply(initialReplyCount, expectedMarker) : "";
         if (expectedMarker && markerCheck && hasCompletionMarker(markerCheck, expectedMarker)) {
           hasNewTurn = true;
@@ -1386,12 +1425,13 @@
       await sleep(400);
 
       const targetPageNumber = msg.pageNumber || job.pageNumber || null;
+      const totalPages = msg.totalPages || job.totalPages || null;
       const expectedMarker = msg.expectedMarker || job.expectedMarker || null;
       const requestId = msg.requestId || job.requestId || null;
 
       let replyText = "";
       if (!fullChat) {
-        replyText = await findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId);
+        replyText = await findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId, totalPages);
       } else {
         const allQs = scrapeAllQuestionJson();
         if (allQs.length) {

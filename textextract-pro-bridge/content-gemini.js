@@ -21,10 +21,13 @@
         name: "study-ai-keepalive"
       });
       port.onDisconnect.addListener(() => {
+        void chrome.runtime?.lastError;
+        try { if (port?.error) void port.error; } catch {}
         port = null;
         setTimeout(connectKeepalive, 1200);
       });
     } catch {
+      void chrome.runtime?.lastError;
       setTimeout(connectKeepalive, 2e3);
     }
   }
@@ -148,12 +151,13 @@
     return pool.filter((node, idx, arr) => !arr.some(other => other !== node && other.contains(node)));
   }
 
-  function findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId) {
+  function findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId, totalPages) {
     const pNum = Number(targetPageNumber) || null;
     const expMarker = expectedMarker ? String(expectedMarker).trim() : null;
     const reqId = requestId ? String(requestId).trim() : null;
+    const totPages = Number(totalPages) || null;
 
-    LOG(`[GeminiTurnPairing] Page: ${pNum}, marker: ${expMarker}, reqId: ${reqId}`);
+    LOG(`[GeminiTurnPairing] Page: ${pNum}/${totPages}, marker: ${expMarker}, reqId: ${reqId}`);
     const modelTurns = getModelResponseNodes();
 
     // Priority 1: Direct marker match in model-response
@@ -187,6 +191,18 @@
         if (reqId && uText.includes(reqId)) { matchedIndex = i; break; }
         if (pNum && (uText.includes(`[PAGE ${pNum} `) || uText.includes(`_P${pNum}_`))) { matchedIndex = i; break; }
       }
+
+      if (matchedIndex === -1 && pNum && pNum > 0) {
+        const total = totPages || pNum;
+        if (pNum <= total && userNodes.length >= (total - pNum + 1)) {
+          matchedIndex = userNodes.length - (total - pNum + 1);
+        } else if (pNum - 1 < userNodes.length) {
+          matchedIndex = pNum - 1;
+        } else {
+          matchedIndex = userNodes.length - 1;
+        }
+      }
+
       if (matchedIndex >= 0 && matchedIndex < modelTurns.length) {
         const t = (modelTurns[matchedIndex].innerText || modelTurns[matchedIndex].textContent || "").trim();
         if (t.length > 20 && !isOurPromptText(t)) {
@@ -210,9 +226,10 @@
 
     // Priority 4: Latest model turn
     if (modelTurns.length > 0) {
-      const last = modelTurns[modelTurns.length - 1];
-      const t = (last.innerText || last.textContent || "").trim();
-      if (t.length > 20 && !isOurPromptText(t)) return t;
+      for (let i = modelTurns.length - 1; i >= 0; i--) {
+        const t = (modelTurns[i].innerText || modelTurns[i].textContent || "").trim();
+        if (t.length > 20 && !isOurPromptText(t)) return t;
+      }
     }
 
     return scrapeBestReply(true);
@@ -316,12 +333,13 @@
         return packed;
       }
       const targetPageNumber = msg.pageNumber || job.pageNumber || null;
+      const totalPages = msg.totalPages || job.totalPages || null;
       const expectedMarker = msg.expectedMarker || job.expectedMarker || null;
       const requestId = msg.requestId || job.requestId || null;
 
       let text = "";
       if (!fullChat) {
-        text = findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId);
+        text = findAssistantReplyForPage(targetPageNumber, expectedMarker, requestId, totalPages);
       } else {
         await scrollChatToLoadAll(msg.requestId, adminTabId);
         const packed = scrapeAllJsonFromChat(msg.requestId, adminTabId);

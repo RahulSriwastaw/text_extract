@@ -42,6 +42,8 @@ export interface ExtractWithBridgeOptions {
   chatUrl?: string;
   timeoutMs?: number;
   pageNumber?: number;
+  totalPages?: number;
+  expectedMarker?: string;
   onProgress?: (step: string, detail?: string) => void;
 }
 
@@ -326,13 +328,11 @@ export async function extractWithStudyAiBridge(
     throw new Error(
       'TextExtract Pro Bridge Extension is not detected in Chrome. Please install or reload it from chrome://extensions.'
     );
-  }
-
-  const pNum = options.pageNumber;
+  }  const pNum = options.pageNumber;
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const expectedMarker = pNum 
+  const expectedMarker = options.expectedMarker || (pNum 
     ? `---STUDY_AI_COMPLETE_P${pNum}_${requestId}---` 
-    : `---STUDY_AI_COMPLETE_${requestId}---`;
+    : `---STUDY_AI_COMPLETE_${requestId}---`);
   const provider = options.provider || getStoredAiProvider();
   const timeoutMs = options.timeoutMs || 300000; // 5 min timeout for slow AI chats
 
@@ -406,6 +406,7 @@ export async function extractWithStudyAiBridge(
       requestId,
       expectedMarker,
       pageNumber: pNum || null,
+      totalPages: options.totalPages || null,
       prompt: promptWithMarker,
       fileName: options.fileName || 'page.png',
       fileBase64: cleanBase64,
@@ -432,7 +433,7 @@ export async function resetStudyAiBridgeSession(): Promise<void> {
   if (typeof window === 'undefined') return;
   window.postMessage({
     source: PAGE_SOURCE,
-    type: 'RESET_SESSION'
+    type: 'RESET_SESSION',
   }, '*');
   if (cachedStatus.session) {
     cachedStatus.session.chatUrl = null;
@@ -446,6 +447,7 @@ export interface CaptureBridgeOptions {
   chatUrl?: string;
   expectedMarker?: string;
   pageNumber?: number;
+  totalPages?: number;
 }
 
 /**
@@ -466,6 +468,7 @@ export async function captureFromStudyAiBridge(
   let chatUrl: string | null = null;
   let expectedMarker: string | null = null;
   let pageNumber: number | null = null;
+  let totalPages: number | null = null;
 
   if (typeof providerOrOptions === 'object' && providerOrOptions !== null) {
     activeProvider = providerOrOptions.provider || getStoredAiProvider();
@@ -473,6 +476,7 @@ export async function captureFromStudyAiBridge(
     chatUrl = providerOrOptions.chatUrl || null;
     expectedMarker = providerOrOptions.expectedMarker || null;
     pageNumber = providerOrOptions.pageNumber || null;
+    totalPages = providerOrOptions.totalPages || null;
   } else if (typeof providerOrOptions === 'string') {
     activeProvider = providerOrOptions;
   }
@@ -520,6 +524,7 @@ export async function captureFromStudyAiBridge(
       chatUrl,
       expectedMarker,
       pageNumber,
+      totalPages,
       provider: activeProvider
     }, '*');
   });

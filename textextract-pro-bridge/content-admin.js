@@ -1,12 +1,12 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.3.6
+ * Version: 2.3.7
  */
 
 (function() {
   const PAGE = "tf-study-ai";
   const EXT = "tf-study-ai-extension";
-  const VERSION = "2.3.6";
+  const VERSION = "2.3.7";
   const LOG = "[TextExtract Bridge]";
   let port = null;
   let portTimer = null;
@@ -15,7 +15,7 @@
 
   function isExtensionValid() {
     try {
-      return !!(typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id);
+      return typeof chrome !== "undefined" && !!chrome.runtime && !!chrome.runtime.id;
     } catch {
       return false;
     }
@@ -23,30 +23,49 @@
 
   function connectKeepalive() {
     if (!isExtensionValid()) return;
+    if (document.visibilityState === "hidden") return;
     try {
       if (port) {
         try {
           port.disconnect();
         } catch {}
+        port = null;
       }
       port = chrome.runtime.connect({
         name: "study-ai-keepalive"
       });
       port.onDisconnect.addListener(() => {
+        void chrome.runtime?.lastError;
+        try { if (port?.error) void port.error; } catch {}
         port = null;
         clearTimeout(portTimer);
-        if (isExtensionValid()) {
+        if (document.visibilityState !== "hidden" && isExtensionValid()) {
           portTimer = setTimeout(connectKeepalive, 1500);
         }
       });
       port.onMessage.addListener(() => {});
-    } catch {
+    } catch (e) {
+      void chrome.runtime?.lastError;
       clearTimeout(portTimer);
-      if (isExtensionValid()) {
+      if (document.visibilityState !== "hidden" && isExtensionValid()) {
         portTimer = setTimeout(connectKeepalive, 3000);
       }
     }
   }
+
+  window.addEventListener("pagehide", () => {
+    clearTimeout(portTimer);
+    if (port) {
+      try { port.disconnect(); } catch {}
+      port = null;
+    }
+  });
+
+  window.addEventListener("pageshow", () => {
+    if (isExtensionValid() && !port) {
+      connectKeepalive();
+    }
+  });
 
   const isLikelyApp = typeof window !== "undefined" && (
     location.hostname === "localhost" ||
@@ -182,6 +201,7 @@
           requestId: data.requestId,
           expectedMarker: data.expectedMarker || null,
           pageNumber: data.pageNumber || null,
+          totalPages: data.totalPages || null,
           prompt: data.prompt,
           fileName: data.fileName,
           fileBase64: data.fileBase64,
@@ -226,6 +246,7 @@
           fullChat: !!data.fullChat,
           expectedMarker: data.expectedMarker || null,
           pageNumber: data.pageNumber || null,
+          totalPages: data.totalPages || null,
           provider: data.provider || "gemini"
         }, res => {
           const lastErr = chrome.runtime?.lastError;

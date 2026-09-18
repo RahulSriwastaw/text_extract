@@ -536,6 +536,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           ? `mocktest_page_${page.pageNumber}.${imgExt}`
           : `mocktest_page_${page.pageNumber}.txt`;
 
+        const initialMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${page.id || Date.now()}---`;
+        page.expectedMarker = initialMarker;
+        setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: initialMarker } : p));
+
         const bridgeRes = await extractWithStudyAiBridge({
           base64Image: page.imageUrl || undefined,
           fileName: pageFileName,
@@ -546,6 +550,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           continueChat: pageIndex > 0,
           chatUrl: documentChatUrl || undefined,
           pageNumber: page.pageNumber,
+          totalPages: pages.length,
+          expectedMarker: initialMarker,
           silent: true,
           onProgress: (step, detail) => {
             const msg = detail || `${step.toUpperCase()}...`;
@@ -1090,6 +1096,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         fullChat: false,
         chatUrl: documentChatUrl || undefined,
         pageNumber: page.pageNumber,
+        totalPages: pages.length,
         expectedMarker: page.expectedMarker || undefined
       });
       if (!rawText || !rawText.trim()) {

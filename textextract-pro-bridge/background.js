@@ -1,6 +1,6 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.3.3
+ * Version: 2.3.4
  * Copyright (c) Shivajee Kumar. All rights reserved.
  */
 
@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.3.3";
+const EXT_VERSION = "2.3.4";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 

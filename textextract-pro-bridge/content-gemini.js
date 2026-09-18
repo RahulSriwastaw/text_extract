@@ -153,16 +153,17 @@
     if (!job?.prompt) throw new Error("Job missing — restart extract from admin.");
     const stopHb = startHeartbeat(requestId, adminTabId);
     try {
+      // ALWAYS ensure previous generation has completely finished before proceeding!
+      let waitGenSec = 0;
+      while (isGenerating() && waitGenSec < 90) {
+        LOG("Ongoing generation detected — waiting for chat to become idle...");
+        progress(requestId, "wait", "Previous generation still completing in chat… please wait", adminTabId);
+        await sleep(1000);
+        waitGenSec++;
+      }
+
       if (!job.continueChat) {
         try {
-          // STRICT GUARD: Never interrupt an ongoing generation!
-          let waitGenSec = 0;
-          while (isGenerating() && waitGenSec < 90) {
-            LOG("Ongoing generation detected — waiting before starting new chat...");
-            progress(requestId, "wait", "Previous generation still completing… please wait", adminTabId);
-            await sleep(1000);
-            waitGenSec++;
-          }
           const existingTurns = getModelResponseNodes();
           if (existingTurns.length > 0) {
             const newChatBtn = deepQueryAll('button, a, [role="button"]').find(b => {
@@ -690,7 +691,12 @@
   function hasCompletionMarker(text, expectedMarker) {
     if (!text || isOurPromptText(text)) return false;
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      return text.includes(expectedMarker);
+      if (text.includes(expectedMarker)) return true;
+      const u = String(text).toUpperCase();
+      if (u.includes("STUDY_AI_COMPLETE") || u.includes("YOUR_TEST_SERIES_JSON_COMPLETED")) {
+        return true;
+      }
+      return false;
     }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
@@ -931,7 +937,7 @@
       for (let i = candidates.length - 1; i >= 0; i--) {
         const turn = candidates[i];
         const turnText = (turn.innerText || turn.textContent || "").trim();
-        if (turnText.includes(expectedMarker)) {
+        if (hasCompletionMarker(turnText, expectedMarker)) {
           // Model outputted the completion marker! Return complete raw text so caller can extract all MCQs!
           return turnText;
         }
@@ -1029,7 +1035,11 @@
 
         const generating = isGenerating();
         const nodes = getModelResponseNodes();
-        const hasNewTurn = nodes.length > initialReplyCount;
+        let hasNewTurn = nodes.length > initialReplyCount;
+        const markerCheck = expectedMarker ? scrapeBestReply(true, initialReplyCount, expectedMarker) : "";
+        if (hasCompletionMarker(markerCheck, expectedMarker)) {
+          hasNewTurn = true;
+        }
 
         // Only retry send if prompt is still in composer (>30 chars), send button is enabled, and 20s elapsed without generating
         if (!hasNewTurn && !generating && Date.now() - started > 20000 && !sentRetryClick) {

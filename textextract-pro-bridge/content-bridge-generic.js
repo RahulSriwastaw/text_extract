@@ -1187,11 +1187,26 @@
       }
       await sleep(400);
 
+      const expectedMarker = msg.expectedMarker || job.expectedMarker;
+      if (expectedMarker && !fullChat) {
+        const turns = getAssistantTurnNodes();
+        for (let i = turns.length - 1; i >= 0; i--) {
+          const t = (turns[i].innerText || turns[i].textContent || "").trim();
+          if (t.includes(expectedMarker)) {
+            const qs = extractQuestionsFromText(t);
+            if (qs.length) return "```json\n" + JSON.stringify(qs, null, 2) + "\n```";
+            const j = extractJsonCandidate(t);
+            if (j) return "```json\n" + j + "\n```";
+            return t;
+          }
+        }
+      }
+
       // Prefer recovered question objects (handles bare `json` label + truncated dumps)
       const allQs = scrapeAllQuestionJson();
       if (allQs.length) {
         progress(msg.requestId, "done", `Found ${allQs.length} question(s)`, adminTabId);
-        return "```json\n" + JSON.stringify(allQs) + "\n```";
+        return "```json\n" + JSON.stringify(allQs, null, 2) + "\n```";
       }
 
       const blob = scrapeBestReply();

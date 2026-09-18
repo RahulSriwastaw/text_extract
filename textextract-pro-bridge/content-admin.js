@@ -222,6 +222,8 @@
           requestId: data.requestId,
           chatUrl: data.chatUrl || null,
           fullChat: !!data.fullChat,
+          expectedMarker: data.expectedMarker || null,
+          pageNumber: data.pageNumber || null,
           provider: data.provider || "gemini"
         }, res => {
           const lastErr = chrome.runtime?.lastError;

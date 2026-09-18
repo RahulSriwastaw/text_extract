@@ -51,6 +51,7 @@ import { cleanMocktestText } from '../services/textCleanService';
 import { 
   extractWithStudyAiBridge, 
   captureFromStudyAiBridge,
+  resetStudyAiBridgeSession,
   parseExtensionOutputToElements,
   pingStudyAiExtension, 
   subscribeToExtensionStatus,
@@ -148,6 +149,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [aiEngine, setAiEngine] = useState<'bridge' | 'api'>('api');
   const [batchSize, setBatchSize] = useState<number>(3);
   const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
+  // Active document session for AI Bridge (1 document = 1 continuous chat thread)
+  const [documentChatUrl, setDocumentChatUrl] = useState<string | null>(null);
+  const [documentSessionId, setDocumentSessionId] = useState<string>(() => `doc_${Date.now()}`);
 
   // Direct Text Input state
   const [inputMode, setInputMode] = useState<'upload' | 'direct_text'>('upload');
@@ -297,6 +301,12 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       }
     }
 
+    if (pages.length === 0) {
+      resetStudyAiBridgeSession().catch(() => {});
+      setDocumentChatUrl(null);
+      setDocumentSessionId(`doc_${Date.now()}`);
+    }
+
     setUploadProgress({ current: 0, total: validFiles.length, text: 'Reading files...' });
     const newQueueItems: PageQueueItem[] = [];
 
@@ -441,6 +451,12 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       return;
     }
 
+    if (pages.length === 0) {
+      resetStudyAiBridgeSession().catch(() => {});
+      setDocumentChatUrl(null);
+      setDocumentSessionId(`doc_${Date.now()}`);
+    }
+
     const clean = directTextInput.trim();
     const chunks = splitTextIntoDocumentPages(clean, directTextSplitCount || 10);
     const startNum = pages.length + 1;
@@ -516,20 +532,27 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           ? `mocktest_page_${page.pageNumber}.${imgExt}`
           : `mocktest_page_${page.pageNumber}.txt`;
 
-        const { rawText, elements } = await extractWithStudyAiBridge({
+        const bridgeRes = await extractWithStudyAiBridge({
           base64Image: page.imageUrl || undefined,
           fileName: pageFileName,
           mimeType: page.imageUrl ? imgMime : 'text/plain',
           skipPdf: !page.imageUrl,
           prompt,
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
-          continueChat: false,
+          continueChat: pageIndex > 0,
+          chatUrl: documentChatUrl || undefined,
+          silent: true,
           onProgress: (step, detail) => {
             const msg = detail || `${step.toUpperCase()}...`;
             setLiveStatusText(`[Page ${page.pageNumber}] ${msg}`);
             setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
           }
         });
+
+        if ((bridgeRes as any).chatUrl) {
+          setDocumentChatUrl((bridgeRes as any).chatUrl);
+        }
+        const { rawText, elements } = bridgeRes;
 
         // 1. Parse AI rawText as JSON
         const startIndex = extractedMcqs.length + 1;
@@ -1053,7 +1076,12 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
     try {
       const provider = selectedProvider || getStoredAiProvider() || 'gemini';
-      const rawText = await captureFromStudyAiBridge(provider, false);
+      const rawText = await captureFromStudyAiBridge({
+        provider,
+        fullChat: false,
+        chatUrl: documentChatUrl || undefined,
+        pageNumber: page.pageNumber
+      });
       if (!rawText || !rawText.trim()) {
         throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');
       }
@@ -1099,6 +1127,56 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       const msg = err.message || 'Recapture failed';
       setLiveStatusText(`Page ${page.pageNumber}: ${msg}`);
       setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
+      alert(`Recapture failed: ${msg}`);
+    }
+  };
+
+  // Manual Recapture of ALL questions across the entire document chat
+  const handleRecaptureFullChat = async () => {
+    if (isProcessingAll) return;
+    const confirmRecapture = confirm(
+      'Recapture All Questions From AI Chat?\n\n' +
+      'This will read the entire conversation thread for this document and merge all extracted questions into the table.'
+    );
+    if (!confirmRecapture) return;
+
+    setLiveStatusText('Recapturing ALL MCQs from the complete AI chat thread...');
+    try {
+      const provider = selectedProvider || getStoredAiProvider() || 'gemini';
+      const rawText = await captureFromStudyAiBridge({
+        provider,
+        fullChat: true,
+        chatUrl: documentChatUrl || undefined
+      });
+
+      if (!rawText || !rawText.trim()) {
+        throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');
+      }
+
+      let allItems = parseAiOutputToMockTestItems(rawText, setName, 1);
+      if (allItems.length === 0) {
+        const elements = parseExtensionOutputToElements(rawText);
+        if (elements && elements.length > 0) {
+          allItems = convertElementsToMockTestItems(elements, setName);
+        }
+      }
+
+      if (allItems.length === 0) {
+        throw new Error('AI chat content captured, but could not extract structured MCQs.');
+      }
+
+      setExtractedMcqs(allItems.map((it, idx) => ({
+        ...it,
+        question_r: idx + 1,
+        set_name: setName,
+        difficulty_level: difficulty
+      })));
+
+      setLiveStatusText(`✓ Successfully recaptured all ${allItems.length} MCQs from the complete chat!`);
+    } catch (err: any) {
+      console.error('Full chat recapture failed:', err);
+      const msg = err.message || 'Recapture failed';
+      setLiveStatusText(`Full chat recapture failed: ${msg}`);
       alert(`Recapture failed: ${msg}`);
     }
   };
@@ -2361,6 +2439,22 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                         <div>
                           <div className="font-bold text-amber-200">Clean Tags & Math</div>
                           <div className="text-[11px] text-slate-400 font-normal">Sanitize raw symbols & formatting glitches</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAiToolsMenu(false);
+                          handleRecaptureFullChat();
+                        }}
+                        disabled={isProcessingAll}
+                        className="w-full flex items-start gap-2.5 p-2 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-left text-xs font-semibold text-cyan-200 hover:text-white transition-all disabled:opacity-40 border border-cyan-500/20"
+                      >
+                        <Camera className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-bold text-cyan-200">📸 Recapture All from Chat</div>
+                          <div className="text-[11px] text-slate-400 font-normal">Re-read complete AI conversation for this document</div>
                         </div>
                       </button>
                     </div>

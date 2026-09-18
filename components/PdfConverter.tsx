@@ -21,6 +21,7 @@ import { addHistoryItem, getHistoryItems, deleteHistoryItem, clearAllHistory } f
 import { 
   extractWithStudyAiBridge, 
   captureFromStudyAiBridge,
+  resetStudyAiBridgeSession,
   parseExtensionOutputToElements,
   buildBridgePrompt, 
   pingStudyAiExtension, 
@@ -73,6 +74,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const [aiEngine, setAiEngine] = useState<'extension' | 'api'>('extension');
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
   const [bridgeProgressMsg, setBridgeProgressMsg] = useState<string | null>(null);
+  const [pdfChatUrl, setPdfChatUrl] = useState<string | null>(null);
   const isUsingBridge = aiEngine === 'extension' && bridgeStatus.connected;
   const [showMocktestStudio, setShowMocktestStudio] = useState(false);
   const [mocktestItems, setMocktestItems] = useState<MockTestMcqItem[]>([]);
@@ -307,6 +309,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       setPages([]); // Clear previous
       setWordsConsumed(0);
       setPointsConsumed(0);
+      resetStudyAiBridgeSession().catch(() => {});
+      setPdfChatUrl(null);
     }
     
     setAppState(AppState.PROCESSING_PDF);
@@ -488,13 +492,15 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             showAnswers,
             prevTailChunk || undefined
           );
-          const { rawText, elements } = await extractWithStudyAiBridge({
+          const bridgeRes = await extractWithStudyAiBridge({
             base64Image: page.imageUrl,
             fileName: `${fileName}_page_${page.pageNumber}.png`,
             mimeType: 'image/png',
             prompt,
             provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
-            continueChat: false,
+            continueChat: i > 0,
+            chatUrl: pdfChatUrl || undefined,
+            silent: true,
             onProgress: (step, detail) => {
               const msg = detail || `${step.toUpperCase()}...`;
               setBridgeProgressMsg(`Page ${i + 1}/${pagesToProcess.length}: ${msg}`);
@@ -504,6 +510,12 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
               } : p));
             }
           });
+
+          if ((bridgeRes as any).chatUrl && !pdfChatUrl) {
+            setPdfChatUrl((bridgeRes as any).chatUrl);
+          }
+
+          const { rawText, elements } = bridgeRes;
 
           // Calculate words and points
           const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
@@ -750,7 +762,12 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
     try {
       const provider = getStoredAiProvider() || bridgeStatus.provider || 'gemini';
-      const rawText = await captureFromStudyAiBridge(provider, false);
+      const rawText = await captureFromStudyAiBridge({
+        provider,
+        fullChat: false,
+        chatUrl: pdfChatUrl || undefined,
+        pageNumber: page.pageNumber
+      });
       if (!rawText || !rawText.trim()) {
         throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');
       }

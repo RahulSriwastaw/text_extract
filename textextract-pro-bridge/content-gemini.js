@@ -234,10 +234,26 @@
         progress(msg.requestId, "done", `Full chat packed ${packed.length} chars`, adminTabId);
         return packed;
       }
-      const text = scrapeBestReply(true);
+      const expectedMarker = msg.expectedMarker || job.expectedMarker;
+      let text = "";
+      if (expectedMarker) {
+        const nodes = getModelResponseNodes();
+        for (let i = nodes.length - 1; i >= 0; i--) {
+          const turnText = (nodes[i].innerText || nodes[i].textContent || "").trim();
+          if (turnText.includes(expectedMarker)) {
+            text = turnText;
+            break;
+          }
+        }
+      }
+      if (!text) {
+        text = scrapeBestReply(true);
+      }
       if (!text || text.length < 20) {
         throw new Error("No reply on bridge tab. Let generation finish, then Capture again.");
       }
+      const qs = extractQuestionsFromText(text);
+      if (qs.length) return "```json\n" + JSON.stringify(qs, null, 2) + "\n```";
       return extractJsonCandidate(text) || text;
     } finally {
       stopHb();

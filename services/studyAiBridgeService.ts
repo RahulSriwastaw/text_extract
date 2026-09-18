@@ -418,11 +418,34 @@ export async function extractWithStudyAiBridge(
 }
 
 /**
+ * Resets the active bridge session so the next extraction starts a fresh new chat (for a new document).
+ */
+export async function resetStudyAiBridgeSession(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  window.postMessage({
+    source: PAGE_SOURCE,
+    type: 'RESET_SESSION'
+  }, '*');
+  if (cachedStatus.session) {
+    cachedStatus.session.chatUrl = null;
+    cachedStatus.session.batch = 0;
+  }
+}
+
+export interface CaptureBridgeOptions {
+  provider?: AiProvider;
+  fullChat?: boolean;
+  chatUrl?: string;
+  expectedMarker?: string;
+  pageNumber?: number;
+}
+
+/**
  * Capture existing chat content from AI tab without re-uploading
  */
 export async function captureFromStudyAiBridge(
-  provider?: AiProvider,
-  fullChat = true
+  providerOrOptions?: AiProvider | CaptureBridgeOptions,
+  fullChatArg = true
 ): Promise<string> {
   const isAvailable = await pingStudyAiExtension(800);
   if (!isAvailable.connected) {
@@ -430,7 +453,21 @@ export async function captureFromStudyAiBridge(
   }
 
   const requestId = `cap_${Date.now()}`;
-  const activeProvider = provider || getStoredAiProvider();
+  let activeProvider: AiProvider = getStoredAiProvider();
+  let fullChat = fullChatArg;
+  let chatUrl: string | null = null;
+  let expectedMarker: string | null = null;
+  let pageNumber: number | null = null;
+
+  if (typeof providerOrOptions === 'object' && providerOrOptions !== null) {
+    activeProvider = providerOrOptions.provider || getStoredAiProvider();
+    fullChat = providerOrOptions.fullChat ?? fullChatArg;
+    chatUrl = providerOrOptions.chatUrl || null;
+    expectedMarker = providerOrOptions.expectedMarker || null;
+    pageNumber = providerOrOptions.pageNumber || null;
+  } else if (typeof providerOrOptions === 'string') {
+    activeProvider = providerOrOptions;
+  }
 
   return new Promise((resolve, reject) => {
     let completed = false;
@@ -472,6 +509,9 @@ export async function captureFromStudyAiBridge(
       type: 'CAPTURE_REQUEST',
       requestId,
       fullChat,
+      chatUrl,
+      expectedMarker,
+      pageNumber,
       provider: activeProvider
     }, '*');
   });

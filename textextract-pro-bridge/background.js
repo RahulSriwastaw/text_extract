@@ -1,6 +1,6 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.3.2
+ * Version: 2.3.3
  * Copyright (c) Shivajee Kumar. All rights reserved.
  */
 
@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.3.2";
+const EXT_VERSION = "2.3.3";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 
@@ -184,9 +184,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         session.batch = continueChat ? session.batch + 1 : 1;
         await persistSession();
         await waitTabComplete(bridgeTab.id, 9e4);
-        try {
-          await chrome.tabs.update(bridgeTab.id, { active: true });
-        } catch {}
+        if (!silent) {
+          try {
+            await chrome.tabs.update(bridgeTab.id, { active: true });
+          } catch {}
+        }
         await delay(continueChat ? 800 : 1600);
         await kickBridge(bridgeTab.id, requestId, "STUDY_AI_RUN", adminTabId, {
           provider: providerId
@@ -225,6 +227,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const providerId = msg.provider || session.provider || "gemini";
         await saveJob({
           requestId: requestId,
+          expectedMarker: msg.expectedMarker || null,
+          pageNumber: msg.pageNumber || null,
           adminTabId: adminTabId,
           createdAt: Date.now(),
           fullChat: fullChat,
@@ -245,6 +249,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await waitTabComplete(tab.id, 6e4).catch(() => {});
         await kickBridge(tab.id, requestId, "STUDY_AI_CAPTURE", adminTabId, {
           fullChat: fullChat,
+          expectedMarker: msg.expectedMarker || null,
+          pageNumber: msg.pageNumber || null,
           provider: providerId
         });
         sendResponse({

@@ -62,6 +62,7 @@ import {
 } from '../services/studyAiBridgeService';
 import GeminiSettingsModal from './GeminiSettingsModal';
 import GeminiConnectModal from './GeminiConnectModal';
+import { downloadMcqAsDocx } from '../services/mcqDocxService';
 
 interface PageQueueItem {
   id: string;
@@ -164,6 +165,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('medium');
   const [answerFormat, setAnswerFormat] = useState<'letters' | 'numbers'>('letters');
   const [mathFormat, setMathFormat] = useState<'mathjax' | 'unicode'>('mathjax');
+  const [isGeneratingDocx, setIsGeneratingDocx] = useState(false);
+  const [docxLang, setDocxLang] = useState<'hi' | 'en' | 'both'>('both');
   const [autoDeepSolveAll, setAutoDeepSolveAll] = useState<boolean>(true);
   // Extraction Mode: 'exact' (Extract as written) vs 'similar' (Input PDF as Reference -> Generate Brand-New Practice Questions)
   const [extractionMode, setExtractionMode] = useState<'exact' | 'similar'>('exact');
@@ -1254,6 +1257,24 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     downloadMockTestCsv(extractedMcqs, finalFileName, answerFormat, mathFormat);
   };
 
+  // Download DOCX with native LaTeX math equations
+  const handleDownloadDocx = async () => {
+    if (isGeneratingDocx || extractedMcqs.length === 0) return;
+    setIsGeneratingDocx(true);
+    try {
+      const safeBase = (outputFileName || setName || 'mocktest').replace(/[\\/:\*?"<>|]+/g, '_').trim() || 'mocktest';
+      await downloadMcqAsDocx(
+        extractedMcqs,
+        { language: docxLang, includeSolution: true, includeAnswer: true, setName: setName || outputFileName },
+        `${safeBase}.docx`
+      );
+    } catch (e: any) {
+      alert(`DOCX generation failed: ${e?.message || e}`);
+    } finally {
+      setIsGeneratingDocx(false);
+    }
+  };
+
   // Copy CSV to clipboard
   const handleCopyCsv = () => {
     if (extractedMcqs.length === 0) return;
@@ -1737,6 +1758,30 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                 onChange={handleImportCsv}
                 className="hidden"
               />
+            </div>
+
+            {/* DOCX Download Button Group */}
+            <div className="flex items-center gap-0">
+              <select
+                value={docxLang}
+                onChange={e => setDocxLang(e.target.value as 'hi' | 'en' | 'both')}
+                className="h-[34px] px-2 text-[10px] font-bold bg-indigo-800/80 text-white border border-indigo-500/40 rounded-l-xl focus:outline-none cursor-pointer"
+                title="Language for DOCX export"
+              >
+                <option value="both">Hi+En</option>
+                <option value="hi">Hindi</option>
+                <option value="en">English</option>
+              </select>
+              <button
+                type="button"
+                onClick={handleDownloadDocx}
+                disabled={isGeneratingDocx || extractedMcqs.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-extrabold rounded-r-xl text-xs transition-all disabled:opacity-40 shadow"
+                title="Download Word DOCX with editable LaTeX math equations"
+              >
+                {isGeneratingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                <span>{isGeneratingDocx ? 'Building…' : 'Export DOCX'}</span>
+              </button>
             </div>
 
             {/* Quick Add Question via AI / Paste Screenshot */}
@@ -3698,6 +3743,29 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                     <Download className="w-3.5 h-3.5" />
                     <span>Download 34-Column CSV</span>
                   </button>
+
+                  {/* DOCX export in bottom panel */}
+                  <div className="flex items-center gap-0">
+                    <select
+                      value={docxLang}
+                      onChange={e => setDocxLang(e.target.value as 'hi' | 'en' | 'both')}
+                      className="h-8 px-2 text-[10px] font-bold bg-indigo-800/80 text-white border border-indigo-500/40 rounded-l-lg focus:outline-none cursor-pointer"
+                    >
+                      <option value="both">Hi+En</option>
+                      <option value="hi">Hindi</option>
+                      <option value="en">English</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleDownloadDocx}
+                      disabled={isGeneratingDocx || extractedMcqs.length === 0}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-extrabold rounded-r-lg text-xs transition-all disabled:opacity-40"
+                      title="Download DOCX with native Word math equations"
+                    >
+                      {isGeneratingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                      <span>{isGeneratingDocx ? 'Building…' : 'Export DOCX'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             );

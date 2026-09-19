@@ -318,11 +318,9 @@
     try {
       progress(msg.requestId, "capture", fullChat ? "Loading complete chat — scraping every JSON block…" : "Scraping latest reply…", adminTabId);
       const start = Date.now();
-      while (Date.now() - start < 6e4 && isGenerating()) {
-        progress(msg.requestId, "capture", "Still generating — waiting…", adminTabId);
-        await sleep(1e3);
+      while (Date.now() - start < 1500 && isGenerating()) {
+        await sleep(250);
       }
-      await sleep(800);
       if (fullChat) {
         await scrollChatToLoadAll(msg.requestId, adminTabId);
         const packed = scrapeAllJsonFromChat(msg.requestId, adminTabId);
@@ -785,8 +783,7 @@
     const streamIndicators = deepQueryAll(
       '.streaming, [data-is-streaming="true"], [class*="streaming"], .typing-indicator, ' +
       'span.cursor, .blinking-cursor, mat-progress-bar, mat-progress-spinner, ' +
-      '[aria-label*="Thinking" i], .thinking-container, .thinking-process, [data-test-id*="thinking"], ' +
-      '.result-streaming, [class*="loading-spinner"]'
+      '.result-streaming'
     );
     return streamIndicators.length > 0;
   }

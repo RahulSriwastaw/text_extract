@@ -514,7 +514,7 @@ export async function captureFromStudyAiBridge(
         cleanup();
         reject(new Error('Capture timed out waiting for AI tab reply.'));
       }
-    }, 60000);
+    }, 12000);
 
     window.postMessage({
       source: PAGE_SOURCE,

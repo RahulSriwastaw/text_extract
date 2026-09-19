@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.4.0";
+const EXT_VERSION = "2.4.1";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 
@@ -251,9 +251,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         session.tabId = tab.id;
         session.provider = providerId;
-        await persistSession();
-        if (preferredUrl) await delay(1500); else await delay(400);
-        await waitTabComplete(tab.id, 6e4).catch(() => {});
+        if (tab.status !== "complete") {
+          await waitTabComplete(tab.id, 2000).catch(() => {});
+        }
         await kickBridge(tab.id, requestId, "STUDY_AI_CAPTURE", adminTabId, {
           fullChat: fullChat,
           expectedMarker: msg.expectedMarker || null,

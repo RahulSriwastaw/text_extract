@@ -327,8 +327,7 @@
     const streamIndicators = deepQueryAll(
       '.streaming, [data-is-streaming="true"], [class*="streaming"], .typing-indicator, ' +
       'span.cursor, .blinking-cursor, mat-progress-bar, mat-progress-spinner, ' +
-      '[aria-label*="Thinking" i], .thinking-container, .thinking-process, [data-test-id*="thinking"], ' +
-      '.result-streaming, [class*="loading-spinner"], [data-testid*="loading"]'
+      '.result-streaming, [data-testid*="loading"]'
     );
     return streamIndicators.length > 0;
   }
@@ -1136,8 +1135,8 @@
           return;
         }
 
-        // Criterion 1: Real completion marker + not generating + at least 1.0s stillness
-        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 1000) {
+        // Criterion 1: Real completion marker + not generating + at least 0.4s stillness
+        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 400) {
           const qs = extractQuestionsFromText(blob);
           const finalJson = qs.length ? JSON.stringify(qs, null, 2) : (extractJsonCandidate(blob) || "[]");
           cleanup();
@@ -1145,8 +1144,8 @@
           return resolve(finalJson + "\n" + (expectedMarker || COMPLETE_MARKER));
         }
 
-        // Criterion 2: Fast resolve when AI is NOT generating and has 1.5s stillness with valid questions/JSON
-        if (!generating && stillDurationMs >= 1500) {
+        // Criterion 2: Fast resolve when AI is NOT generating and has 0.6s stillness with valid questions/JSON
+        if (!generating && stillDurationMs >= 600) {
           const qs = extractQuestionsFromText(blob);
           if (qs.length > 0) {
             cleanup();
@@ -1162,8 +1161,8 @@
           }
         }
 
-        // While text changed recently (< 3.0s), keep waiting
-        if (stillDurationMs < 3000) {
+        // While text changed recently (< 1.2s), keep waiting
+        if (stillDurationMs < 1200) {
           return;
         }
 
@@ -1427,9 +1426,8 @@
     const stopHb = startHeartbeat(msg.requestId, adminTabId);
     try {
       const start = Date.now();
-      while (Date.now() - start < 60000 && isGenerating()) {
-        progress(msg.requestId, "capture", "Still generating…", adminTabId);
-        await sleep(1000);
+      while (Date.now() - start < 1500 && isGenerating()) {
+        await sleep(250);
       }
       progress(
         msg.requestId,

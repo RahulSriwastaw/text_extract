@@ -27,6 +27,7 @@ export interface BridgeStatus {
   version?: string;
   session?: BridgeSessionInfo | null;
   provider?: AiProvider;
+  openProviders?: AiProvider[];
   lastPingTime?: number;
 }
 
@@ -52,6 +53,7 @@ let cachedStatus: BridgeStatus = {
   version: undefined,
   session: null,
   provider: (typeof window !== 'undefined' ? (localStorage.getItem('study_ai_provider') as AiProvider) : null) || 'gemini',
+  openProviders: [],
 };
 
 const statusListeners = new Set<(status: BridgeStatus) => void>();
@@ -76,9 +78,10 @@ if (typeof window !== 'undefined') {
 
       cachedStatus = {
         connected: !!data.ok,
-        version: data.version || '2.0.0',
+        version: data.version || '2.4.2',
         session: data.session || null,
         provider: userSelected || (data.session?.provider as AiProvider) || 'gemini',
+        openProviders: (data.openProviders as AiProvider[]) || [],
         lastPingTime: Date.now(),
       };
       statusListeners.forEach((fn) => {
@@ -156,9 +159,10 @@ export function pingStudyAiExtension(timeoutMs = 1500): Promise<BridgeStatus> {
           cleanup();
           cachedStatus = {
             connected: !!data.ok,
-            version: data.version || '1.2.2',
+            version: data.version || '2.4.2',
             session: data.session || null,
             provider: (data.session?.provider as AiProvider) || cachedStatus.provider || 'gemini',
+            openProviders: (data.openProviders as AiProvider[]) || [],
             lastPingTime: Date.now(),
           };
           resolve(cachedStatus);

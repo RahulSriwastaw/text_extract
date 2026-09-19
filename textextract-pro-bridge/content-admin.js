@@ -6,7 +6,7 @@
 (function() {
   const PAGE = "tf-study-ai";
   const EXT = "tf-study-ai-extension";
-  const VERSION = "2.4.1";
+  const VERSION = "2.4.2";
   const LOG = "[TextExtract Bridge]";
   let port = null;
   let portTimer = null;
@@ -151,6 +151,7 @@
             ok: !lastErr && !!res?.ok,
             version: res?.version || VERSION,
             session: res?.session || null,
+            openProviders: res?.openProviders || [],
             error: lastErr?.message || null
           }, "*");
         });
@@ -160,6 +161,7 @@
           source: EXT,
           type: "PONG",
           ok: false,
+          openProviders: [],
           error: "Extension reloaded. Please refresh this page."
         }, "*");
       }
@@ -179,6 +181,7 @@
             ok: !lastErr && !!res?.ok,
             version: res?.version || VERSION,
             session: res?.session || null,
+            openProviders: res?.openProviders || [],
             error: lastErr?.message || null
           }, "*");
         });

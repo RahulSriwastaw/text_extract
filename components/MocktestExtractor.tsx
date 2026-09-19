@@ -294,6 +294,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const handleProviderChange = (prov: AiProvider) => {
     setSelectedProvider(prov);
     setStoredAiProvider(prov);
+    setBridgeStatus(prev => ({ ...prev, provider: prov }));
+    setDocumentChatUrl('');
   };
 
   // Handle files dropped / chosen
@@ -1960,12 +1962,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
                 <select
                   value={selectedProvider}
                   onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
-                  className="px-2 py-0.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-300 font-bold focus:outline-none"
+                  className="px-2 py-0.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-300 font-bold focus:outline-none cursor-pointer"
                 >
-                  <option value="gemini">Gemini</option>
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="chatgpt">ChatGPT</option>
-                  <option value="claude">Claude</option>
+                  <option value="gemini">
+                    Gemini {bridgeStatus.openProviders?.includes('gemini') ? '🟢 (Tab Open)' : ''}
+                  </option>
+                  <option value="deepseek">
+                    DeepSeek {bridgeStatus.openProviders?.includes('deepseek') ? '🟢 (Tab Open)' : ''}
+                  </option>
+                  <option value="chatgpt">
+                    ChatGPT {bridgeStatus.openProviders?.includes('chatgpt') ? '🟢 (Tab Open)' : ''}
+                  </option>
+                  <option value="claude">
+                    Claude {bridgeStatus.openProviders?.includes('claude') ? '🟢 (Tab Open)' : ''}
+                  </option>
                 </select>
 
                 {bridgeStatus.connected ? (

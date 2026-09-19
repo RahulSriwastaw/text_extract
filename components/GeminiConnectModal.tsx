@@ -380,45 +380,59 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                       </div>
 
                       {/* Providers grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {PROVIDERS.map((p) => {
                           const isSelected = selectedProvider === p.id;
+                          const isOpenTab = bridgeStatus.openProviders?.includes(p.id);
                           return (
                             <div
                               key={p.id}
                               onClick={() => handleProviderSelect(p.id)}
-                              className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                              className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                                 isSelected
-                                  ? 'bg-[#FF6B2B]/10 border-[#FF6B2B] text-white shadow-md'
-                                  : 'bg-white/[0.02] border-white/[0.06] text-slate-300 hover:bg-white/[0.05] hover:border-white/[0.12]'
+                                  ? 'bg-[#FF6B2B]/10 border-[#FF6B2B] text-white shadow-lg ring-1 ring-[#FF6B2B]/40'
+                                  : 'bg-white/[0.02] border-white/[0.06] text-slate-300 hover:bg-white/[0.05] hover:border-white/[0.15]'
                               }`}
                             >
-                              <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center justify-between mb-1.5">
                                 <span className="text-xs font-bold flex items-center gap-1.5">
-                                  <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-[#FF6B2B]' : 'bg-slate-500'}`} />
+                                  <span className={`w-2.5 h-2.5 rounded-full ${isSelected ? 'bg-[#FF6B2B] shadow-sm shadow-[#FF6B2B]' : isOpenTab ? 'bg-emerald-400' : 'bg-slate-500'}`} />
                                   {p.name}
                                 </span>
-                                <span className="text-[9px] px-1.5 py-0.5 bg-white/10 rounded font-medium text-slate-300">
-                                  {p.badge}
-                                </span>
+                                <div className="flex items-center gap-1">
+                                  {isOpenTab ? (
+                                    <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-bold flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                      Tab Open ✓
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] px-1.5 py-0.5 bg-white/10 rounded font-medium text-slate-400">
+                                      {p.badge}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <p className="text-[10px] text-slate-400 leading-tight">
+                              <p className="text-[11px] text-slate-400 leading-tight">
                                 {p.desc}
                               </p>
-                              <div className="mt-2 pt-2 border-t border-white/[0.04] flex items-center justify-between text-[10px]">
+                              <div className="mt-2.5 pt-2 border-t border-white/[0.06] flex items-center justify-between text-[11px]">
                                 <a
                                   href={p.url}
                                   target="_blank"
                                   rel="noreferrer"
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-[#FF884D] hover:underline flex items-center gap-0.5"
+                                  className="text-[#FF884D] hover:underline flex items-center gap-1 font-semibold"
                                 >
-                                  Open {p.name} Web
-                                  <ExternalLink className="w-2.5 h-2.5" />
+                                  Open {p.name}
+                                  <ExternalLink className="w-3 h-3" />
                                 </a>
-                                {isSelected && (
+                                {isSelected ? (
                                   <span className="text-emerald-400 font-bold flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3" /> Selected
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Active Model
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 hover:text-white font-medium text-[10px]">
+                                    Click to Switch →
                                   </span>
                                 )}
                               </div>

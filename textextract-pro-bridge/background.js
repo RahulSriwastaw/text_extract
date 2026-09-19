@@ -10,28 +10,28 @@ const PROVIDERS = {
     home: "https://gemini.google.com/app",
     match: [ "https://gemini.google.com/*" ],
     script: "content-gemini.js",
-    chatUrlOk: u => /gemini\.google\.com\/app\//i.test(u || "")
+    chatUrlOk: u => /gemini\.google\.com/i.test(u || "")
   },
   deepseek: {
     id: "deepseek",
     home: "https://chat.deepseek.com/",
     match: [ "https://chat.deepseek.com/*" ],
     script: "content-bridge-generic.js",
-    chatUrlOk: u => /chat\.deepseek\.com\/(?:a\/)?chat/i.test(u || "")
+    chatUrlOk: u => /chat\.deepseek\.com/i.test(u || "")
   },
   chatgpt: {
     id: "chatgpt",
     home: "https://chatgpt.com/",
     match: [ "https://chatgpt.com/*", "https://chat.openai.com/*" ],
     script: "content-bridge-generic.js",
-    chatUrlOk: u => /chatgpt\.com\/c\//i.test(u || "") || /chat\.openai\.com\/c\//i.test(u || "")
+    chatUrlOk: u => /chatgpt\.com|chat\.openai\.com/i.test(u || "")
   },
   claude: {
     id: "claude",
     home: "https://claude.ai/new",
     match: [ "https://claude.ai/*" ],
     script: "content-bridge-generic.js",
-    chatUrlOk: u => /claude\.ai\/chat\//i.test(u || "")
+    chatUrlOk: u => /claude\.ai/i.test(u || "")
   }
 };
 
@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.4.1";
+const EXT_VERSION = "2.4.2";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 
@@ -104,20 +104,50 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     adminTabIds.add(sender.tab.id);
   }
   if (!msg || !msg.type) return;
+  async function detectOpenProviders() {
+    const open = [];
+    for (const [pId, pCfg] of Object.entries(PROVIDERS)) {
+      try {
+        const pTabs = await chrome.tabs.query({ url: pCfg.match });
+        if (pTabs && pTabs.length > 0) {
+          open.push(pId);
+        }
+      } catch {}
+    }
+    return open;
+  }
+
   if (msg.type === "STUDY_AI_PING") {
-    sendResponse({
-      ok: true,
-      version: EXT_VERSION,
-      session: {
-        tabId: session.tabId,
-        chatUrl: session.chatUrl,
-        batch: session.batch,
-        hasPdf: !!session.pdfKey,
-        provider: session.provider || "gemini",
-        alivePorts: alivePorts.size,
-        openJobs: jobs.size
+    (async () => {
+      try {
+        const openProviders = await detectOpenProviders();
+        sendResponse({
+          ok: true,
+          version: EXT_VERSION,
+          openProviders: openProviders,
+          session: {
+            tabId: session.tabId,
+            chatUrl: session.chatUrl,
+            batch: session.batch,
+            hasPdf: !!session.pdfKey,
+            provider: session.provider || "gemini",
+            alivePorts: alivePorts.size,
+            openJobs: jobs.size
+          }
+        });
+      } catch (e) {
+        sendResponse({
+          ok: true,
+          version: EXT_VERSION,
+          openProviders: [],
+          session: {
+            ...session,
+            alivePorts: alivePorts.size,
+            openJobs: jobs.size
+          }
+        });
       }
-    });
+    })();
     return true;
   }
   if (msg.type === "STUDY_AI_SET_PROVIDER") {
@@ -128,9 +158,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         session.chatUrl = null;
         session.batch = 0;
         await persistSession();
+        const openProviders = await detectOpenProviders();
         sendResponse({
           ok: true,
           version: EXT_VERSION,
+          openProviders: openProviders,
           session: {
             tabId: session.tabId,
             chatUrl: session.chatUrl,
@@ -553,6 +585,7 @@ async function openOrReuseTab({continueChat: continueChat, silent: silent, prefe
     };
     if (targetUrl && tab.url !== targetUrl) update.url = targetUrl;
     await chrome.tabs.update(tab.id, update);
+    session.tabId = tab.id;
     if (preferredUrl && provider.chatUrlOk(preferredUrl)) session.chatUrl = preferredUrl; else if (tab.url) session.chatUrl = tab.url;
     session.provider = provider.id;
     await persistSession();
@@ -563,6 +596,7 @@ async function openOrReuseTab({continueChat: continueChat, silent: silent, prefe
     url: url,
     active: !silent
   });
+  session.tabId = created.id;
   session.chatUrl = url;
   session.provider = provider.id;
   await persistSession();

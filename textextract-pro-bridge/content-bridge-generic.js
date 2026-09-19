@@ -1,11 +1,10 @@
 /**
  * TextExtract Pro Bridge — generic content script for DeepSeek / ChatGPT / Claude
- * Version: 2.2.0
+ * Version: 2.4.2
  */
 
 (function () {
-  const EXT_VER = "2.2.0";
-  if (window.__tfStudyAiGenericVer === EXT_VER) return;
+  const EXT_VER = "2.4.2";
   window.__tfStudyAiGenericVer = EXT_VER;
   const LOG = (...a) => console.log("[TextExtract Bridge Gen]", ...a);
   const COMPLETE_MARKER = "---STUDY_AI_COMPLETE---";
@@ -28,7 +27,14 @@
   }
   connectKeepalive();
 
-  chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+  // Safely rebind onMessage listener on script injection / extension reload
+  if (window.__tfStudyAiGenericMsgListener) {
+    try {
+      chrome.runtime.onMessage.removeListener(window.__tfStudyAiGenericMsgListener);
+    } catch {}
+  }
+
+  const genericMsgListener = (msg, _s, sendResponse) => {
     if (!msg?.type) return;
     if (msg.type === "STUDY_AI_RUN") {
       sendResponse({ ok: true, started: true });
@@ -45,7 +51,9 @@
         .catch((e) => report(msg.requestId, false, null, e?.message || String(e), msg.adminTabId));
       return false;
     }
-  });
+  };
+  window.__tfStudyAiGenericMsgListener = genericMsgListener;
+  chrome.runtime.onMessage.addListener(genericMsgListener);
 
   function progress(requestId, step, detail, adminTabId) {
     try {
@@ -326,9 +334,15 @@
 
     const streamIndicators = deepQueryAll(
       '.streaming, [data-is-streaming="true"], [class*="streaming"], .typing-indicator, ' +
-      'span.cursor, .blinking-cursor, mat-progress-bar, mat-progress-spinner, ' +
-      '.result-streaming, [data-testid*="loading"]'
-    );
+      'span.cursor, .blinking-cursor, .result-streaming, [data-testid*="loading"]'
+    ).filter(el => {
+      try {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      } catch {
+        return false;
+      }
+    });
     return streamIndicators.length > 0;
   }
 
@@ -603,7 +617,7 @@
     let turns = [];
     if (/deepseek\.com/i.test(location.href)) {
       turns = deepQueryAll(".ds-markdown, [class*='message-content']");
-    } else if (/chatgpt\.com/i.test(location.href)) {
+    } else if (/(?:chatgpt\.com|chat\.openai\.com)/i.test(location.href)) {
       turns = deepQueryAll('[data-message-author-role="assistant"], article [class*="agent-turn"]');
     } else if (/claude\.ai/i.test(location.href)) {
       turns = deepQueryAll('[data-is-streaming], [class*="font-claude-message"]');
@@ -635,7 +649,7 @@
       } else {
         nodes = deepQueryAll("div._72b6158, [class*='user-message'], [class*='user-prompt']");
       }
-    } else if (/chatgpt\.com/i.test(location.href)) {
+    } else if (/(?:chatgpt\.com|chat\.openai\.com)/i.test(location.href)) {
       nodes = deepQueryAll('[data-message-author-role="user"]');
     } else if (/claude\.ai/i.test(location.href)) {
       nodes = deepQueryAll('[data-is-streaming="false"][class*="user"], [class*="font-user-message"]');

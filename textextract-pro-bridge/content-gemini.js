@@ -1,14 +1,13 @@
 /**
  * TextExtract Pro Bridge
- * Version: 2.2.0
+ * Version: 2.4.2
  */
 
 (function() {
-  const EXT_VER = "2.2.0";
-  if (window.__tfStudyAiGeminiVer === EXT_VER) return;
+  const EXT_VER = "2.4.2";
   window.__tfStudyAiGeminiVer = EXT_VER;
   window.__tfStudyAiGeminiBound = true;
-  const LOG = (...a) => console.log("[TextExtract Bridge]", ...a);
+  const LOG = (...a) => console.log("[TextExtract Bridge Gemini]", ...a);
   const COMPLETE_MARKER = "---STUDY_AI_COMPLETE---";
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   function isOurPromptText(text) {
@@ -32,7 +31,15 @@
     }
   }
   connectKeepalive();
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+
+  // Safely rebind onMessage listener on every script execution / extension reload
+  if (window.__tfStudyAiGeminiMsgListener) {
+    try {
+      chrome.runtime.onMessage.removeListener(window.__tfStudyAiGeminiMsgListener);
+    } catch {}
+  }
+
+  const geminiMsgListener = (msg, _sender, sendResponse) => {
     if (!msg?.type) return;
     if (msg.type === "STUDY_AI_RUN") {
       sendResponse({
@@ -53,7 +60,9 @@
       runCaptureOnly(msg).then(text => report(msg.requestId, true, text, null, msg.adminTabId)).catch(e => report(msg.requestId, false, null, e?.message || String(e), msg.adminTabId));
       return false;
     }
-  });
+  };
+  window.__tfStudyAiGeminiMsgListener = geminiMsgListener;
+  chrome.runtime.onMessage.addListener(geminiMsgListener);
   function progress(requestId, step, detail, adminTabId) {
     const payload = {
       type: "STUDY_AI_PROGRESS",
@@ -446,11 +455,22 @@
     throw new Error("Gemini composer not found — login first.");
   }
   function findComposer() {
-    const selectors = [ "div.ql-editor.textarea.new-input-ui", 'div.ql-editor[contenteditable="true"]', "div.ql-editor", 'rich-textarea div[contenteditable="true"]', 'div[contenteditable="true"][role="textbox"]', 'div[contenteditable="true"]', "textarea" ];
+    const selectors = [
+      "div.ql-editor.textarea.new-input-ui",
+      'div.ql-editor[contenteditable="true"]',
+      "div.ql-editor",
+      'rich-textarea div[contenteditable="true"]',
+      'div[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"][aria-label*="prompt" i]',
+      'div[contenteditable="true"][aria-label*="Gemini" i]',
+      'div[contenteditable="true"]',
+      "textarea",
+      "p[data-placeholder]"
+    ];
     for (const sel of selectors) {
       const list = deepQueryAll(sel).filter(el => {
         const r = el.getBoundingClientRect();
-        return r.width > 40 && r.height > 12 && r.bottom > 0;
+        return r.width > 30 && r.height > 12 && r.bottom > 0;
       });
       if (!list.length) continue;
       list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
@@ -773,18 +793,29 @@
     // 1. Check for Stop buttons (Gemini web UI uses various aria-labels / titles)
     const buttons = deepQueryAll('button, [role="button"]');
     const hasStop = buttons.some(b => {
+      try {
+        const r = b.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+      } catch { return false; }
       const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.textContent || "")).toLowerCase().trim();
-      return /stop|stop response|stop generation|stop generating|cancel response/i.test(al) ||
-             b.querySelector('.ds-icon-stop, [class*="stop-icon"], svg[data-icon="stop"]') !== null;
+      return (/stop|stop response|stop generation|stop generating|cancel response/i.test(al) ||
+             b.querySelector('.ds-icon-stop, [class*="stop-icon"], svg[data-icon="stop"]') !== null) &&
+             !al.includes("history") && !al.includes("search");
     });
     if (hasStop) return true;
 
-    // 2. Check for streaming/thinking/processing DOM indicators in Gemini
+    // 2. Check for streaming/thinking/processing DOM indicators in Gemini (must be visible)
     const streamIndicators = deepQueryAll(
       '.streaming, [data-is-streaming="true"], [class*="streaming"], .typing-indicator, ' +
-      'span.cursor, .blinking-cursor, mat-progress-bar, mat-progress-spinner, ' +
-      '.result-streaming'
-    );
+      'span.cursor, .blinking-cursor, .result-streaming'
+    ).filter(el => {
+      try {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      } catch {
+        return false;
+      }
+    });
     return streamIndicators.length > 0;
   }
 

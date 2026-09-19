@@ -138,7 +138,7 @@ const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowConnectModal(true)}
-                  title="TextExtract Pro Bridge Connected - Click to configure"
+                  title={`TextExtract Pro Bridge Active: ${(bridgeStatus.provider || 'AI').toUpperCase()} selected${bridgeStatus.openProviders?.length ? ` • Open tabs: ${bridgeStatus.openProviders.join(', ').toUpperCase()}` : ''} - Click to configure / switch model`}
                   className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold whitespace-nowrap transition-all shadow-sm"
                 >
                   <span className="relative flex h-2 w-2 shrink-0">

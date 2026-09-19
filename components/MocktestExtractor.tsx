@@ -786,18 +786,16 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     }
 
     if (aiEngine === 'bridge' && !bridgeStatus.connected) {
-      const ping = await pingStudyAiExtension(600);
+      const ping = await pingStudyAiExtension(2000);
       if (!ping.connected) {
-        const switchApi = confirm(
-          'TextExtract Pro Bridge Extension is not connected in Chrome.\n\n' +
-          'Would you like to switch to DIRECT GEMINI API mode instead?'
+        alert(
+          'TextExtract Pro Bridge Extension se connection nahi mil pa raha hai.\n\n' +
+          'Aasan Samadhan:\n' +
+          '1. Agar aapne extension abhi reload ya install kiya hai, to please is webpage ko ek baar REFRESH (F5) karein taaki naya connection bind ho sake.\n' +
+          '2. chrome://extensions par check karein ki "TextExtract Pro Bridge" on hai.'
         );
-        if (switchApi) {
-          setAiEngine('api');
-        } else {
-          setShowConnectModal(true);
-          return;
-        }
+        setShowConnectModal(true);
+        return;
       }
     }
 

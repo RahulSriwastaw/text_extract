@@ -327,10 +327,10 @@ At the very end after the JSON code block, on a new line, output:
 export async function extractWithStudyAiBridge(
   options: ExtractWithBridgeOptions
 ): Promise<{ rawText: string; elements: ExtractedElement[] }> {
-  const isAvailable = await pingStudyAiExtension(800);
+  const isAvailable = await pingStudyAiExtension(2000);
   if (!isAvailable.connected) {
     throw new Error(
-      'TextExtract Pro Bridge Extension is not detected in Chrome. Please install or reload it from chrome://extensions.'
+      'TextExtract Pro Bridge Extension se connect nahi ho pa raha hai. Kripya is page ko ek baar Refresh (F5) karein aur chrome://extensions par extension check karein.'
     );
   }  const pNum = options.pageNumber;
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -461,9 +461,9 @@ export async function captureFromStudyAiBridge(
   providerOrOptions?: AiProvider | CaptureBridgeOptions,
   fullChatArg = true
 ): Promise<string> {
-  const isAvailable = await pingStudyAiExtension(800);
+  const isAvailable = await pingStudyAiExtension(2000);
   if (!isAvailable.connected) {
-    throw new Error('TextExtract Pro Bridge Extension is not detected.');
+    throw new Error('TextExtract Pro Bridge Extension se connect nahi ho pa raha hai. Kripya is page ko F5 (Refresh) karein.');
   }
 
   const requestId = `cap_${Date.now()}`;

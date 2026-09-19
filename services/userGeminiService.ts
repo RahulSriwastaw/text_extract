@@ -83,7 +83,7 @@ export async function checkUserGeminiAuth(): Promise<{
 
   // Check if Study AI Extension Bridge is connected (Free Zero-Token Mode)
   try {
-    const bridge = await pingStudyAiExtension(400);
+    const bridge = await pingStudyAiExtension(1500);
     if (bridge.connected) {
       return {
         isAuthenticated: true,

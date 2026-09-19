@@ -1052,13 +1052,28 @@ export function downloadMockTestCsv(
 }
 
 /**
- * RFC 4180 CSV parser to import existing MockTest CSVs back into MockTestMcqItem[]
+/**
+ * RFC 4180 CSV / TSV / Table parser to import existing MockTest CSVs, Excel copies, or tables into MockTestMcqItem[]
  */
 export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper Name'): MockTestMcqItem[] {
-  if (!csvText) return [];
+  if (!csvText || !csvText.trim()) return [];
 
   // Remove UTF-8 BOM if present
-  let clean = csvText.replace(/^\uFEFF/, '');
+  let clean = csvText.replace(/^\uFEFF/, '').trim();
+  
+  // Auto-detect delimiter: check first line for tabs vs commas vs semicolons
+  const firstLine = clean.split(/\r?\n/)[0] || '';
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+
+  let delimiter = ',';
+  if (tabCount > commaCount && tabCount >= 2) {
+    delimiter = '\t';
+  } else if (semiCount > commaCount && semiCount >= 2) {
+    delimiter = ';';
+  }
+
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = '';
@@ -1075,7 +1090,7 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
       } else {
         inQuotes = !inQuotes;
       }
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === delimiter && !inQuotes) {
       currentRow.push(currentField);
       currentField = '';
     } else if ((char === '\r' || char === '\n') && !inQuotes) {
@@ -1098,23 +1113,112 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
     }
   }
 
-  if (rows.length <= 1) return [];
+  if (rows.length === 0) return [];
 
-  // First row is header
-  const headers = rows[0].map(h => h.trim().toLowerCase());
-  const getCol = (row: string[], name: string): string => {
-    const idx = headers.indexOf(name.toLowerCase());
-    return idx >= 0 && row[idx] !== undefined ? row[idx] : '';
+  // Check if first row contains recognizable headers
+  const rawHeaders = rows[0].map(h => h.trim().toLowerCase());
+  const hasRecognizedHeader = rawHeaders.some(h => 
+    /question|option|answer|ans|solution|subject|diff|set_name|q_num|q\.|q\s*\d/i.test(h)
+  );
+
+  const startRow = hasRecognizedHeader ? 1 : 0;
+  const headers = hasRecognizedHeader ? rawHeaders : [];
+
+  const getCol = (row: string[], names: string | string[]): string => {
+    const list = Array.isArray(names) ? names : [names];
+    for (const name of list) {
+      const target = name.toLowerCase().trim();
+      const idx = headers.findIndex(h => h === target || h.replace(/[\s_-]+/g, '') === target.replace(/[\s_-]+/g, ''));
+      if (idx >= 0 && row[idx] !== undefined && row[idx].trim().length > 0) {
+        return row[idx].trim();
+      }
+    }
+    return '';
   };
 
   const items: MockTestMcqItem[] = [];
 
-  for (let r = 1; r < rows.length; r++) {
+  for (let r = startRow; r < rows.length; r++) {
     const row = rows[r];
-    if (!row || row.length === 0) continue;
+    if (!row || row.length === 0 || !row.some(c => c.trim().length > 0)) continue;
 
-    const qNum = parseInt(getCol(row, 'question_r'), 10) || r;
-    const ans = getCol(row, 'answer').trim();
+    let qNum = r;
+    let qHi = '';
+    let qEn = '';
+    let opt1Hi = '';
+    let opt2Hi = '';
+    let opt3Hi = '';
+    let opt4Hi = '';
+    let opt5Hi = '';
+    let opt1En = '';
+    let opt2En = '';
+    let opt3En = '';
+    let opt4En = '';
+    let opt5En = '';
+    let solHi = '';
+    let solEn = '';
+    let ans = '';
+    let subject = '';
+    let diff = 'medium';
+
+    if (hasRecognizedHeader) {
+      qNum = parseInt(getCol(row, ['question_r', 'q_num', 'qnum', 'q_no', 'q', 'sr', 'no']), 10) || r;
+      qHi = getCol(row, ['question_hi', 'question', 'question_text', 'q', 'प्रश्न', 'सवाल', 'hindi_question', 'question_hindi']);
+      qEn = getCol(row, ['question_en', 'english_question', 'question_english', 'question_eng']);
+      
+      opt1Hi = getCol(row, ['option1_hi', 'option1', 'option 1', 'option_1', 'option a', 'option_a', 'opt1', 'opt 1', 'a', 'विकल्प 1', 'विकल्प a']);
+      opt2Hi = getCol(row, ['option2_hi', 'option2', 'option 2', 'option_2', 'option b', 'option_b', 'opt2', 'opt 2', 'b', 'विकल्प 2', 'विकल्प b']);
+      opt3Hi = getCol(row, ['option3_hi', 'option3', 'option 3', 'option_3', 'option c', 'option_c', 'opt3', 'opt 3', 'c', 'विकल्प 3', 'विकल्प c']);
+      opt4Hi = getCol(row, ['option4_hi', 'option4', 'option 4', 'option_4', 'option d', 'option_d', 'opt4', 'opt 4', 'd', 'विकल्प 4', 'विकल्प d']);
+      opt5Hi = getCol(row, ['option5_hi', 'option5', 'option 5', 'option_5', 'option e', 'option_e', 'opt5', 'opt 5', 'e']);
+
+      opt1En = getCol(row, ['option1_en', 'option1_eng', 'option_1_en']);
+      opt2En = getCol(row, ['option2_en', 'option2_eng', 'option_2_en']);
+      opt3En = getCol(row, ['option3_en', 'option3_eng', 'option_3_en']);
+      opt4En = getCol(row, ['option4_en', 'option4_eng', 'option_4_en']);
+      opt5En = getCol(row, ['option5_en', 'option5_eng', 'option_5_en']);
+
+      solHi = getCol(row, ['solution_hi', 'solution', 'explanation', 'exp', 'हल', 'व्याख्या', 'sol', 'solution_text']);
+      solEn = getCol(row, ['solution_en', 'english_solution', 'explanation_en', 'sol_en']);
+      ans = getCol(row, ['answer', 'ans', 'correct_option', 'correct_answer', 'correct answer', 'उत्तर', 'key']);
+      subject = getCol(row, ['subject', 'topic', 'विषय']);
+      diff = getCol(row, ['difficulty_level', 'difficulty', 'diff', 'level']) || 'medium';
+    } else {
+      // Positional row fallback (e.g. pasted directly without headers)
+      // If row has e.g. [Q, OptA, OptB, OptC, OptD, Ans, Solution]
+      let offset = 0;
+      if (/^\d+$/.test(row[0]?.trim())) {
+        qNum = parseInt(row[0].trim(), 10);
+        offset = 1;
+      }
+      qHi = row[offset] || '';
+      opt1Hi = row[offset + 1] || '';
+      opt2Hi = row[offset + 2] || '';
+      opt3Hi = row[offset + 3] || '';
+      opt4Hi = row[offset + 4] || '';
+      ans = (row[offset + 5] || '').trim();
+      solHi = row[offset + 6] || '';
+    }
+
+    // Ensure bilingual synchronization if only one language is present
+    if (!qHi && qEn) qHi = qEn;
+    if (!qEn && qHi) qEn = qHi;
+    if (!opt1Hi && opt1En) opt1Hi = opt1En;
+    if (!opt2Hi && opt2En) opt2Hi = opt2En;
+    if (!opt3Hi && opt3En) opt3Hi = opt3En;
+    if (!opt4Hi && opt4En) opt4Hi = opt4En;
+    if (!opt1En && opt1Hi) opt1En = opt1Hi;
+    if (!opt2En && opt2Hi) opt2En = opt2Hi;
+    if (!opt3En && opt3Hi) opt3En = opt3Hi;
+    if (!opt4En && opt4Hi) opt4En = opt4Hi;
+    if (!solHi && solEn) solHi = solEn;
+    if (!solEn && solHi) solEn = solHi;
+
+    // Normalize Answer to A, B, C, D
+    const cleanAns = ans.toUpperCase().trim().replace(/^(?:OPTION\s*|OPT\s*)/i, '').slice(0, 1);
+    const validAns = ['A', 'B', 'C', 'D'].includes(cleanAns) ? cleanAns : (ans.trim() || 'A');
+
+    if (!qHi && !opt1Hi) continue;
 
     let qType: QuestionType = 'MCQ';
     if (ans.startsWith('[') && ans.endsWith(']')) qType = 'MSQ';
@@ -1124,43 +1228,80 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
       id: `mt_row_${r}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       question_r: qNum,
       question_type: qType,
-      question_hi: getCol(row, 'question_hi'),
-      option1_hi: getCol(row, 'option1_hi'),
-      option2_hi: getCol(row, 'option2_hi'),
-      option3_hi: getCol(row, 'option3_hi'),
-      option4_hi: getCol(row, 'option4_hi'),
-      option5_hi: getCol(row, 'option5_hi'),
-      solution_hi: getCol(row, 'solution_hi'),
-      question_en: getCol(row, 'question_en'),
-      option1_en: getCol(row, 'option1_en'),
-      option2_en: getCol(row, 'option2_en'),
-      option3_en: getCol(row, 'option3_en'),
-      option4_en: getCol(row, 'option4_en'),
-      option5_en: getCol(row, 'option5_en'),
-      solution_en: getCol(row, 'solution_en'),
-      answer: ans,
-      set_name: getCol(row, 'set_name') || defaultSetName,
-      difficulty_level: (getCol(row, 'difficulty_level').toLowerCase() as DifficultyLevel) || 'medium',
-      test_date: getCol(row, 'test_date'),
-      test_time: getCol(row, 'test_time'),
-      subject: getCol(row, 'subject'),
-      subject_level: getCol(row, 'subject_level'),
-      figure_notes: getCol(row, 'figure_notes'),
-      correction_notes: getCol(row, 'correction_notes'),
-      source_pdf: getCol(row, 'source_pdf'),
-      source_pages: getCol(row, 'source_pages'),
-      source_question_reference: getCol(row, 'source_question_reference') || `Q.${qNum}`,
-      latex_check: getCol(row, 'latex_check') || 'checked',
-      html_check: getCol(row, 'html_check') || 'checked',
-      answer_check: getCol(row, 'answer_check') || 'checked',
-      solution_check: getCol(row, 'solution_check') || 'checked',
-      hash_figure: getCol(row, 'hash_figure'),
-      manually_review: getCol(row, 'manually_review') || 'checked',
-      duplicate_statistics: getCol(row, 'duplicate_statistics') || 'Unique within this shift; duplicate check completed.'
+      question_hi: qHi,
+      option1_hi: opt1Hi,
+      option2_hi: opt2Hi,
+      option3_hi: opt3Hi,
+      option4_hi: opt4Hi,
+      option5_hi: opt5Hi,
+      solution_hi: solHi,
+      question_en: qEn,
+      option1_en: opt1En,
+      option2_en: opt2En,
+      option3_en: opt3En,
+      option4_en: opt4En,
+      option5_en: opt5En,
+      solution_en: solEn,
+      answer: validAns,
+      set_name: hasRecognizedHeader ? (getCol(row, 'set_name') || defaultSetName) : defaultSetName,
+      difficulty_level: (diff.toLowerCase() as DifficultyLevel) || 'medium',
+      test_date: hasRecognizedHeader ? getCol(row, 'test_date') : '',
+      test_time: hasRecognizedHeader ? getCol(row, 'test_time') : '',
+      subject: subject || 'General',
+      subject_level: hasRecognizedHeader ? getCol(row, 'subject_level') : '',
+      figure_notes: hasRecognizedHeader ? getCol(row, 'figure_notes') : '',
+      correction_notes: hasRecognizedHeader ? getCol(row, 'correction_notes') : '',
+      source_pdf: hasRecognizedHeader ? getCol(row, 'source_pdf') : '',
+      source_pages: hasRecognizedHeader ? getCol(row, 'source_pages') : '',
+      source_question_reference: hasRecognizedHeader ? (getCol(row, 'source_question_reference') || `Q.${qNum}`) : `Q.${qNum}`,
+      latex_check: 'checked',
+      html_check: 'checked',
+      answer_check: 'checked',
+      solution_check: 'checked',
+      hash_figure: hasRecognizedHeader ? getCol(row, 'hash_figure') : '',
+      manually_review: 'checked',
+      duplicate_statistics: 'Unique within this shift; duplicate check completed.'
     });
   }
 
   return items.map(cleanMockTestItem);
+}
+
+/**
+ * Universal smart parser for ANY pasted text content:
+ * Accepts CSV, TSV (Excel copy), JSON array / object, markdown code blocks, or raw plain questions.
+ */
+export function parseAnyMockTestPastedText(
+  text: string,
+  setName = 'Mock Test Paper',
+  startIndex = 1
+): MockTestMcqItem[] {
+  if (!text || !text.trim()) return [];
+  const trimmed = text.trim();
+
+  // 1. If it looks like JSON or contains JSON blocks
+  if (trimmed.startsWith('[') || trimmed.startsWith('{') || trimmed.includes('```json') || (trimmed.includes('"question"') && trimmed.includes('{'))) {
+    try {
+      const jsonItems = parseAiOutputToMockTestItems(trimmed, setName, startIndex);
+      if (jsonItems && jsonItems.length > 0) return jsonItems;
+    } catch {}
+  }
+
+  // 2. Try CSV / TSV table parsing
+  if (trimmed.includes(',') || trimmed.includes('\t') || trimmed.includes(';')) {
+    try {
+      const csvItems = parseCsvToMockTestItems(trimmed, setName);
+      if (csvItems && csvItems.length > 0) return csvItems;
+    } catch {}
+  }
+
+  // 3. Fallback to heuristic parser
+  try {
+    const aiItems = parseAiOutputToMockTestItems(trimmed, setName, startIndex);
+    if (aiItems && aiItems.length > 0) return aiItems;
+  } catch {}
+
+  return [];
 }
 
 /**

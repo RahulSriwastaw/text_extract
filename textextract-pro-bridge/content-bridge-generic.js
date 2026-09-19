@@ -728,29 +728,36 @@
           if (userNodes[matchedIndex]) {
             LOG(`[TurnPairing] DeepSeek: Clicking user turn #${matchedIndex}`);
             userNodes[matchedIndex].click();
-            await sleep(600);
+            await sleep(500);
           }
         } catch (e) {
           LOG("[TurnPairing] DeepSeek turn click error:", e);
         }
-
-        // After activating turn, check visible assistant turns or code blocks
-        const activeTurns = getAssistantTurnNodes();
-        for (let i = activeTurns.length - 1; i >= 0; i--) {
-          const t = (activeTurns[i].innerText || activeTurns[i].textContent || "").trim();
-          if (t.length > 20 && !isOurPromptText(t)) {
-            const qs = extractQuestionsFromText(t);
-            if (qs.length) return t;
-            if (extractJsonCandidate(t)) return t;
-          }
-        }
       }
 
-      if (matchedIndex >= 0 && matchedIndex < assistantTurns.length) {
-        const t = (assistantTurns[matchedIndex].innerText || assistantTurns[matchedIndex].textContent || "").trim();
+      const freshAssistantTurns = getAssistantTurnNodes();
+      const candidateTurns = freshAssistantTurns.length >= assistantTurns.length ? freshAssistantTurns : assistantTurns;
+
+      if (matchedIndex >= 0 && matchedIndex < candidateTurns.length) {
+        const t = (candidateTurns[matchedIndex].innerText || candidateTurns[matchedIndex].textContent || "").trim();
         if (t.length > 20 && !isOurPromptText(t)) {
           LOG(`[TurnPairing] Priority 2: Returning paired assistant turn #${matchedIndex}`);
           return t;
+        }
+      }
+
+      // If exact index wasn't within bounds, check the assistant turn directly following the matched user node
+      if (matchedIndex >= 0 && userNodes[matchedIndex]) {
+        const uNode = userNodes[matchedIndex];
+        const nextTurn = candidateTurns.find(at => 
+          (uNode.compareDocumentPosition(at) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+        );
+        if (nextTurn) {
+          const t = (nextTurn.innerText || nextTurn.textContent || "").trim();
+          if (t.length > 20 && !isOurPromptText(t)) {
+            LOG(`[TurnPairing] Priority 2b: Returning directly following assistant turn`);
+            return t;
+          }
         }
       }
     }
@@ -1473,9 +1480,13 @@
       const j = extractJsonCandidate(replyText);
       if (j && j !== "[]") return "```json\n" + j + "\n```";
       if (/"question"\s*:/i.test(replyText)) return replyText;
+      if (replyText && replyText.length > 30 && !isOurPromptText(replyText)) {
+        progress(msg.requestId, "done", `Scraped text content (${replyText.length} chars)`, adminTabId);
+        return replyText;
+      }
 
       throw new Error(
-        "No questions found in chat DOM for this page. Click AI Copy on the JSON, then Paste JSON in admin."
+        "No reply content found in chat DOM for this page. Please wait for AI to finish, or click Paste CSV."
       );
     } finally {
       stopHb();

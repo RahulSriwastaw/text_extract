@@ -3,7 +3,7 @@ import {
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
-  ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare
+  ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare, Clipboard
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -25,6 +25,7 @@ import {
   downloadMockTestCsv, 
   serializeMockTestToCsv, 
   parseCsvToMockTestItems, 
+  parseAnyMockTestPastedText,
   parseAiOutputToMockTestItems,
   buildMockTestDirectPrompt,
   buildMockTestBridgePrompt,
@@ -173,6 +174,11 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [extractionMode, setExtractionMode] = useState<'exact' | 'similar'>('exact');
   const [generatingSimilarId, setGeneratingSimilarId] = useState<string | null>(null);
   const [isGeneratingSimilarBatch, setIsGeneratingSimilarBatch] = useState(false);
+
+  // Per-page CSV / TSV / JSON manual paste drawer state
+  const [activePastePageId, setActivePastePageId] = useState<string | null>(null);
+  const [pasteInputText, setPasteInputText] = useState<string>('');
+  const [pasteError, setPasteError] = useState<string | null>(null);
 
   // Extracted MCQs state
   const [extractedMcqs, setExtractedMcqs] = useState<MockTestMcqItem[]>([]);
@@ -553,7 +559,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           totalPages: pages.length,
           expectedMarker: initialMarker,
           silent: true,
-          onProgress: (step, detail) => {
+          onProgress: (step, detail, chatUrl) => {
+            if (chatUrl) {
+              setDocumentChatUrl(chatUrl);
+            }
             const msg = detail || `${step.toUpperCase()}...`;
             setLiveStatusText(`[Page ${page.pageNumber}] ${msg}`);
             setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
@@ -1085,9 +1094,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
   // Manual Recapture from open AI tab (Gemini/ChatGPT/DeepSeek/Claude)
   const handleRecaptureFromAiTab = async (page: PageQueueItem) => {
-    if (isProcessingAll) return;
-    setLiveStatusText(`Page ${page.pageNumber}: Recapturing complete response from AI tab...`);
-    setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: 'Reading complete response from AI tab...' } : p));
+    if (isProcessingAll && !isPaused) {
+      const confirmOverride = confirm(
+        `Batch processing is currently active. Would you like to pause batch extraction and recapture Page ${page.pageNumber} now?`
+      );
+      if (!confirmOverride) return;
+      pauseRef.current = true;
+      setIsPaused(true);
+      await new Promise(r => setTimeout(r, 300));
+    }
+    setIsProcessingAll(false);
+
+    setLiveStatusText(`Page ${page.pageNumber}: Recapturing response from AI tab...`);
+    setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: 'Reading response from AI tab...' } : p));
 
     try {
       const provider = selectedProvider || getStoredAiProvider() || 'gemini';
@@ -1104,7 +1123,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       }
 
       const startIndex = extractedMcqs.filter(it => it.pageId !== page.id).length + 1;
-      let formattedItems = parseAiOutputToMockTestItems(rawText, setName, startIndex);
+      let formattedItems = parseAnyMockTestPastedText(rawText, setName, startIndex);
       if (formattedItems.length === 0) {
         const elements = parseExtensionOutputToElements(rawText);
         if (elements && elements.length > 0) {
@@ -1113,7 +1132,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       }
 
       if (formattedItems.length === 0) {
-        throw new Error('AI tab content captured, but could not extract structured MCQs.');
+        throw new Error('AI tab content captured, but could not extract structured MCQs. You can also paste CSV / JSON directly using the "Paste CSV" button below the page.');
       }
 
       formattedItems = formattedItems.map(item => ({
@@ -1145,6 +1164,60 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       setLiveStatusText(`Page ${page.pageNumber}: ${msg}`);
       setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
       alert(`Recapture failed: ${msg}`);
+    }
+  };
+
+  // Direct manual paste of CSV / TSV / JSON for a specific page
+  const handleImportPastedContentForPage = (page: PageQueueItem, rawInput: string) => {
+    const text = rawInput.trim();
+    if (!text) {
+      setPasteError('Please enter or paste CSV, TSV table, or JSON questions first.');
+      return;
+    }
+
+    try {
+      const startIndex = extractedMcqs.filter(it => it.pageId !== page.id).length + 1;
+      let formattedItems = parseAnyMockTestPastedText(text, setName, startIndex);
+      if (formattedItems.length === 0) {
+        const elements = parseExtensionOutputToElements(text);
+        if (elements && elements.length > 0) {
+          formattedItems = convertElementsToMockTestItems(elements, setName);
+        }
+      }
+
+      if (formattedItems.length === 0) {
+        setPasteError('Could not detect questions. Please verify your CSV has question/option columns, or is valid JSON/TSV.');
+        return;
+      }
+
+      formattedItems = formattedItems.map(item => ({
+        ...item,
+        pageNumber: page.pageNumber,
+        pageId: page.id,
+        set_name: setName,
+        difficulty_level: difficulty
+      }));
+
+      setPages(prev => prev.map(p => p.id === page.id ? {
+        ...p,
+        status: 'ready',
+        mcqCount: formattedItems.length,
+        errorMessage: undefined,
+        items: formattedItems
+      } : p));
+
+      setExtractedMcqs(prev => {
+        const withoutThisPage = prev.filter(it => it.pageId !== page.id);
+        const nextList = [...withoutThisPage, ...formattedItems];
+        return nextList.map((it, idx) => ({ ...it, question_r: idx + 1 }));
+      });
+
+      setActivePastePageId(null);
+      setPasteInputText('');
+      setPasteError(null);
+      setLiveStatusText(`✓ Page ${page.pageNumber}: Successfully imported ${formattedItems.length} MCQs from pasted CSV/JSON!`);
+    } catch (err: any) {
+      setPasteError(`Import failed: ${err?.message || err}`);
     }
   };
 
@@ -2821,6 +2894,31 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                             <Camera className="w-3.5 h-3.5 text-cyan-400" />
                             <span>Recapture</span>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (activePastePageId === page.id) {
+                                setActivePastePageId(null);
+                                setPasteInputText('');
+                                setPasteError(null);
+                              } else {
+                                setActivePastePageId(page.id);
+                                setPasteInputText('');
+                                setPasteError(null);
+                              }
+                            }}
+                            disabled={page.status === 'processing'}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg font-bold transition-all disabled:opacity-40 ${
+                              activePastePageId === page.id
+                                ? 'bg-amber-500/25 border-amber-500/60 text-amber-200 shadow-sm'
+                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-300 hover:text-emerald-200'
+                            }`}
+                            title="Paste CSV rows, Excel table, or JSON directly for this page"
+                          >
+                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Paste CSV</span>
+                          </button>
                         </div>
 
                         <button
@@ -2833,6 +2931,88 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
+
+                      {/* Inline Manual Paste CSV / JSON Drawer directly below page */}
+                      {activePastePageId === page.id && (
+                        <div className="mt-3 p-3.5 bg-slate-900/95 border border-emerald-500/40 rounded-xl space-y-2.5 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+                              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                              <span>Paste CSV / Table / JSON (Page {page.pageNumber})</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => { setActivePastePageId(null); setPasteInputText(''); setPasteError(null); }}
+                              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10"
+                              title="Close"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <p className="text-[11px] text-slate-400 leading-tight">
+                            DeepSeek, ChatGPT, Excel ya kahi se bhi Page {page.pageNumber} ke CSV rows ya JSON yaha paste karein:
+                          </p>
+
+                          <textarea
+                            value={pasteInputText}
+                            onChange={(e) => { setPasteInputText(e.target.value); setPasteError(null); }}
+                            placeholder={`Example CSV format:\nquestion_hi,option1_hi,option2_hi,option3_hi,option4_hi,answer,solution_hi\n"भारत की राजधानी?","मुंबई","दिल्ली","कोलकाता","चेन्नई","B","दिल्ली भारत की राजधानी है"`}
+                            rows={5}
+                            className="w-full bg-black/70 border border-white/10 rounded-lg p-2.5 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 custom-scrollbar resize-y"
+                          />
+
+                          {pasteError && (
+                            <div className="text-[11px] text-rose-400 flex items-center gap-1.5 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>{pasteError}</span>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const clipText = await navigator.clipboard.readText();
+                                  if (clipText && clipText.trim()) {
+                                    setPasteInputText(clipText.trim());
+                                    setPasteError(null);
+                                  } else {
+                                    setPasteError('Clipboard is empty.');
+                                  }
+                                } catch (e) {
+                                  setPasteError('Could not read clipboard. Please paste manually (Ctrl+V).');
+                                }
+                              }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white rounded-lg text-xs font-semibold transition-all"
+                              title="Paste directly from clipboard"
+                            >
+                              <Clipboard className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>Paste Clipboard</span>
+                            </button>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => { setActivePastePageId(null); setPasteInputText(''); setPasteError(null); }}
+                                className="px-2.5 py-1.5 text-slate-400 hover:text-slate-200 text-xs font-semibold"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleImportPastedContentForPage(page, pasteInputText)}
+                                disabled={!pasteInputText.trim()}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold rounded-lg text-xs shadow-md transition-all disabled:opacity-40"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Import to Page {page.pageNumber}</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* RIGHT SIDE: Extracted Questions for THIS Page */}

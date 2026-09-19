@@ -39,7 +39,7 @@ function resolveProvider(id) {
   return PROVIDERS[id] || PROVIDERS.gemini;
 }
 
-const EXT_VERSION = "2.3.9";
+const EXT_VERSION = "2.4.0";
 
 const JOBS_KEY = "study_ai_jobs_v1";
 

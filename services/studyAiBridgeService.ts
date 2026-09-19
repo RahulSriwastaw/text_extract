@@ -44,7 +44,7 @@ export interface ExtractWithBridgeOptions {
   pageNumber?: number;
   totalPages?: number;
   expectedMarker?: string;
-  onProgress?: (step: string, detail?: string) => void;
+  onProgress?: (step: string, detail?: string, chatUrl?: string) => void;
 }
 
 let cachedStatus: BridgeStatus = {
@@ -363,7 +363,7 @@ export async function extractWithStudyAiBridge(
 
       if (data.type === 'STUDY_AI_PROGRESS' && data.requestId === requestId) {
         if (options.onProgress) {
-          options.onProgress(data.step || 'working', data.detail || '');
+          options.onProgress(data.step || 'working', data.detail || '', data.chatUrl);
         }
       }
 

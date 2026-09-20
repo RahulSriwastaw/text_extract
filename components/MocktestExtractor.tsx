@@ -848,16 +848,20 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     }
 
     if (aiEngine === 'bridge' && !bridgeStatus.connected) {
-      const ping = await pingStudyAiExtension(2000);
+      const ping = await pingStudyAiExtension(1500);
       if (!ping.connected) {
-        alert(
+        const useApiInstead = confirm(
           'TextExtract Pro Bridge Extension se connection nahi mil pa raha hai.\n\n' +
-          'Aasan Samadhan:\n' +
-          '1. Agar aapne extension abhi reload ya install kiya hai, to please is webpage ko ek baar REFRESH (F5) karein taaki naya connection bind ho sake.\n' +
-          '2. chrome://extensions par check karein ki "TextExtract Pro Bridge" on hai.'
+          'Kya aap Direct Gemini API (23 Rotating Keys) se bina extension ke turant extraction karna chahte hain?\n\n' +
+          '• [OK] dabayein: Direct Gemini API se turant extraction shuru karein (No extension needed).\n' +
+          '• [Cancel] dabayein: Extension connection modal kholein.'
         );
-        setShowConnectModal(true);
-        return;
+        if (useApiInstead) {
+          setAiEngine('api');
+        } else {
+          setShowConnectModal(true);
+          return;
+        }
       }
     }
 

@@ -1543,7 +1543,7 @@ const STRICT_MATH_AND_TEXT_PROMPT_RULES = `
 
 app.post('/api/mocktest-solve', async (req, res) => {
   try {
-    const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option1_en, option2_en, option3_en, option4_en, answer, question_type } = req.body;
+    const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option5_hi, option1_en, option2_en, option3_en, option4_en, option5_en, answer, question_type } = req.body;
     const userKey = (req.headers['x-user-gemini-key'] as string) || '';
 
     const qPrompt = `You are an elite Indian Competitive Exam Educator and Master Test-Series Author (specializing in SSC CGL/CHSL, Railway RRB NTPC/ALP/Group-D, Banking IBPS/SBI, UPSC, State PSC, and YCT-style exam publications).
@@ -1559,6 +1559,7 @@ Question: ${question_hi || ''}
 (B) ${option2_hi || ''}
 (C) ${option3_hi || ''}
 (D) ${option4_hi || ''}
+${option5_hi ? `(E) ${option5_hi}` : ''}
 
 ENGLISH:
 Question: ${question_en || ''}
@@ -1566,6 +1567,7 @@ Question: ${question_en || ''}
 (B) ${option2_en || ''}
 (C) ${option3_en || ''}
 (D) ${option4_en || ''}
+${option5_en ? `(E) ${option5_en}` : ''}
 
 CRITICAL PEDAGOGICAL GUIDELINES (DETAILED & STUDENT-FRIENDLY STANDARD):
 1. DYNAMIC STEP-BY-STEP PATTERN (जैसा प्रश्न वैसा विस्तृत पैटर्न):
@@ -1644,11 +1646,13 @@ Option 1 (Hindi): "${item.option1_hi || ''}"
 Option 2 (Hindi): "${item.option2_hi || ''}"
 Option 3 (Hindi): "${item.option3_hi || ''}"
 Option 4 (Hindi): "${item.option4_hi || ''}"
+${item.option5_hi ? `Option 5 (Hindi): "${item.option5_hi}"` : ''}
 Question (English): "${item.question_en || ''}"
 Option 1 (English): "${item.option1_en || ''}"
 Option 2 (English): "${item.option2_en || ''}"
 Option 3 (English): "${item.option3_en || ''}"
 Option 4 (English): "${item.option4_en || ''}"
+${item.option5_en ? `Option 5 (English): "${item.option5_en}"` : ''}
 Answer Candidate: "${item.answer || ''}"
 
 MANDATORY TASKS TO EXECUTE:
@@ -2401,8 +2405,11 @@ app.post('/api/mocktest-add-question', async (req, res) => {
       targetPageNumber = 1, 
       nextQuestionNumber = 1, 
       difficulty = 'medium',
-      instruction = ''
+      instruction = '',
+      optionCount = 4
     } = req.body;
+
+    const optCount = Number(optionCount) === 5 ? 5 : 4;
 
     if (!text.trim() && !base64Image) {
       return res.status(400).json({ error: "Please provide either question text, an instruction, or an image/screenshot." });
@@ -2424,14 +2431,15 @@ INPUT PROVIDED:
 - Sequence Number: Q#${nextQuestionNumber}
 - Target Page: Page ${targetPageNumber}
 - Difficulty Level: ${difficulty}
+- Required Options Count: ${optCount} Options (${optCount === 5 ? 'A, B, C, D, and E' : 'A, B, C, and D'})
 
 YOUR MISSION:
 1. Parse the input (whether image screenshot, raw unformatted text, or prompt) and build a complete, professional exam MCQ:
-   - If a screenshot/image is provided: extract the question, all 4 options, and figure/diagram context with high fidelity.
+   - If a screenshot/image is provided: extract the question, all options (${optCount} options: ${optCount === 5 ? 'A, B, C, D, and E' : 'A, B, C, and D'}), and figure/diagram context with high fidelity.
    - If raw text is provided: format it into clear, well-structured Hindi and English question stems and options.
-   - If an instruction/topic is provided (e.g. "Create a question on..."): formulate an authentic, exam-standard question with realistic distractors.
+   - If an instruction/topic is provided: formulate an authentic, exam-standard question with ${optCount} realistic options (${optCount === 5 ? 'A, B, C, D, and E' : 'A, B, C, and D'}).
 2. BOTH Hindi and English fields MUST be fully populated!
-3. Accurately deduce and verify the SINGLE CORRECT ANSWER ("A", "B", "C", or "D").
+3. Accurately deduce and verify the SINGLE CORRECT ANSWER (${optCount === 5 ? '"A", "B", "C", "D", or "E"' : '"A", "B", "C", or "D"'}).
 4. Formulate an IN-DEPTH, STEP-BY-STEP PEDAGOGICAL SOLUTION in BOTH Hindi and English:
    - Math/Numericals: State given data ("दिया गया है / Given that:"), LaTeX formula ($...$), complete step-by-step intermediate calculation without skipping steps so any level of student can follow easily, conclude with final value with units.
    - Reasoning: Core rule/logic, full step-by-step pattern verification for each term, conclusion.
@@ -2439,7 +2447,7 @@ YOUR MISSION:
    - Language: Grammar rule/meaning + usage example.
 5. STRICT NO-OPTION-LETTER RULE (CRITICAL FOR SHUFFLED OPTIONS):
    - Options shuffle dynamically in mock test portals!
-   - YOU MUST NEVER mention option letters (A, B, C, D) or option numbers in solution_hi or solution_en! (e.g. NEVER write "सही विकल्प A है" or "Option B is correct").
+   - YOU MUST NEVER mention option letters (A, B, C, D, E) or option numbers in solution_hi or solution_en! (e.g. NEVER write "सही विकल्प A है" or "Option B is correct").
    - State the factual name, term, formula, or calculated value directly!
 6. CRITICAL CURRENT AFFAIRS RULE (STRICT LAST 1-YEAR WINDOW ONLY):
    - If the question belongs to Current Affairs, contemporary government schemes, national initiatives, sports tournaments, awards, summits, appointments, union budget, or recent GK:
@@ -2458,12 +2466,12 @@ Respond with ONLY a strict JSON object:
     "option2_hi": "...",
     "option3_hi": "...",
     "option4_hi": "...",
-    "option5_hi": "",
+    "option5_hi": "${optCount === 5 ? 'Option E Hindi text' : ''}",
     "option1_en": "...",
     "option2_en": "...",
     "option3_en": "...",
     "option4_en": "...",
-    "option5_en": "",
+    "option5_en": "${optCount === 5 ? 'Option E English text' : ''}",
     "answer": "A",
     "solution_hi": "...",
     "solution_en": "...",

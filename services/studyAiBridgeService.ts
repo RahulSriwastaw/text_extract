@@ -45,6 +45,7 @@ export interface ExtractWithBridgeOptions {
   pageNumber?: number;
   totalPages?: number;
   expectedMarker?: string;
+  signal?: AbortSignal;
   onProgress?: (step: string, detail?: string, chatUrl?: string) => void;
 }
 
@@ -358,7 +359,31 @@ export async function extractWithStudyAiBridge(
     const cleanup = () => {
       window.removeEventListener('message', messageHandler);
       if (timer) clearTimeout(timer);
+      if (options.signal) {
+        options.signal.removeEventListener('abort', onAbort);
+      }
     };
+
+    const onAbort = () => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      try {
+        window.postMessage({
+          source: PAGE_SOURCE,
+          type: 'CANCEL_REQUEST',
+          requestId
+        }, '*');
+      } catch {}
+      reject(new DOMException('Extraction stopped by user.', 'AbortError'));
+    };
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        return reject(new DOMException('Extraction stopped by user.', 'AbortError'));
+      }
+      options.signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     const messageHandler = (event: MessageEvent) => {
       if (event.source !== window || !event.data) return;

@@ -2,24 +2,28 @@ import React, { useState, useMemo, useRef } from 'react';
 import { 
   X, Download, Sparkles, Plus, Trash2, Copy, Check, FileSpreadsheet, 
   Upload, Eye, Edit3, ChevronDown, ChevronUp, AlertCircle, AlertTriangle,
-  CheckCircle2, Loader2, BookOpen, Layers, ArrowUpDown, MessageSquare, FileText
+  CheckCircle2, Loader2, BookOpen, Layers, ArrowUpDown, MessageSquare, FileText,
+  ClipboardPaste
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MockTestMcqItem, QuestionType, DifficultyLevel } from '../types';
 import { MocktestAiChatModal } from './MocktestAiChatModal';
 import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
+import { MocktestPasteCsvModal } from './MocktestPasteCsvModal';
 import { LatexRenderer } from './MocktestExtractor';
 import { 
   downloadMockTestCsv, 
   serializeMockTestToCsv, 
   parseCsvToMockTestItems, 
+  parseAnyMockTestPastedText,
   generateDeepSolutionForItem,
   ensureHtmlParagraph,
   STANDARD_SUBJECTS,
   normalizeStrictSubject,
   detectItemFieldIssues,
   autoRecoverItemOptionsFromStem,
-  repairMockTestItemWithAi
+  repairMockTestItemWithAi,
+  detectMissingQuestionNumbers
 } from '../services/mocktestService';
 import { downloadMcqAsDocx } from '../services/mcqDocxService';
 
@@ -57,6 +61,20 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
   const isCardEditing = (id: string) => (cardMode[id] !== undefined ? cardMode[id] === 'edit' : viewMode === 'edit');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [showPasteCsvModal, setShowPasteCsvModal] = useState<boolean>(false);
+  const [optionCountMode, setOptionCountMode] = useState<'4_options' | '5_options'>('4_options');
+
+  const missingGaps = useMemo(() => detectMissingQuestionNumbers(items), [items]);
+  const has5Options = useMemo(() => {
+    return items.some(it => 
+      Boolean((it.option5_hi && it.option5_hi.trim().length > 0)) || 
+      Boolean((it.option5_en && it.option5_en.trim().length > 0)) ||
+      it.answer === 'E' || it.answer === '5'
+    );
+  }, [items]);
+
+  // Keep 4 options as default mode. Users can switch to 5 options explicitly via toolbar toggle.
+
   // Sync initialItems if provided and local items are empty
   React.useEffect(() => {
     if (initialItems && initialItems.length > 0) {
@@ -66,6 +84,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
   const handleAddQuestion = () => {
     const nextNum = items.length + 1;
+    const is5Opts = optionCountMode === '5_options';
     const newItem: MockTestMcqItem = {
       id: `mt_manual_${Date.now()}`,
       question_r: nextNum,
@@ -75,14 +94,14 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
       option2_hi: '<p>विकल्प B</p>',
       option3_hi: '<p>विकल्प C</p>',
       option4_hi: '<p>विकल्प D</p>',
-      option5_hi: '',
+      option5_hi: is5Opts ? '<p>विकल्प E</p>' : '',
       solution_hi: '<p>विस्तृत विवरण...</p>',
       question_en: '<p>Enter new question here...</p>',
       option1_en: '<p>Option A</p>',
       option2_en: '<p>Option B</p>',
       option3_en: '<p>Option C</p>',
       option4_en: '<p>Option D</p>',
-      option5_en: '',
+      option5_en: is5Opts ? '<p>Option E</p>' : '',
       solution_en: '<p>Detailed explanation and proof...</p>',
       answer: answerFormat === 'letters' ? 'A' : '1',
       set_name: setName,
@@ -247,12 +266,12 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
     reader.onload = (evt) => {
       const text = evt.target?.result as string;
       if (text) {
-        const parsed = parseCsvToMockTestItems(text, setName);
+        const parsed = parseAnyMockTestPastedText(text, setName);
         if (parsed.length > 0) {
           setItems(parsed);
-          alert(`Successfully imported ${parsed.length} questions from CSV!`);
+          alert(`Successfully imported ${parsed.length} questions!`);
         } else {
-          alert('Could not parse any valid questions from the selected CSV file.');
+          alert('Could not parse any valid questions from the selected file.');
         }
       }
     };
@@ -377,19 +396,60 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                   onClick={() => setAnswerFormat('letters')}
                   className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${answerFormat === 'letters' ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                 >
-                  A, B, C, D
+                  A, B, C, D, E
                 </button>
                 <button
                   onClick={() => setAnswerFormat('numbers')}
                   className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${answerFormat === 'numbers' ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                 >
-                  1, 2, 3, 4
+                  1, 2, 3, 4, 5
+                </button>
+              </div>
+
+              {/* 4 Options vs 5 Options Selector */}
+              <div className="flex items-center gap-1 bg-white/[0.03] border border-white/[0.08] p-0.5 rounded-xl">
+                <span className="text-[10px] uppercase font-bold text-slate-500 px-1.5">Options:</span>
+                <button
+                  type="button"
+                  onClick={() => setOptionCountMode('4_options')}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${
+                    optionCountMode === '4_options' ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="4 options (Option A to D)"
+                >
+                  4 (A-D)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOptionCountMode('5_options')}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${
+                    optionCountMode === '5_options' ? 'bg-amber-500 text-black shadow-sm font-extrabold' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="5 options (Option A to E / e.g. BPSC, Bank PO, State PSCs)"
+                >
+                  5 (A-E)
                 </button>
               </div>
             </div>
 
             {/* Right side controls */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Paste CSV / Add Missing Questions Button */}
+              <button
+                type="button"
+                onClick={() => setShowPasteCsvModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-teal-600/20 transition-all"
+                title="Paste CSV from clipboard to fill missing question gaps or append new questions"
+              >
+                <ClipboardPaste className="w-3.5 h-3.5" />
+                <span>Paste CSV / Missing</span>
+                {missingGaps.length > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-400 text-black font-extrabold text-[10px] rounded-full animate-pulse">
+                    {missingGaps.length} missing
+                  </span>
+                )}
+              </button>
+
               <button
                 onClick={handleSolveAll}
                 disabled={isSolvingAll || items.length === 0}
@@ -414,12 +474,12 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                 title="Import existing CSV"
               >
                 <Upload className="w-3.5 h-3.5 text-blue-400" />
-                Import CSV
+                Import File
               </button>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,.json,.tsv,.txt"
                 onChange={handleImportCsv}
                 className="hidden"
               />
@@ -518,10 +578,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                       <th className="p-2.5">Subject (Strict)</th>
                       <th className="p-2.5">Level</th>
                       <th className="p-2.5">question_hi</th>
-                      <th className="p-2.5">options_hi (1-4)</th>
+                      <th className="p-2.5">options_hi (1-5)</th>
                       <th className="p-2.5">solution_hi</th>
                       <th className="p-2.5">question_en</th>
-                      <th className="p-2.5">options_en (1-4)</th>
+                      <th className="p-2.5">options_en (1-5)</th>
                       <th className="p-2.5">solution_en</th>
                       <th className="p-2.5">Ans</th>
                       <th className="p-2.5">Difficulty</th>
@@ -535,10 +595,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                         <td className="p-2.5 font-bold text-amber-300 bg-amber-500/5">{item.subject || 'Current Affairs'}</td>
                         <td className="p-2.5 text-slate-300">{item.subject_level || '—'}</td>
                         <td className="p-2.5 max-w-xs truncate" title={item.question_hi}>{item.question_hi}</td>
-                        <td className="p-2.5 max-w-xs truncate">{item.option1_hi} | {item.option2_hi} | {item.option3_hi} | {item.option4_hi}</td>
+                        <td className="p-2.5 max-w-xs truncate">{item.option1_hi} | {item.option2_hi} | {item.option3_hi} | {item.option4_hi}{item.option5_hi ? ` | ${item.option5_hi}` : ''}</td>
                         <td className="p-2.5 max-w-xs truncate text-emerald-300" title={item.solution_hi}>{item.solution_hi || '—'}</td>
                         <td className="p-2.5 max-w-xs truncate" title={item.question_en}>{item.question_en}</td>
-                        <td className="p-2.5 max-w-xs truncate">{item.option1_en} | {item.option2_en} | {item.option3_en} | {item.option4_en}</td>
+                        <td className="p-2.5 max-w-xs truncate">{item.option1_en} | {item.option2_en} | {item.option3_en} | {item.option4_en}{item.option5_en ? ` | ${item.option5_en}` : ''}</td>
                         <td className="p-2.5 max-w-xs truncate text-teal-300" title={item.solution_en}>{item.solution_en || '—'}</td>
                         <td className="p-2.5 font-bold font-mono text-white bg-white/[0.02] text-center">{item.answer}</td>
                         <td className="p-2.5">
@@ -558,6 +618,18 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                 {items.map((item, idx) => {
                   const issues = detectItemFieldIssues(item);
                   const isRepairing = repairingId === item.id;
+                  const is5OptQuestion = optionCountMode === '5_options' || 
+                    Boolean((item.option5_hi && item.option5_hi.trim().length > 0)) || 
+                    Boolean((item.option5_en && item.option5_en.trim().length > 0)) || 
+                    item.answer === 'E';
+
+                  const hiOptionKeys = is5OptQuestion 
+                    ? (['option1_hi', 'option2_hi', 'option3_hi', 'option4_hi', 'option5_hi'] as const)
+                    : (['option1_hi', 'option2_hi', 'option3_hi', 'option4_hi'] as const);
+
+                  const enOptionKeys = is5OptQuestion 
+                    ? (['option1_en', 'option2_en', 'option3_en', 'option4_en', 'option5_en'] as const)
+                    : (['option1_en', 'option2_en', 'option3_en', 'option4_en'] as const);
 
                   return (
                     <div 
@@ -784,9 +856,26 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                             </div>
                           )}
 
-                          {/* Hindi Options 1 to 4 */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {(['option1_hi', 'option2_hi', 'option3_hi', 'option4_hi'] as const).map((key, optIdx) => {
+                          {/* Hindi Options */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-amber-400/80 uppercase">
+                              Options ({hiOptionKeys.length}):
+                            </span>
+                            {isCardEditing(item.id) && !is5OptQuestion && (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateItem(item.id, { option5_hi: '<p>विकल्प E</p>', option5_en: '<p>Option E</p>' })}
+                                className="text-[10px] font-bold text-amber-300 hover:text-amber-200 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded transition-all"
+                                title="Add 5th option (Option E)"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>+ Option E</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className={`grid gap-2 ${is5OptQuestion ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                            {hiOptionKeys.map((key, optIdx) => {
                               const label = String.fromCharCode(65 + optIdx);
                               const optNum = String(optIdx + 1);
                               const isCorrect = item.answer === label || item.answer === optNum || item.answer?.includes(label) || item.answer?.includes(optNum);
@@ -803,14 +892,24 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                         : 'bg-black/30 border-white/[0.06]'
                                     }`}
                                   >
-                                    <span className={`text-[10px] font-bold w-4 text-center font-mono ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
+                                    <span className={`text-[10px] font-bold w-4 text-center font-mono shrink-0 ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
                                     <input
                                       type="text"
                                       value={item[key] || ''}
                                       onChange={(e) => handleUpdateItem(item.id, { [key]: e.target.value })}
-                                      placeholder={isBlank ? `⚠️ Blank (${label}) - Click AI Auto-Fill` : `विकल्प ${label}`}
-                                      className={`bg-transparent text-xs focus:outline-none flex-1 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
+                                      placeholder={isBlank ? `⚠️ Blank (${label})` : `विकल्प ${label}`}
+                                      className={`bg-transparent text-xs focus:outline-none flex-1 min-w-0 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
                                     />
+                                    {optIdx === 4 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateItem(item.id, { option5_hi: '', option5_en: '' })}
+                                        className="p-1 text-slate-500 hover:text-rose-400 transition-colors shrink-0"
+                                        title="Remove Option E"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    )}
                                   </div>
                                 );
                               }
@@ -891,9 +990,26 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                             </div>
                           )}
 
-                          {/* English Options 1 to 4 */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {(['option1_en', 'option2_en', 'option3_en', 'option4_en'] as const).map((key, optIdx) => {
+                          {/* English Options */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-blue-400/80 uppercase">
+                              Options ({enOptionKeys.length}):
+                            </span>
+                            {isCardEditing(item.id) && !is5OptQuestion && (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateItem(item.id, { option5_hi: '<p>विकल्प E</p>', option5_en: '<p>Option E</p>' })}
+                                className="text-[10px] font-bold text-blue-300 hover:text-blue-200 flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-0.5 rounded transition-all"
+                                title="Add 5th option (Option E)"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>+ Option E</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className={`grid gap-2 ${is5OptQuestion ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                            {enOptionKeys.map((key, optIdx) => {
                               const label = String.fromCharCode(65 + optIdx);
                               const optNum = String(optIdx + 1);
                               const isCorrect = item.answer === label || item.answer === optNum || item.answer?.includes(label) || item.answer?.includes(optNum);
@@ -910,14 +1026,24 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                         : 'bg-black/30 border-white/[0.06]'
                                     }`}
                                   >
-                                    <span className={`text-[10px] font-bold w-4 text-center font-mono ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
+                                    <span className={`text-[10px] font-bold w-4 text-center font-mono shrink-0 ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
                                     <input
                                       type="text"
                                       value={item[key] || ''}
                                       onChange={(e) => handleUpdateItem(item.id, { [key]: e.target.value })}
-                                      placeholder={isBlank ? `⚠️ Blank (${label}) - Click AI Auto-Fill` : `Option ${label}`}
-                                      className={`bg-transparent text-xs focus:outline-none flex-1 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
+                                      placeholder={isBlank ? `⚠️ Blank (${label})` : `Option ${label}`}
+                                      className={`bg-transparent text-xs focus:outline-none flex-1 min-w-0 ${isBlank ? 'text-amber-200 placeholder:text-amber-400/80 font-medium' : 'text-slate-200'}`}
                                     />
+                                    {optIdx === 4 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateItem(item.id, { option5_hi: '', option5_en: '' })}
+                                        className="p-1 text-slate-500 hover:text-rose-400 transition-colors shrink-0"
+                                        title="Remove Option E"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    )}
                                   </div>
                                 );
                               }
@@ -1033,6 +1159,17 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
         setName={setName}
         onAddQuestion={(newItem) => {
           setItems(prev => [...prev, newItem]);
+        }}
+      />
+
+      {/* Paste CSV / Add Missing Questions Modal */}
+      <MocktestPasteCsvModal
+        isOpen={showPasteCsvModal}
+        onClose={() => setShowPasteCsvModal(false)}
+        existingItems={items}
+        setName={setName}
+        onAddItems={(newItems) => {
+          setItems(newItems);
         }}
       />
     </AnimatePresence>

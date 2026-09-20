@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
-  BookOpen, CheckSquare, Square, Zap, Settings, RefreshCw, Key,
-  ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare, Clipboard
+  BookOpen, CheckSquare, Square, StopCircle, Zap, Settings, RefreshCw, Key,
+  ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare, Clipboard, ClipboardPaste, Save, History
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -13,6 +13,7 @@ import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import mammoth from 'mammoth';
 import { MocktestAiChatModal } from './MocktestAiChatModal';
 import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
+import { MocktestPasteCsvModal } from './MocktestPasteCsvModal';
 import { LatexRepairModal } from './LatexRepairModal';
 import { LatexRenderer, useMathJax } from './LatexRenderer';
 import { 
@@ -20,6 +21,8 @@ import {
   DifficultyLevel,
   LatexRepairScope
 } from '../types';
+import { useCurrentUser } from '../services/authService';
+import { addMocktestHistoryItem } from '../services/historyService';
 import { saveItemBackup, restoreItemBackup, canUndoItem } from '../services/latexRepairService';
 import { 
   downloadMockTestCsv, 
@@ -189,6 +192,39 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [isRepairingAll, setIsRepairingAll] = useState(false);
   const [repairProgress, setRepairProgress] = useState<{ current: number; total: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [user] = useCurrentUser();
+  const [isSavedToHistory, setIsSavedToHistory] = useState(false);
+
+  const handleSaveSetToHistory = async () => {
+    if (extractedMcqs.length === 0) return;
+    const currentUid = user?.uid || 'guest';
+    const item = {
+      id: 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      userId: currentUid,
+      setName: outputFileName || setName || 'Mock Test',
+      timestamp: Date.now(),
+      questionCount: extractedMcqs.length,
+      questions: extractedMcqs
+    };
+    await addMocktestHistoryItem(currentUid, item);
+    setIsSavedToHistory(true);
+    setTimeout(() => setIsSavedToHistory(false), 3000);
+    alert(`✨ Test set "${item.setName}" (${extractedMcqs.length} questions) successfully saved to your account history!`);
+  };
+
+  // Auto-save draft for this user ID so reload/refresh never loses progress
+  useEffect(() => {
+    if (extractedMcqs.length > 0) {
+      const currentUid = user?.uid || 'guest';
+      try {
+        localStorage.setItem(`mocktest_draft_${currentUid}`, JSON.stringify({
+          setName: outputFileName || setName,
+          timestamp: Date.now(),
+          questions: extractedMcqs
+        }));
+      } catch (_) {}
+    }
+  }, [extractedMcqs, outputFileName, setName, user]);
 
   // AI LaTeX Repair Modal state
   const [latexRepairTarget, setLatexRepairTarget] = useState<{ item: MockTestMcqItem; scope: LatexRepairScope } | null>(null);
@@ -239,6 +275,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [activeChatQuestion, setActiveChatQuestion] = useState<MockTestMcqItem | null>(null);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
   const [addQuestionTargetPage, setAddQuestionTargetPage] = useState<number>(1);
+  const [showPasteCsvModal, setShowPasteCsvModal] = useState<boolean>(false);
+  const [pasteCsvTargetPage, setPasteCsvTargetPage] = useState<number | undefined>(undefined);
 
   // Modals & Bridge status
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
@@ -253,6 +291,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvImportInputRef = useRef<HTMLInputElement>(null);
   const pauseRef = useRef<boolean>(false);
+  const activeAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -514,6 +553,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     setActivePageIndex(pageIndex);
     setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'processing', errorMessage: undefined } : p));
     
+    const abortController = new AbortController();
+    activeAbortControllersRef.current.set(page.id, abortController);
+
     const carryNotice = pendingContext && pendingContext.pendingItems.length > 0
       ? ` (Carrying forward ${pendingContext.pendingItems.length} pending MCQ from P.${pendingContext.sourcePageNumber})`
       : '';
@@ -561,6 +603,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           totalPages: pages.length,
           expectedMarker: initialMarker,
           silent: true,
+          signal: abortController.signal,
           onProgress: (step, detail, chatUrl) => {
             if (chatUrl) {
               setDocumentChatUrl(chatUrl);
@@ -608,7 +651,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           pendingContext,
           page.pageNumber,
           isSimilar,
-          page.rawTextContent
+          page.rawTextContent,
+          abortController.signal
         );
       }
 
@@ -678,6 +722,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
         finalComplete = await Promise.all(
           finalComplete.map(async (item) => {
+            if (abortController.signal.aborted) {
+              return item;
+            }
             if (item.solution_hi && item.solution_hi.length > 35 && item.solution_en && item.solution_en.length > 35) {
               return item;
             }
@@ -695,6 +742,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
             }
           })
         );
+      }
+
+      if (abortController.signal.aborted) {
+        throw new DOMException('Extraction stopped by user.', 'AbortError');
       }
 
       // If last page, include any pending items as complete so nothing is lost
@@ -732,6 +783,15 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
       return { completeItems: finalComplete, nextPendingContext };
     } catch (err: any) {
+      const isAborted = err?.name === 'AbortError' || err?.message?.includes('stopped by user') || err?.message?.includes('aborted');
+      if (isAborted) {
+        setPages(prev => prev.map(p => p.id === page.id ? {
+          ...p,
+          status: (p.items && p.items.length > 0) ? 'ready' : 'pending',
+          errorMessage: 'Extraction stopped by user'
+        } : p));
+        throw err;
+      }
       const msg = err.message || 'Extraction failed';
       setPages(prev => prev.map(p => p.id === page.id ? {
         ...p,
@@ -739,6 +799,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         errorMessage: msg
       } : p));
       throw err;
+    } finally {
+      activeAbortControllersRef.current.delete(page.id);
     }
   };
 
@@ -834,7 +896,13 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           );
           carriedPendingContext = nextPendingContext;
         } catch (pageErr: any) {
-          console.error(`Error processing page ${page.pageNumber}:`, pageErr);
+          const isAborted = pageErr?.name === 'AbortError' || pageErr?.message?.includes('stopped by user') || pageErr?.message?.includes('aborted');
+          if (isAborted) {
+            console.log(`Page ${page.pageNumber} extraction stopped.`);
+            if (pauseRef.current) break;
+          } else {
+            console.error(`Error processing page ${page.pageNumber}:`, pageErr);
+          }
         }
 
         // Brief delay between sequential pages to avoid rate limiting
@@ -1007,6 +1075,16 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
           : `✓ Page ${page.pageNumber} extracted successfully!`
       );
     } catch (err: any) {
+      const isAborted = err?.name === 'AbortError' || err?.message?.includes('stopped by user') || err?.message?.includes('aborted');
+      if (isAborted) {
+        setPages(prev => prev.map(p => p.id === page.id ? {
+          ...p,
+          status: (p.items && p.items.length > 0) ? 'ready' : 'pending',
+          errorMessage: 'Extraction stopped by user'
+        } : p));
+        setLiveStatusText(`Page ${page.pageNumber} extraction stopped.`);
+        return;
+      }
       console.error(`Page ${page.pageNumber} processing failed:`, err);
       const errMsg = err?.message || 'Processing failed';
       setPages(prev => prev.map(p => p.id === page.id ? {
@@ -1018,6 +1096,56 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     } finally {
       setActivePageIndex(null);
     }
+  };
+
+  // Stop extraction for a specific running page
+  const handleStopPage = (pageId: string) => {
+    // If batch was running, pause batch processing so subsequent pages don't auto-run
+    if (isProcessingAll) {
+      pauseRef.current = true;
+      setIsPaused(true);
+    }
+    const controller = activeAbortControllersRef.current.get(pageId);
+    if (controller) {
+      controller.abort();
+      activeAbortControllersRef.current.delete(pageId);
+    }
+    setPages(prev => prev.map(p => {
+      if (p.id === pageId) {
+        return {
+          ...p,
+          status: (p.items && p.items.length > 0) ? 'ready' : 'pending',
+          errorMessage: 'Extraction stopped by user'
+        };
+      }
+      return p;
+    }));
+    const target = pages.find(p => p.id === pageId);
+    setLiveStatusText(target ? `Page ${target.pageNumber} extraction stopped.` : 'Extraction stopped.');
+    if (activePageIndex !== null && pages[activePageIndex]?.id === pageId) {
+      setActivePageIndex(null);
+    }
+  };
+
+  // Stop all running extractions
+  const handleStopAll = () => {
+    pauseRef.current = true;
+    setIsProcessingAll(false);
+    setIsPaused(false);
+    activeAbortControllersRef.current.forEach(ctrl => ctrl.abort());
+    activeAbortControllersRef.current.clear();
+    setPages(prev => prev.map(p => {
+      if (p.status === 'processing') {
+        return {
+          ...p,
+          status: (p.items && p.items.length > 0) ? 'ready' : 'pending',
+          errorMessage: 'Extraction stopped by user'
+        };
+      }
+      return p;
+    }));
+    setActivePageIndex(null);
+    setLiveStatusText('All extractions stopped by user.');
   };
 
   // Generate a brand-new similar question variant from an existing MCQ item
@@ -1379,14 +1507,14 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     reader.onload = (evt) => {
       const text = evt.target?.result as string;
       if (text) {
-        const parsed = parseCsvToMockTestItems(text, setName);
+        const parsed = parseAnyMockTestPastedText(text, setName);
         if (parsed.length > 0) {
           // Standardize imported items: enforce strict <p>...</p> wrapping and MathJax format
           const standardized = parsed.map(it => standardizeItemHtmlAndMathJax(it, mathFormat === 'mathjax'));
           setExtractedMcqs(standardized);
           alert(`✨ Successfully imported and standardized ${standardized.length} MCQs!\n\nAll bare text fields (e.g. Q.21-25, 46-50, 76) have been wrapped in <p>...</p> and formatted consistently.`);
         } else {
-          alert('Could not parse any MCQs from this CSV file. Verify headers.');
+          alert('Could not parse any MCQs from this file. Verify format (CSV, TSV, or JSON).');
         }
       }
     };
@@ -1633,6 +1761,49 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     setLiveStatusText(`✓ Q#${resolvedItem.question_r} successfully added to Page ${targetPageNumber}!`);
   };
 
+  // Insert or merge questions created via Paste CSV / Missing
+  const handlePasteCsvAddItems = (newOrMergedItems: MockTestMcqItem[], targetPageNum?: number) => {
+    const targetPage = targetPageNum ? pages.find(p => p.pageNumber === targetPageNum) : undefined;
+
+    const resolvedItems = newOrMergedItems.map(it => {
+      // If item is assigned to this target page and lacks proper pageId / source_pages
+      if (targetPageNum && (it.pageNumber === targetPageNum || !it.pageNumber)) {
+        return {
+          ...it,
+          pageNumber: targetPageNum,
+          pageId: targetPage?.id || it.pageId,
+          source_pages: it.source_pages || String(targetPageNum),
+          set_name: it.set_name || setName
+        };
+      }
+      return {
+        ...it,
+        set_name: it.set_name || setName
+      };
+    });
+
+    setExtractedMcqs(resolvedItems);
+
+    // Sync with pages
+    setPages(prevPages => prevPages.map(p => {
+      const pQuestions = resolvedItems.filter(it => 
+        (it.pageId && it.pageId === p.id) || it.pageNumber === p.pageNumber
+      );
+      return {
+        ...p,
+        items: pQuestions,
+        mcqCount: pQuestions.length,
+        status: pQuestions.length > 0 && (p.status === 'pending' || p.status === 'error') ? 'ready' : p.status
+      };
+    }));
+
+    setLiveStatusText(
+      targetPageNum
+        ? `✓ Questions successfully added to Page ${targetPageNum} via CSV paste (${resolvedItems.length} total)!`
+        : `✓ Test questions successfully updated via CSV paste (${resolvedItems.length} total)!`
+    );
+  };
+
   // Single Question AI Repair
   const handleAiRepairSingle = async (item: MockTestMcqItem) => {
     setRepairingId(item.id);
@@ -1841,7 +2012,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
               <input
                 ref={csvImportInputRef}
                 type="file"
-                accept=".csv"
+                accept=".csv,.json,.tsv,.txt"
                 onChange={handleImportCsv}
                 className="hidden"
               />
@@ -1883,6 +2054,36 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Question (Paste / AI)</span>
+            </button>
+
+            {/* Paste CSV / Missing Questions Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setPasteCsvTargetPage(undefined);
+                setShowPasteCsvModal(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-extrabold rounded-xl text-xs transition-all shadow-md shadow-teal-600/20 shrink-0"
+              title="Paste CSV or missing questions extracted separately to fill gaps or assign to pages"
+            >
+              <ClipboardPaste className="w-3.5 h-3.5" />
+              <span>Paste CSV / Missing</span>
+            </button>
+
+            {/* Save Set to Account History Button */}
+            <button
+              type="button"
+              onClick={handleSaveSetToHistory}
+              disabled={extractedMcqs.length === 0}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all shadow-md shrink-0 disabled:opacity-40 ${
+                isSavedToHistory
+                  ? 'bg-emerald-500 text-black shadow-emerald-500/30'
+                  : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 shadow-emerald-600/10'
+              }`}
+              title="Save this question set to your user account history"
+            >
+              {isSavedToHistory ? <Check className="w-3.5 h-3.5 text-black" /> : <Save className="w-3.5 h-3.5" />}
+              <span>{isSavedToHistory ? 'Saved to Account!' : 'Save Set to History'}</span>
             </button>
           </div>
         </div>
@@ -2412,14 +2613,25 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                     </button>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsPaused(!isPaused)}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all"
-                  >
-                    {isPaused ? <Play className="w-3.5 h-3.5 fill-white" /> : <Pause className="w-3.5 h-3.5" />}
-                    <span>{isPaused ? 'Resume' : 'Pause'}</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsPaused(!isPaused)}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/50 text-amber-200 font-bold rounded-xl text-xs shadow-lg transition-all"
+                    >
+                      {isPaused ? <Play className="w-3.5 h-3.5 fill-white" /> : <Pause className="w-3.5 h-3.5" />}
+                      <span>{isPaused ? 'Resume' : 'Pause'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStopAll}
+                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all active:scale-95"
+                      title="Stop all running extractions"
+                    >
+                      <Square className="w-3.5 h-3.5 fill-white" />
+                      <span>Stop All</span>
+                    </button>
+                  </div>
                 )}
 
                 {/* Status indicator */}
@@ -2774,9 +2986,23 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                           {/* Status Badge */}
                           <div>
                             {page.status === 'processing' && (
-                              <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 animate-pulse">
-                                <Loader2 className="w-3 h-3 animate-spin" /> Digitizing...
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 animate-pulse">
+                                  <Loader2 className="w-3 h-3 animate-spin" /> Digitizing...
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleStopPage(page.id);
+                                  }}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/40 text-rose-300 hover:text-white rounded-full text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                                  title={`Stop digitizing Page ${page.pageNumber}`}
+                                >
+                                  <Square className="w-2.5 h-2.5 fill-current" />
+                                  <span>Stop</span>
+                                </button>
+                              </div>
                             )}
                             {page.status === 'ready' && (
                               <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -2870,6 +3096,18 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                       {/* Bottom Controls for Page */}
                       <div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs gap-1.5 flex-wrap">
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          {page.status === 'processing' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStopPage(page.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/50 text-rose-300 hover:text-white rounded-lg font-bold transition-all text-xs active:scale-95 shadow-sm animate-pulse"
+                              title={`Stop extraction for Page ${page.pageNumber}`}
+                            >
+                              <Square className="w-3.5 h-3.5 fill-rose-400" />
+                              <span>Stop</span>
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => handleRetryPage(page, idx, 'exact')}
@@ -3083,6 +3321,18 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                   <Plus className="w-3.5 h-3.5 text-violet-400" />
                                   <span>AI Add / Paste</span>
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPasteCsvTargetPage(page.pageNumber);
+                                    setShowPasteCsvModal(true);
+                                  }}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/40 text-teal-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm"
+                                  title={`Paste CSV or missing questions extracted separately directly into Page ${page.pageNumber}`}
+                                >
+                                  <ClipboardPaste className="w-3.5 h-3.5 text-teal-400" />
+                                  <span>Paste to Page</span>
+                                </button>
                               </div>
                             </>
                           );
@@ -3091,14 +3341,25 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
 
                       {/* Content Area according to Status */}
                       {page.status === 'processing' && (
-                        <div className="py-16 flex flex-col items-center justify-center text-center space-y-3">
-                          <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
-                          <p className="text-xs font-bold text-amber-300 uppercase tracking-wider">
-                            Extracting Bilingual MCQs with LaTeX...
-                          </p>
-                          <p className="text-[11px] text-slate-400 max-w-sm">
-                            {page.errorMessage || 'AI model is reading questions, options, and deep step-by-step solutions.'}
-                          </p>
+                        <div className="py-16 flex flex-col items-center justify-center text-center space-y-4">
+                          <Loader2 className="w-9 h-9 text-amber-400 animate-spin" />
+                          <div className="space-y-1 max-w-sm">
+                            <p className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                              Extracting Bilingual MCQs with LaTeX...
+                            </p>
+                            <p className="text-[11px] text-slate-400">
+                              {page.errorMessage || 'AI model is reading questions, options, and deep step-by-step solutions.'}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleStopPage(page.id)}
+                            className="mt-2 flex items-center gap-2 px-4 py-2 bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/40 hover:border-rose-500/70 text-rose-300 hover:text-white rounded-xl text-xs font-bold transition-all shadow-lg hover:shadow-rose-500/20 active:scale-95 group"
+                            title={`Stop extracting Page ${page.pageNumber}`}
+                          >
+                            <Square className="w-3.5 h-3.5 fill-rose-400 group-hover:fill-rose-300" />
+                            <span>Stop Extraction</span>
+                          </button>
                         </div>
                       )}
 
@@ -3173,6 +3434,18 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                           <AlertCircle className="w-7 h-7 mx-auto text-slate-600" />
                           <p className="text-xs font-semibold">No questions found on Page {page.pageNumber}</p>
                           <div className="flex items-center justify-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPasteCsvTargetPage(page.pageNumber);
+                                setShowPasteCsvModal(true);
+                              }}
+                              className="px-3 py-1.5 text-xs font-bold bg-teal-600/25 hover:bg-teal-600/40 border border-teal-500/40 text-teal-300 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+                              title={`Paste CSV data or missing questions into Page ${page.pageNumber}`}
+                            >
+                              <ClipboardPaste className="w-3.5 h-3.5 text-teal-400" />
+                              <span>Paste CSV to Page {page.pageNumber}</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => {
@@ -4277,6 +4550,20 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
         nextQuestionNumber={extractedMcqs.length + 1}
         setName={setName}
         onAddQuestion={handleInsertNewQuestion}
+      />
+
+      {/* Paste CSV / Add Missing Questions Modal */}
+      <MocktestPasteCsvModal
+        isOpen={showPasteCsvModal}
+        onClose={() => {
+          setShowPasteCsvModal(false);
+          setPasteCsvTargetPage(undefined);
+        }}
+        existingItems={extractedMcqs}
+        setName={setName}
+        targetPageNumber={pasteCsvTargetPage}
+        totalPages={pages.length}
+        onAddItems={handlePasteCsvAddItems}
       />
 
       {/* AI LaTeX Repair Modal */}

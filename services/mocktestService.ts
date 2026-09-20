@@ -1185,19 +1185,50 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
       diff = getCol(row, ['difficulty_level', 'difficulty', 'diff', 'level']) || 'medium';
     } else {
       // Positional row fallback (e.g. pasted directly without headers)
-      // If row has e.g. [Q, OptA, OptB, OptC, OptD, Ans, Solution]
       let offset = 0;
       if (/^\d+$/.test(row[0]?.trim())) {
         qNum = parseInt(row[0].trim(), 10);
         offset = 1;
       }
-      qHi = row[offset] || '';
-      opt1Hi = row[offset + 1] || '';
-      opt2Hi = row[offset + 2] || '';
-      opt3Hi = row[offset + 3] || '';
-      opt4Hi = row[offset + 4] || '';
-      ans = (row[offset + 5] || '').trim();
-      solHi = row[offset + 6] || '';
+      
+      // Intelligent detection of 4 options vs 5 options positional rows
+      const remainingCols = row.length - offset;
+      if (remainingCols >= 8) {
+        const possibleAns6 = (row[offset + 6] || '').trim().toUpperCase();
+        const possibleAns5 = (row[offset + 5] || '').trim().toUpperCase();
+        const isAns6 = /^[A-E1-5]$/.test(possibleAns6) || possibleAns6.startsWith('[') || possibleAns6.startsWith('{');
+        const isAns5 = /^[A-E1-5]$/.test(possibleAns5) || possibleAns5.startsWith('[') || possibleAns5.startsWith('{');
+
+        if (isAns6 && !isAns5) {
+          // 5 Options: [Q, opt1, opt2, opt3, opt4, opt5, ans, sol]
+          qHi = row[offset] || '';
+          opt1Hi = row[offset + 1] || '';
+          opt2Hi = row[offset + 2] || '';
+          opt3Hi = row[offset + 3] || '';
+          opt4Hi = row[offset + 4] || '';
+          opt5Hi = row[offset + 5] || '';
+          ans = row[offset + 6] || '';
+          solHi = row[offset + 7] || '';
+        } else {
+          // 4 Options: [Q, opt1, opt2, opt3, opt4, ans, sol]
+          qHi = row[offset] || '';
+          opt1Hi = row[offset + 1] || '';
+          opt2Hi = row[offset + 2] || '';
+          opt3Hi = row[offset + 3] || '';
+          opt4Hi = row[offset + 4] || '';
+          ans = (row[offset + 5] || '').trim();
+          solHi = row[offset + 6] || '';
+        }
+      } else {
+        // Default 4 Options positional row
+        qHi = row[offset] || '';
+        opt1Hi = row[offset + 1] || '';
+        opt2Hi = row[offset + 2] || '';
+        opt3Hi = row[offset + 3] || '';
+        opt4Hi = row[offset + 4] || '';
+        ans = (row[offset + 5] || '').trim();
+        solHi = row[offset + 6] || '';
+      }
     }
 
     // Ensure bilingual synchronization if only one language is present
@@ -1207,16 +1238,20 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
     if (!opt2Hi && opt2En) opt2Hi = opt2En;
     if (!opt3Hi && opt3En) opt3Hi = opt3En;
     if (!opt4Hi && opt4En) opt4Hi = opt4En;
+    if (!opt5Hi && opt5En) opt5Hi = opt5En;
     if (!opt1En && opt1Hi) opt1En = opt1Hi;
     if (!opt2En && opt2Hi) opt2En = opt2Hi;
     if (!opt3En && opt3Hi) opt3En = opt3Hi;
     if (!opt4En && opt4Hi) opt4En = opt4Hi;
+    if (!opt5En && opt5Hi) opt5En = opt5Hi;
     if (!solHi && solEn) solHi = solEn;
     if (!solEn && solHi) solEn = solHi;
 
-    // Normalize Answer to A, B, C, D
+    // Normalize Answer to A, B, C, D, E
     const cleanAns = ans.toUpperCase().trim().replace(/^(?:OPTION\s*|OPT\s*)/i, '').slice(0, 1);
-    const validAns = ['A', 'B', 'C', 'D'].includes(cleanAns) ? cleanAns : (ans.trim() || 'A');
+    const numToLetter: Record<string, string> = { '1': 'A', '2': 'B', '3': 'C', '4': 'D', '5': 'E' };
+    const mappedAns = numToLetter[cleanAns] || cleanAns;
+    const validAns = ['A', 'B', 'C', 'D', 'E'].includes(mappedAns) ? mappedAns : (ans.trim() || 'A');
 
     if (!qHi && !opt1Hi) continue;
 
@@ -1265,6 +1300,113 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
   }
 
   return items.map(cleanMockTestItem);
+}
+
+/**
+ * Detects missing question numbers (gaps) in a list of MockTest items.
+ * E.g., if items have question_r: [1, 2, 4, 7], returns [3, 5, 6].
+ */
+export function detectMissingQuestionNumbers(items: MockTestMcqItem[]): number[] {
+  if (!items || items.length === 0) return [];
+  const numbers = items
+    .map(i => Number(i.question_r))
+    .filter(n => !isNaN(n) && n > 0);
+  if (numbers.length === 0) return [];
+
+  const max = Math.max(...numbers);
+  const numSet = new Set(numbers);
+  const missing: number[] = [];
+
+  for (let i = 1; i < max; i++) {
+    if (!numSet.has(i)) {
+      missing.push(i);
+    }
+  }
+  return missing;
+}
+
+/**
+ * Merges or appends incoming MockTest items into an existing set.
+ * - 'smart_fill': First fills in any missing gap question numbers, inserts by question_r, and sorts numerically.
+ * - 'append': Renumbers incoming questions sequentially after the last question in existing, and appends to end.
+ * - 'replace': Completely replaces existing items with incoming items.
+ */
+export function mergeOrAppendMockTestItems(
+  existing: MockTestMcqItem[],
+  incoming: MockTestMcqItem[],
+  mode: 'smart_fill' | 'append' | 'replace' = 'smart_fill'
+): MockTestMcqItem[] {
+  if (mode === 'replace') {
+    return incoming.map((item, idx) => ({
+      ...item,
+      question_r: idx + 1,
+      source_question_reference: item.source_question_reference || `Q.${idx + 1}`
+    }));
+  }
+
+  if (mode === 'append') {
+    const existingCount = existing.length;
+    const renumberedIncoming = incoming.map((item, idx) => {
+      const newNum = existingCount + idx + 1;
+      return {
+        ...item,
+        question_r: newNum,
+        source_question_reference: `Q.${newNum}`
+      };
+    });
+    return [...existing, ...renumberedIncoming];
+  }
+
+  // mode === 'smart_fill': Fill gaps in sequence
+  const missingGaps = detectMissingQuestionNumbers(existing);
+  const existingMap = new Map<number, MockTestMcqItem>();
+  existing.forEach(item => {
+    if (item.question_r) {
+      existingMap.set(item.question_r, item);
+    }
+  });
+
+  const availableGaps = [...missingGaps];
+  let nextMax = existing.reduce((max, it) => Math.max(max, it.question_r || 0), 0);
+
+  const processedIncoming: MockTestMcqItem[] = [];
+
+  for (const item of incoming) {
+    let targetNum = item.question_r;
+
+    // If item has a specific question_r that is in missing gaps or not currently in existing
+    if (targetNum && targetNum > 0 && !existingMap.has(targetNum)) {
+      const gapIdx = availableGaps.indexOf(targetNum);
+      if (gapIdx >= 0) availableGaps.splice(gapIdx, 1);
+    } else if (availableGaps.length > 0) {
+      // Fill next available gap
+      targetNum = availableGaps.shift()!;
+    } else {
+      // Append after max
+      nextMax++;
+      targetNum = nextMax;
+    }
+
+    processedIncoming.push({
+      ...item,
+      question_r: targetNum,
+      source_question_reference: item.source_question_reference || `Q.${targetNum}`
+    });
+    existingMap.set(targetNum, item);
+  }
+
+  // Combine and sort by question_r
+  const combined = [...existing, ...processedIncoming];
+  combined.sort((a, b) => (a.question_r || 0) - (b.question_r || 0));
+
+  // Renumber to ensure clean consecutive 1..N order
+  return combined.map((item, idx) => ({
+    ...item,
+    question_r: idx + 1,
+    source_question_reference: item.source_question_reference && !item.source_question_reference.startsWith('Q.')
+      ? item.source_question_reference
+      : `Q.${idx + 1}`
+  }));
 }
 
 /**
@@ -2314,7 +2456,8 @@ export async function extractMockTestWithDirectApi(
   pendingContext?: PendingMcqContext | null,
   pageNumber?: number,
   generateSimilar: boolean = false,
-  rawText?: string
+  rawText?: string,
+  signal?: AbortSignal
 ): Promise<MockTestMcqItem[]> {
   const settings = await getAiSettings();
   const headers: Record<string, string> = {
@@ -2329,6 +2472,7 @@ export async function extractMockTestWithDirectApi(
     const response = await fetch('/api/mocktest-extract', {
       method: 'POST',
       headers,
+      signal,
       body: JSON.stringify({
         base64Image,
         rawText,
@@ -2353,11 +2497,18 @@ export async function extractMockTestWithDirectApi(
         }));
       }
     }
-  } catch (e) {
+  } catch (e: any) {
+    if (e?.name === 'AbortError' || signal?.aborted) {
+      throw e;
+    }
     console.warn('/api/mocktest-extract error:', e);
     if (generateSimilar) {
       throw e;
     }
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException('Extraction stopped by user.', 'AbortError');
   }
 
   if (generateSimilar) {
@@ -2368,6 +2519,7 @@ export async function extractMockTestWithDirectApi(
   const extractRes = await fetch('/api/extract', {
     method: 'POST',
     headers,
+    signal,
     body: JSON.stringify({
       base64Image,
       numberingStyle: 1, // NumberingStyle.HASH
@@ -2650,6 +2802,7 @@ export async function addMockTestQuestionWithAi(params: {
   nextQuestionNumber?: number;
   difficulty?: string;
   instruction?: string;
+  optionCount?: number;
 }): Promise<{ item: MockTestMcqItem; summary: string }> {
   const settings = await getAiSettings();
   const headers: Record<string, string> = {

@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null;
     }
 
     function isOwner(userId) {
@@ -28,14 +28,19 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL']);
     }
 
-    // History items
+    // History items (PDF conversions)
     match /users/{userId}/history/{historyId} {
-      allow list: if isOwner(userId);
-      allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidId(historyId) &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.keys().hasAll(['id', 'userId', 'fileName', 'timestamp', 'pagesCount', 'elements']) &&
-        request.resource.data.elements is list;
+      allow list, get: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidId(historyId) &&
+        request.resource.data.userId == request.auth.uid;
+      allow delete: if isOwner(userId);
+    }
+
+    // Mocktest history items
+    match /users/{userId}/mocktests/{testId} {
+      allow list, get: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidId(testId) &&
+        request.resource.data.userId == request.auth.uid;
       allow delete: if isOwner(userId);
     }
   }

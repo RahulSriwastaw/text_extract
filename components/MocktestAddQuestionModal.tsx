@@ -58,6 +58,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
   const [targetPage, setTargetPage] = useState<number>(defaultPageNumber);
   const [qNumber, setQNumber] = useState<number>(nextQuestionNumber);
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLevel>('medium');
+  const [optionCount, setOptionCount] = useState<4 | 5>(4);
   const [inputText, setInputText] = useState<string>('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -139,7 +140,8 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
         setName,
         targetPageNumber: targetPage,
         nextQuestionNumber: qNumber,
-        difficulty: selectedDifficulty
+        difficulty: selectedDifficulty,
+        optionCount
       });
 
       if (!res.item || (!res.item.question_hi && !res.item.question_en)) {
@@ -283,6 +285,28 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                 <option value="medium">Medium</option>
                 <option value="hard">Hard</option>
               </select>
+            </div>
+
+            {/* Option Count Selector: 4 vs 5 */}
+            <div className="flex items-center gap-1 bg-black/60 border border-white/[0.12] p-0.5 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setOptionCount(4)}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+                  optionCount === 4 ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                4 Opts
+              </button>
+              <button
+                type="button"
+                onClick={() => setOptionCount(5)}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+                  optionCount === 5 ? 'bg-amber-500 text-black shadow-sm font-extrabold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                5 Opts (A-E)
+              </button>
             </div>
           </div>
 
@@ -460,7 +484,14 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                   { label: 'A', text: activeLang === 'hi' ? generatedItem.option1_hi : generatedItem.option1_en, isAns: generatedItem.answer === 'A' || generatedItem.answer === '1' },
                   { label: 'B', text: activeLang === 'hi' ? generatedItem.option2_hi : generatedItem.option2_en, isAns: generatedItem.answer === 'B' || generatedItem.answer === '2' },
                   { label: 'C', text: activeLang === 'hi' ? generatedItem.option3_hi : generatedItem.option3_en, isAns: generatedItem.answer === 'C' || generatedItem.answer === '3' },
-                  { label: 'D', text: activeLang === 'hi' ? generatedItem.option4_hi : generatedItem.option4_en, isAns: generatedItem.answer === 'D' || generatedItem.answer === '4' }
+                  { label: 'D', text: activeLang === 'hi' ? generatedItem.option4_hi : generatedItem.option4_en, isAns: generatedItem.answer === 'D' || generatedItem.answer === '4' },
+                  ...(((generatedItem.option5_hi && generatedItem.option5_hi.trim().length > 0) || 
+                      (generatedItem.option5_en && generatedItem.option5_en.trim().length > 0) || 
+                      generatedItem.answer === 'E' || generatedItem.answer === '5') ? [{
+                    label: 'E',
+                    text: activeLang === 'hi' ? (generatedItem.option5_hi || '') : (generatedItem.option5_en || ''),
+                    isAns: generatedItem.answer === 'E' || generatedItem.answer === '5'
+                  }] : [])
                 ].map((opt) => (
                   <div
                     key={opt.label}

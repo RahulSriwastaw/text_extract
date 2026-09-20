@@ -135,45 +135,17 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     setUserGeminiAuth({ isAuthenticated: auth.isAuthenticated, authType: auth.authType });
   };
 
-  // Load history on mount (device-local fallback)
+  // Load history whenever user changes (or on initial mount)
   useEffect(() => {
-    const savedHistory = localStorage.getItem('conversion_history');
-    if (savedHistory) {
-      try { setHistory(JSON.parse(savedHistory)); } catch (e) { console.error("Failed to load history", e); }
-    }
-  }, []);
-
-  // When signed in, merge cloud history with whatever is already showing
-  // (e.g. items saved locally before login) instead of blindly overwriting
-  // it — an empty/slow cloud fetch must never wipe out visible history.
-  useEffect(() => {
-    if (!user) return;
-    getHistoryItems(user.uid)
-      .then((cloudItems) => {
-        setHistory((localItems) => {
-          const cloudIds = new Set(cloudItems.map((i) => i.id));
-          const localOnly = localItems.filter((i) => !cloudIds.has(i.id));
-
-          // Anything that only exists locally (e.g. saved before this login)
-          // gets pushed up to the cloud so it isn't lost on the next device.
-          localOnly.forEach((item) => {
-            addHistoryItem(user.uid, item).catch((e) =>
-              console.error('[history] Failed to migrate local item to cloud:', e)
-            );
-          });
-
-          return [...cloudItems, ...localOnly]
-            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-            .slice(0, 20);
-        });
+    const currentUid = user?.uid || 'guest';
+    getHistoryItems(currentUid)
+      .then((items) => {
+        setHistory(items);
       })
-      .catch((e) => console.error('[history] Failed to load cloud history:', e));
+      .catch((e) => {
+        console.error('[history] Failed to load history for user:', currentUid, e);
+      });
   }, [user]);
-
-  // Save history to localStorage (always, so logged-out usage still works)
-  useEffect(() => {
-    try { localStorage.setItem('conversion_history', JSON.stringify(history)); } catch (e) {}
-  }, [history]);
 
   // Auto-save to history effect & local IndexedDB
   useEffect(() => {
@@ -183,23 +155,23 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         .flatMap(p => p.elements || []);
       
       if (completedElements.length > 0) {
-        const newItem: Omit<HistoryItem, 'id'> = {
-          fileName: fileName,
+        const currentUid = user?.uid || 'guest';
+        const docId = generateId();
+        const fullHistoryItem: HistoryItem = {
+          id: docId,
+          userId: currentUid,
+          fileName: fileName || 'Untitled Document',
           timestamp: Date.now(),
           pagesCount: pages.length,
           elements: completedElements
         };
 
-        const docId = generateId();
-        const fullHistoryItem = { ...newItem, id: docId } as HistoryItem;
-        setHistory(prev => [fullHistoryItem, ...prev].slice(0, 20));
+        setHistory(prev => [fullHistoryItem, ...prev.filter(i => i.id !== docId)].slice(0, 30));
 
-        // Sync to the user's cloud account so history survives across devices
-        if (user) {
-          addHistoryItem(user.uid, fullHistoryItem).catch((e) =>
-            console.error('[history] Failed to save to cloud:', e)
-          );
-        }
+        // Save immediately to user ID history (local cache + cloud Firestore sync)
+        addHistoryItem(currentUid, fullHistoryItem).catch((e) =>
+          console.error('[history] Failed to save history for user:', currentUid, e)
+        );
 
         // Save to browser IndexedDB (100% local device storage)
         const fullText = completedElements.map(e => e.type === 'text' ? (e.content || '') : '').join('\n\n');
@@ -969,17 +941,15 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   };
 
   const handleDeleteHistoryItem = (id: string) => {
+    const currentUid = user?.uid || 'guest';
     setHistory(prev => prev.filter(item => item.id !== id));
-    if (user) {
-      deleteHistoryItem(user.uid, id).catch((e) => console.error('[history] Failed to delete from cloud:', e));
-    }
+    deleteHistoryItem(currentUid, id).catch((e) => console.error('[history] Failed to delete item:', e));
   };
 
   const handleClearAllHistory = () => {
+    const currentUid = user?.uid || 'guest';
     setHistory([]);
-    if (user) {
-      clearAllHistory(user.uid).catch((e) => console.error('[history] Failed to clear cloud history:', e));
-    }
+    clearAllHistory(currentUid).catch((e) => console.error('[history] Failed to clear history:', e));
   };
 
   const hasCompletedPages = pages.some(p => p.status === 'done' && (p.extractedText || p.elements));

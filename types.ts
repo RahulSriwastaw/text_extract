@@ -53,10 +53,20 @@ export interface ConversionConfig {
 
 export interface HistoryItem {
   id: string;
+  userId?: string;
   fileName: string;
   timestamp: number;
   pagesCount: number;
   elements: ExtractedElement[];
+}
+
+export interface MocktestHistoryItem {
+  id: string;
+  userId?: string;
+  setName: string;
+  timestamp: number;
+  questionCount: number;
+  questions: MockTestMcqItem[];
 }
 
 export type QuestionType = 'MCQ' | 'MSQ' | 'NAT';

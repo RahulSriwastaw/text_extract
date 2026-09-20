@@ -229,6 +229,9 @@ const Navbar: React.FC<NavbarProps> = ({
       <AiHistoryDrawer
         isOpen={showHistoryDrawer}
         onClose={() => setShowHistoryDrawer(false)}
+        onSelectConversionItem={() => {
+          onSelectTool?.('text-converter');
+        }}
       />
 
       <GeminiSettingsModal

@@ -3,7 +3,8 @@ import {
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, StopCircle, Zap, Settings, RefreshCw, Key,
-  ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare, Clipboard, ClipboardPaste, Save, History
+  ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare, Clipboard, ClipboardPaste, Save, History,
+  Image as ImageIcon
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -243,6 +244,84 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Copy Page Image & AI CSV Prompt to Clipboard for external AIs (ChatGPT, Claude, etc.)
+  const [copiedImagePageId, setCopiedImagePageId] = useState<string | null>(null);
+  const [copiedPromptPageId, setCopiedPromptPageId] = useState<string | null>(null);
+
+  const handleCopyPageImage = async (page: PageQueueItem) => {
+    if (!page.imageUrl) {
+      if (page.rawTextContent) {
+        await navigator.clipboard.writeText(page.rawTextContent);
+        setCopiedImagePageId(page.id);
+        setTimeout(() => setCopiedImagePageId(null), 3000);
+        alert(`📄 Copied text content of Page ${page.pageNumber} to clipboard!`);
+        return;
+      }
+      alert(`No image available for Page ${page.pageNumber}`);
+      return;
+    }
+
+    try {
+      // Load image into canvas and create a clean PNG Blob
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Failed to load image element'));
+        img.src = page.imageUrl!;
+      });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas context could not be created');
+      ctx.drawImage(img, 0, 0);
+
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/png'));
+      if (!blob) throw new Error('Could not convert canvas to PNG blob');
+
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob })
+      ]);
+
+      setCopiedImagePageId(page.id);
+      setTimeout(() => setCopiedImagePageId(null), 3000);
+      alert(`📸 Page ${page.pageNumber} image copied to clipboard!\n\nNow open ChatGPT, Claude, or Gemini and press Ctrl+V to paste the image directly!`);
+    } catch (e: any) {
+      console.warn('Direct image clipboard copy fallback:', e);
+      try {
+        await navigator.clipboard.writeText(page.imageUrl);
+        setCopiedImagePageId(page.id);
+        setTimeout(() => setCopiedImagePageId(null), 3000);
+        alert(`Notice: Image data copied to clipboard! (Or right-click the image on the left and choose "Copy image")`);
+      } catch (_) {
+        alert('Please right-click the page image on the left and select "Copy image".');
+      }
+    }
+  };
+
+  const handleCopyPagePrompt = (page: PageQueueItem) => {
+    const promptText = `Extract ALL Multiple Choice Questions (MCQs) from this test paper image (Page ${page.pageNumber}) into a clean CSV format.
+
+Output ONLY the raw CSV text (without markdown code fences, backticks, or other explanation).
+
+Required CSV Header:
+question_r,question_hi,question_en,option1_hi,option2_hi,option3_hi,option4_hi,option1_en,option2_en,option3_en,option4_en,answer,solution_hi,solution_en
+
+Rules:
+1. If questions are bilingual (Hindi & English), place the Hindi question & options into the _hi columns, and English into the _en columns. If single language, fill the matching column.
+2. The "answer" column must be the single uppercase letter: A, B, C, D, or E.
+3. Every field containing commas or quotes must be enclosed in double quotes ("...").
+4. Keep all mathematical formulas in clean LaTeX notation (e.g., $x^2 + y^2 = r^2$).
+5. Provide a detailed, step-by-step explanatory solution for every question.`;
+
+    navigator.clipboard.writeText(promptText);
+    setCopiedPromptPageId(page.id);
+    setTimeout(() => setCopiedPromptPageId(null), 3000);
+    alert(`📋 AI Extraction Prompt for Page ${page.pageNumber} copied to clipboard!\n\n1. Paste (Ctrl+V) this prompt along with the image into ChatGPT / Claude.\n2. Once generated, copy its CSV.\n3. Click "Paste to Page" here to import all questions directly into Page ${page.pageNumber}!`);
+  };
 
   // Keyboard navigation & zoom for Lightbox modal
   useEffect(() => {
@@ -3177,6 +3256,33 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                               alt={`Page ${page.pageNumber}`}
                               className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
                             />
+                            
+                            {/* Floating Quick Action Buttons on Image */}
+                            <div 
+                              className="absolute top-2 right-2 flex items-center gap-1.5 z-20"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPageImage(page)}
+                                className="flex items-center gap-1 px-2 py-1 bg-black/80 hover:bg-slate-900 border border-white/20 hover:border-sky-400 text-sky-300 hover:text-white rounded-lg text-[10px] font-extrabold transition-all shadow-lg backdrop-blur-md cursor-pointer active:scale-95"
+                                title={`Copy Page ${page.pageNumber} image to clipboard to paste (Ctrl+V) in ChatGPT / Claude`}
+                              >
+                                {copiedImagePageId === page.id ? <Check className="w-3 h-3 text-emerald-400" /> : <ImageIcon className="w-3 h-3 text-sky-400" />}
+                                <span>{copiedImagePageId === page.id ? 'Copied!' : 'Copy Image'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPagePrompt(page)}
+                                className="flex items-center gap-1 px-2 py-1 bg-black/80 hover:bg-slate-900 border border-white/20 hover:border-indigo-400 text-indigo-300 hover:text-white rounded-lg text-[10px] font-extrabold transition-all shadow-lg backdrop-blur-md cursor-pointer active:scale-95"
+                                title={`Copy ready-to-use CSV prompt for ChatGPT / Claude`}
+                              >
+                                {copiedPromptPageId === page.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Clipboard className="w-3 h-3 text-indigo-400" />}
+                                <span>{copiedPromptPageId === page.id ? 'Copied!' : 'Copy Prompt'}</span>
+                              </button>
+                            </div>
+
                             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white gap-2 font-bold text-xs backdrop-blur-xs">
                               <ZoomIn className="w-5 h-5 text-amber-400" />
                               <span>Click to Zoom Image</span>
@@ -3290,6 +3396,26 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                           >
                             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
                             <span>Paste CSV</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPageImage(page)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:text-sky-200 rounded-lg font-bold transition-all text-xs"
+                            title={`Copy Page ${page.pageNumber} image to clipboard to paste in ChatGPT / Claude`}
+                          >
+                            {copiedImagePageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <ImageIcon className="w-3.5 h-3.5 text-sky-400" />}
+                            <span>{copiedImagePageId === page.id ? 'Copied' : 'Copy Img'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPagePrompt(page)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 hover:text-indigo-200 rounded-lg font-bold transition-all text-xs"
+                            title={`Copy ready-to-use CSV prompt for ChatGPT / Claude`}
+                          >
+                            {copiedPromptPageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Clipboard className="w-3.5 h-3.5 text-indigo-400" />}
+                            <span>{copiedPromptPageId === page.id ? 'Copied' : 'Copy Prompt'}</span>
                           </button>
                         </div>
 
@@ -3435,6 +3561,24 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                     </button>
                                   </>
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyPageImage(page)}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/35 border border-sky-500/40 text-sky-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                                  title={`Copy Page ${page.pageNumber} image to clipboard (press Ctrl+V in ChatGPT / Claude / Gemini)`}
+                                >
+                                  {copiedImagePageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <ImageIcon className="w-3.5 h-3.5 text-sky-400" />}
+                                  <span>{copiedImagePageId === page.id ? 'Image Copied!' : 'Copy Image'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyPagePrompt(page)}
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                                  title={`Copy ready-to-use CSV prompt for ChatGPT / Claude / Gemini`}
+                                >
+                                  {copiedPromptPageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Clipboard className="w-3.5 h-3.5 text-indigo-400" />}
+                                  <span>{copiedPromptPageId === page.id ? 'Prompt Copied!' : 'Copy Prompt'}</span>
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => {

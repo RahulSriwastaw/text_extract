@@ -324,6 +324,32 @@ export const MocktestPasteCsvModal: React.FC<MocktestPasteCsvModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    const promptText = `Extract ALL Multiple Choice Questions (MCQs) from this test paper into a clean CSV format.
+
+Output ONLY the raw CSV text (without markdown code fences, backticks, or explanation).
+
+Required CSV Header:
+question_r,question_hi,question_en,option1_hi,option2_hi,option3_hi,option4_hi,option1_en,option2_en,option3_en,option4_en,answer,solution_hi,solution_en
+
+Rules:
+1. If questions are bilingual (Hindi & English), place the Hindi question & options into the _hi columns, and English into the _en columns. If single language, fill the matching column.
+2. The "answer" column must be the single uppercase letter: A, B, C, D, or E.
+3. Every field containing commas or quotes must be enclosed in double quotes ("...").
+4. Keep all mathematical formulas in clean LaTeX notation (e.g., $x^2 + y^2 = r^2$).
+5. Provide a detailed, step-by-step explanatory solution for every question.`;
+                    navigator.clipboard.writeText(promptText);
+                    alert('📋 AI Extraction Prompt copied to clipboard!\n\nPaste this into ChatGPT / Claude with your page image. Once it outputs the CSV, copy its CSV and click "Paste Clipboard" here!');
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 rounded-lg text-xs font-medium transition-all"
+                  title="Copy AI Prompt to give to ChatGPT / Claude"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Copy AI Prompt</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
                     setCsvText(SAMPLE_4_OPTIONS_CSV);
                     setIsCsvInputCollapsed(false);
                   }}

@@ -105,19 +105,18 @@ function loadFromLocalStorage<T>(key: string): T[] {
 let isFirestoreAvailable = true;
 
 /**
- * Executes a Firestore promise guarded by a strict timeout.
- * If it times out or throws permission/abort errors, Firestore is automatically
- * disabled for the session so it never hangs or spams network abort errors.
+ * Executes a Firestore promise guarded by a timeout.
+ * Cloud sync runs in the background and does not block the UI.
  */
-async function withFirestoreTimeout<T>(promise: Promise<T>, timeoutMs = 1500): Promise<T> {
-  if (!isFirestoreAvailable || !db) {
-    throw new Error('Firestore is disabled or unconfigured');
+async function withFirestoreTimeout<T>(promise: Promise<T>, timeoutMs = 10000): Promise<T> {
+  if (!db) {
+    throw new Error('Firestore is unconfigured');
   }
 
   let timer: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new Error('Firestore operation timed out'));
+      reject(new Error(`Firestore operation timed out after ${timeoutMs}ms`));
     }, timeoutMs);
   });
 
@@ -129,19 +128,14 @@ async function withFirestoreTimeout<T>(promise: Promise<T>, timeoutMs = 1500): P
     clearTimeout(timer);
     const msg = String(err?.message || err);
     if (
-      msg.includes('timed out') ||
       msg.includes('PERMISSION_DENIED') ||
       msg.includes('not-found') ||
-      msg.includes('AbortError') ||
       msg.includes('disabled') ||
-      msg.includes('aborted')
+      msg.includes('has not been used in project')
     ) {
-      if (isFirestoreAvailable) {
-        console.warn(
-          '[historyService] Cloud Firestore unavailable or disabled on project. Running 100% offline LocalStorage mode.'
-        );
-        isFirestoreAvailable = false;
-      }
+      console.warn(
+        '[Firebase] Cloud Firestore is not active or rules need publishing in Firebase Console. Go to: https://console.firebase.google.com/project/text-extract-8210e/firestore'
+      );
     }
     throw err;
   }
@@ -199,15 +193,16 @@ export async function addHistoryItem(userId: string, item: HistoryItem): Promise
   }
 
   // 4. Cloud sync to Firestore if authenticated (fire-and-forget in background, NEVER await!)
-  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  if (!db || uid === 'guest') return;
 
   (async () => {
     try {
       const ref = doc(historyCollection(uid), leanItem.id);
       const sanitized = sanitizeForFirestore(leanItem);
-      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500);
-    } catch (_) {
-      // Ignored: already handled by withFirestoreTimeout
+      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000);
+      console.log(`[Firebase Cloud Sync] ✅ Conversion document "${leanItem.fileName}" synced to Firestore for user: ${uid}`);
+    } catch (err: any) {
+      console.warn(`[Firebase Cloud Sync] Notice: Cloud sync deferred (${err?.message || err}). Document safely preserved in local history.`);
     }
   })();
 }
@@ -244,15 +239,15 @@ export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
     } catch (_) {}
   }
 
-  // If guest, no db configured, or Firestore disabled, return local items directly (0ms)
-  if (!db || uid === 'guest' || !isFirestoreAvailable) {
+  // If guest or no db configured, return local items directly (0ms)
+  if (!db || uid === 'guest') {
     return localItems;
   }
 
-  // Attempt fast fetch from Firestore with strict timeout; fallback to local items immediately
+  // Attempt fast fetch from Firestore; fallback to local items immediately
   try {
     const q = query(historyCollection(uid), orderBy('timestamp', 'desc'), limit(HISTORY_LIMIT));
-    const snap = await withFirestoreTimeout(getDocs(q), 1200);
+    const snap = await withFirestoreTimeout(getDocs(q), 4000);
     const cloudItems = snap.docs.map((d) => d.data() as HistoryItem);
 
     // Merge cloud items with local items
@@ -264,7 +259,7 @@ export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
       try {
         const ref = doc(historyCollection(uid), item.id);
         const sanitized = sanitizeForFirestore({ ...item, userId: uid });
-        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500).catch(() => {});
+        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000).catch(() => {});
       } catch (_) {}
     });
 
@@ -387,15 +382,16 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
   }
 
   // 3. Non-blocking cloud sync (fire-and-forget in background, NEVER await!)
-  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  if (!db || uid === 'guest') return;
 
   (async () => {
     try {
       const ref = doc(mocktestCollection(uid), leanItem.id);
       const sanitized = sanitizeForFirestore(leanItem);
-      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500);
-    } catch (_) {
-      // Ignored: already handled by withFirestoreTimeout
+      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000);
+      console.log(`[Firebase Cloud Sync] ✅ Mocktest set "${leanItem.setName}" (${leanItem.questionCount} MCQs) successfully saved to Firebase Firestore for user: ${uid}`);
+    } catch (err: any) {
+      console.warn(`[Firebase Cloud Sync] Notice: Cloud sync deferred (${err?.message || err}). Questions safely preserved in local history.`);
     }
   })();
 }
@@ -420,14 +416,14 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
     }
   }
 
-  // If guest, no db, or Firestore disabled, return local items IMMEDIATELY (0ms)
-  if (!db || uid === 'guest' || !isFirestoreAvailable) {
+  // If guest or no db, return local items IMMEDIATELY (0ms)
+  if (!db || uid === 'guest') {
     return localItems;
   }
 
   try {
     const q = query(mocktestCollection(uid), orderBy('timestamp', 'desc'), limit(HISTORY_LIMIT));
-    const snap = await withFirestoreTimeout(getDocs(q), 1200);
+    const snap = await withFirestoreTimeout(getDocs(q), 4000);
     const cloudItems = snap.docs.map((d) => d.data() as MocktestHistoryItem);
 
     const cloudIds = new Set(cloudItems.map((i) => i.id));
@@ -437,7 +433,7 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
       try {
         const ref = doc(mocktestCollection(uid), item.id);
         const sanitized = sanitizeForFirestore({ ...item, userId: uid });
-        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500).catch(() => {});
+        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000).catch(() => {});
       } catch (_) {}
     });
 

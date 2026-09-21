@@ -102,6 +102,51 @@ function loadFromLocalStorage<T>(key: string): T[] {
 // 1. PDF TO DOCX / TEXT CONVERSION HISTORY
 // ==========================================
 
+let isFirestoreAvailable = true;
+
+/**
+ * Executes a Firestore promise guarded by a strict timeout.
+ * If it times out or throws permission/abort errors, Firestore is automatically
+ * disabled for the session so it never hangs or spams network abort errors.
+ */
+async function withFirestoreTimeout<T>(promise: Promise<T>, timeoutMs = 1500): Promise<T> {
+  if (!isFirestoreAvailable || !db) {
+    throw new Error('Firestore is disabled or unconfigured');
+  }
+
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('Firestore operation timed out'));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timer);
+    return result;
+  } catch (err: any) {
+    clearTimeout(timer);
+    const msg = String(err?.message || err);
+    if (
+      msg.includes('timed out') ||
+      msg.includes('PERMISSION_DENIED') ||
+      msg.includes('not-found') ||
+      msg.includes('AbortError') ||
+      msg.includes('disabled') ||
+      msg.includes('aborted')
+    ) {
+      if (isFirestoreAvailable) {
+        console.warn(
+          '[historyService] Cloud Firestore unavailable or disabled on project. Running 100% offline LocalStorage mode.'
+        );
+        isFirestoreAvailable = false;
+      }
+    }
+    throw err;
+  }
+}
+
 export async function addHistoryItem(userId: string, item: HistoryItem): Promise<void> {
   const uid = userId || 'guest';
   const storageKey = getUserHistoryKey(uid);
@@ -123,7 +168,7 @@ export async function addHistoryItem(userId: string, item: HistoryItem): Promise
     elements: cleanedElements as any,
   };
 
-  // 1. Save to user-scoped local storage
+  // 1. Save to user-scoped local storage immediately
   const localItems = loadFromLocalStorage<HistoryItem>(storageKey);
   const updated = [leanItem, ...localItems.filter((i) => i.id !== item.id)].slice(0, HISTORY_LIMIT);
   saveToLocalStorage(storageKey, updated);
@@ -148,18 +193,23 @@ export async function addHistoryItem(userId: string, item: HistoryItem): Promise
     });
   } catch (_) {}
 
-  // 3. Cloud sync to Firestore if user is authenticated and db is available
-  if (!db || uid === 'guest') return;
-
-  try {
-    const ref = doc(historyCollection(uid), leanItem.id);
-    const sanitized = sanitizeForFirestore(leanItem);
-    await setDoc(ref, sanitized, { merge: true });
-  } catch (e: any) {
-    console.warn(
-      `[historyService] Saved locally for user ${uid}. (Cloud sync skipped: ${e?.message || e})`
-    );
+  // 3. Dispatch local notification event
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('conversion_history_updated', { detail: { item: leanItem } }));
   }
+
+  // 4. Cloud sync to Firestore if authenticated (fire-and-forget in background, NEVER await!)
+  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+
+  (async () => {
+    try {
+      const ref = doc(historyCollection(uid), leanItem.id);
+      const sanitized = sanitizeForFirestore(leanItem);
+      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500);
+    } catch (_) {
+      // Ignored: already handled by withFirestoreTimeout
+    }
+  })();
 }
 
 export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
@@ -194,15 +244,15 @@ export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
     } catch (_) {}
   }
 
-  // If guest or no db configured, return local items directly
-  if (!db || uid === 'guest') {
+  // If guest, no db configured, or Firestore disabled, return local items directly (0ms)
+  if (!db || uid === 'guest' || !isFirestoreAvailable) {
     return localItems;
   }
 
-  // Attempt to fetch from Firestore
+  // Attempt fast fetch from Firestore with strict timeout; fallback to local items immediately
   try {
     const q = query(historyCollection(uid), orderBy('timestamp', 'desc'), limit(HISTORY_LIMIT));
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 1200);
     const cloudItems = snap.docs.map((d) => d.data() as HistoryItem);
 
     // Merge cloud items with local items
@@ -214,7 +264,7 @@ export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
       try {
         const ref = doc(historyCollection(uid), item.id);
         const sanitized = sanitizeForFirestore({ ...item, userId: uid });
-        setDoc(ref, sanitized, { merge: true }).catch(() => {});
+        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500).catch(() => {});
       } catch (_) {}
     });
 
@@ -224,11 +274,7 @@ export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
 
     saveToLocalStorage(storageKey, merged);
     return merged;
-  } catch (e: any) {
-    console.warn(
-      `[historyService] Cloud fetch skipped for user ${uid}, serving local history:`,
-      e?.message || e
-    );
+  } catch (_) {
     return localItems;
   }
 }
@@ -244,12 +290,14 @@ export async function deleteHistoryItem(userId: string, id: string): Promise<voi
     localStorage.setItem('conversion_history', JSON.stringify(filtered));
   } catch (_) {}
 
-  if (!db || uid === 'guest') return;
-  try {
-    await deleteDoc(doc(historyCollection(uid), id));
-  } catch (e) {
-    console.warn('[historyService] Failed to delete from cloud Firestore:', e);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('conversion_history_updated'));
   }
+
+  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  try {
+    withFirestoreTimeout(deleteDoc(doc(historyCollection(uid), id)), 1200).catch(() => {});
+  } catch (_) {}
 }
 
 export async function clearAllHistory(userId: string): Promise<void> {
@@ -261,17 +309,24 @@ export async function clearAllHistory(userId: string): Promise<void> {
     localStorage.removeItem('conversion_history');
   } catch (_) {}
 
-  if (!db || uid === 'guest') return;
-  try {
-    const snap = await getDocs(historyCollection(uid));
-    if (!snap.empty) {
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-    }
-  } catch (e) {
-    console.warn('[historyService] Failed to clear cloud Firestore history:', e);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('conversion_history_updated'));
   }
+
+  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  try {
+    withFirestoreTimeout(
+      (async () => {
+        const snap = await getDocs(historyCollection(uid));
+        if (!snap.empty) {
+          const batch = writeBatch(db!);
+          snap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+      })(),
+      1500
+    ).catch(() => {});
+  } catch (_) {}
 }
 
 // ==========================================
@@ -304,7 +359,7 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
   }));
 
   const leanItem: MocktestHistoryItem = {
-    id: item.id,
+    id: item.id || ('mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
     userId: uid,
     setName: item.setName || 'Mock Test',
     timestamp: item.timestamp || Date.now(),
@@ -312,28 +367,37 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
     questions: cleanQuestions,
   };
 
-  // 1. Save locally to user-scoped key
+  // 1. Save locally to user-scoped key immediately
   const localItems = loadFromLocalStorage<MocktestHistoryItem>(storageKey);
-  const updated = [leanItem, ...localItems.filter((i) => i.id !== item.id)].slice(0, HISTORY_LIMIT);
+  const updated = [leanItem, ...localItems.filter((i) => i.id !== leanItem.id)].slice(0, HISTORY_LIMIT);
   saveToLocalStorage(storageKey, updated);
 
-  // Also keep general mocktests fallback updated
+  // Also keep general mocktests fallback and guest key updated so data is never lost across login
   try {
     localStorage.setItem('user_mocktests_all', JSON.stringify(updated));
+    if (uid !== 'guest') {
+      // Also update guest key so switching back preserves history
+      localStorage.setItem('user_mocktests_guest', JSON.stringify(updated));
+    }
   } catch (_) {}
 
-  // 2. Sync to Firestore
-  if (!db || uid === 'guest') return;
-
-  try {
-    const ref = doc(mocktestCollection(uid), leanItem.id);
-    const sanitized = sanitizeForFirestore(leanItem);
-    await setDoc(ref, sanitized, { merge: true });
-  } catch (e: any) {
-    console.warn(
-      `[historyService] Saved mocktest locally for user ${uid}. (Cloud sync notice: ${e?.message || e})`
-    );
+  // 2. Dispatch custom event so any open UI / Drawer updates immediately
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mocktest_history_updated', { detail: { item: leanItem } }));
   }
+
+  // 3. Non-blocking cloud sync (fire-and-forget in background, NEVER await!)
+  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+
+  (async () => {
+    try {
+      const ref = doc(mocktestCollection(uid), leanItem.id);
+      const sanitized = sanitizeForFirestore(leanItem);
+      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500);
+    } catch (_) {
+      // Ignored: already handled by withFirestoreTimeout
+    }
+  })();
 }
 
 export async function getMocktestHistoryItems(userId: string): Promise<MocktestHistoryItem[]> {
@@ -341,22 +405,29 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
   const storageKey = getUserMocktestKey(uid);
   let localItems = loadFromLocalStorage<MocktestHistoryItem>(storageKey);
 
-  // Fallback to general mocktests list if user-scoped is empty
+  // Fallback to general mocktests list or guest list if user-scoped is empty
   if (localItems.length === 0) {
     const general = loadFromLocalStorage<MocktestHistoryItem>('user_mocktests_all');
     if (general.length > 0) {
       localItems = general;
       saveToLocalStorage(storageKey, general);
+    } else {
+      const guestItems = loadFromLocalStorage<MocktestHistoryItem>('user_mocktests_guest');
+      if (guestItems.length > 0) {
+        localItems = guestItems;
+        saveToLocalStorage(storageKey, guestItems);
+      }
     }
   }
 
-  if (!db || uid === 'guest') {
+  // If guest, no db, or Firestore disabled, return local items IMMEDIATELY (0ms)
+  if (!db || uid === 'guest' || !isFirestoreAvailable) {
     return localItems;
   }
 
   try {
     const q = query(mocktestCollection(uid), orderBy('timestamp', 'desc'), limit(HISTORY_LIMIT));
-    const snap = await getDocs(q);
+    const snap = await withFirestoreTimeout(getDocs(q), 1200);
     const cloudItems = snap.docs.map((d) => d.data() as MocktestHistoryItem);
 
     const cloudIds = new Set(cloudItems.map((i) => i.id));
@@ -366,7 +437,7 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
       try {
         const ref = doc(mocktestCollection(uid), item.id);
         const sanitized = sanitizeForFirestore({ ...item, userId: uid });
-        setDoc(ref, sanitized, { merge: true }).catch(() => {});
+        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 1500).catch(() => {});
       } catch (_) {}
     });
 
@@ -376,11 +447,7 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
 
     saveToLocalStorage(storageKey, merged);
     return merged;
-  } catch (e: any) {
-    console.warn(
-      `[historyService] Cloud mocktests fetch skipped for user ${uid}, serving local history:`,
-      e?.message || e
-    );
+  } catch (_) {
     return localItems;
   }
 }
@@ -396,12 +463,14 @@ export async function deleteMocktestHistoryItem(userId: string, id: string): Pro
     localStorage.setItem('user_mocktests_all', JSON.stringify(filtered));
   } catch (_) {}
 
-  if (!db || uid === 'guest') return;
-  try {
-    await deleteDoc(doc(mocktestCollection(uid), id));
-  } catch (e) {
-    console.warn('[historyService] Failed to delete mocktest from cloud Firestore:', e);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mocktest_history_updated'));
   }
+
+  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  try {
+    withFirestoreTimeout(deleteDoc(doc(mocktestCollection(uid), id)), 1200).catch(() => {});
+  } catch (_) {}
 }
 
 export async function clearAllMocktestHistory(userId: string): Promise<void> {
@@ -413,15 +482,22 @@ export async function clearAllMocktestHistory(userId: string): Promise<void> {
     localStorage.removeItem('user_mocktests_all');
   } catch (_) {}
 
-  if (!db || uid === 'guest') return;
-  try {
-    const snap = await getDocs(mocktestCollection(uid));
-    if (!snap.empty) {
-      const batch = writeBatch(db);
-      snap.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-    }
-  } catch (e) {
-    console.warn('[historyService] Failed to clear cloud mocktest history:', e);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('mocktest_history_updated'));
   }
+
+  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  try {
+    withFirestoreTimeout(
+      (async () => {
+        const snap = await getDocs(mocktestCollection(uid));
+        if (!snap.empty) {
+          const batch = writeBatch(db!);
+          snap.docs.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+      })(),
+      1500
+    ).catch(() => {});
+  } catch (_) {}
 }

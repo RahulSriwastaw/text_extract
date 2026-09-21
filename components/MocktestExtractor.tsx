@@ -195,12 +195,16 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [copied, setCopied] = useState(false);
   const [user] = useCurrentUser();
   const [isSavedToHistory, setIsSavedToHistory] = useState(false);
+  const currentSessionSetIdRef = useRef<string>('');
 
   const handleSaveSetToHistory = async () => {
     if (extractedMcqs.length === 0) return;
     const currentUid = user?.uid || 'guest';
+    if (!currentSessionSetIdRef.current) {
+      currentSessionSetIdRef.current = 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    }
     const item = {
-      id: 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      id: currentSessionSetIdRef.current,
       userId: currentUid,
       setName: outputFileName || setName || 'Mock Test',
       timestamp: Date.now(),
@@ -335,6 +339,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   useEffect(() => {
     const handleLoadHistory = (e: any) => {
       if (e.detail && e.detail.questions && e.detail.questions.length > 0) {
+        if (e.detail.id) {
+          currentSessionSetIdRef.current = e.detail.id;
+        }
         setExtractedMcqs(e.detail.questions);
         if (e.detail.setName) {
           setSetName(e.detail.setName);
@@ -787,7 +794,25 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
         // Derive extractedMcqs cleanly from all pages combined
         const allMcqs = nextPages.flatMap(p => p.items || []);
-        setExtractedMcqs(allMcqs.map((it, idx) => ({ ...it, question_r: idx + 1 })));
+        const formattedMcqs = allMcqs.map((it, idx) => ({ ...it, question_r: idx + 1 }));
+        setExtractedMcqs(formattedMcqs);
+
+        // Auto-save this updated question set to user account history immediately after every single page!
+        if (formattedMcqs.length > 0) {
+          const currentUid = user?.uid || 'guest';
+          if (!currentSessionSetIdRef.current) {
+            currentSessionSetIdRef.current = 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          }
+          addMocktestHistoryItem(currentUid, {
+            id: currentSessionSetIdRef.current,
+            userId: currentUid,
+            setName: outputFileName || setName || 'Mock Test Paper',
+            timestamp: Date.now(),
+            questionCount: formattedMcqs.length,
+            questions: formattedMcqs,
+          }).catch(() => {});
+        }
+
         return nextPages;
       });
 
@@ -943,23 +968,29 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       setIsProcessingAll(false);
       setActivePageIndex(null);
       // Automatically save completed extraction set to user history
-      setExtractedMcqs(currentItems => {
-        if (currentItems.length > 0) {
-          const currentUid = user?.uid || 'guest';
-          const autoItem: MocktestHistoryItem = {
-            id: 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
-            userId: currentUid,
-            setName: outputFileName || setName || 'Mock Test Paper',
-            timestamp: Date.now(),
-            questionCount: currentItems.length,
-            questions: currentItems,
-          };
-          addMocktestHistoryItem(currentUid, autoItem).catch((err) => {
-            console.warn('[history] Auto-save mocktest failed:', err);
-          });
-        }
-        return currentItems;
-      });
+      setTimeout(() => {
+        setPages(currentPages => {
+          const allMcqs = currentPages.flatMap(p => p.items || []);
+          if (allMcqs.length > 0) {
+            const currentUid = user?.uid || 'guest';
+            if (!currentSessionSetIdRef.current) {
+              currentSessionSetIdRef.current = 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+            }
+            const autoItem: MocktestHistoryItem = {
+              id: currentSessionSetIdRef.current,
+              userId: currentUid,
+              setName: outputFileName || setName || 'Mock Test Paper',
+              timestamp: Date.now(),
+              questionCount: allMcqs.length,
+              questions: allMcqs.map((it, idx) => ({ ...it, question_r: idx + 1 })),
+            };
+            addMocktestHistoryItem(currentUid, autoItem).catch((err) => {
+              console.warn('[history] Auto-save mocktest failed:', err);
+            });
+          }
+          return currentPages;
+        });
+      }, 50);
     }
   };
 
@@ -1506,6 +1537,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       alert('No MCQs to download yet. Extract some pages first!');
       return;
     }
+    const currentUid = user?.uid || 'guest';
+    if (!currentSessionSetIdRef.current) {
+      currentSessionSetIdRef.current = 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    }
+    addMocktestHistoryItem(currentUid, {
+      id: currentSessionSetIdRef.current,
+      userId: currentUid,
+      setName: outputFileName || setName || 'Mock Test Paper',
+      timestamp: Date.now(),
+      questionCount: extractedMcqs.length,
+      questions: extractedMcqs,
+    }).catch(() => {});
+
     const chosenName = (outputFileName || setName || 'mocktest').trim();
     const safeBase = chosenName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'mocktest';
     const finalFileName = safeBase.toLowerCase().endsWith('.csv') ? safeBase : `${safeBase}.csv`;
@@ -1517,6 +1561,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     if (isGeneratingDocx || extractedMcqs.length === 0) return;
     setIsGeneratingDocx(true);
     try {
+      const currentUid = user?.uid || 'guest';
+      if (!currentSessionSetIdRef.current) {
+        currentSessionSetIdRef.current = 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      }
+      addMocktestHistoryItem(currentUid, {
+        id: currentSessionSetIdRef.current,
+        userId: currentUid,
+        setName: outputFileName || setName || 'Mock Test Paper',
+        timestamp: Date.now(),
+        questionCount: extractedMcqs.length,
+        questions: extractedMcqs,
+      }).catch(() => {});
+
       const safeBase = (outputFileName || setName || 'mocktest').replace(/[\\/:\*?"<>|]+/g, '_').trim() || 'mocktest';
       await downloadMcqAsDocx(
         extractedMcqs,

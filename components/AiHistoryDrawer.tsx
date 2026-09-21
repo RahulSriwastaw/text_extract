@@ -84,14 +84,34 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
     }
   }, [isOpen, user, activeTool]);
 
+  // Real-time synchronization when history updates in background
+  useEffect(() => {
+    const handleUpdate = () => {
+      if (isOpen) {
+        loadAllData();
+      }
+    };
+    window.addEventListener('mocktest_history_updated', handleUpdate);
+    window.addEventListener('conversion_history_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('mocktest_history_updated', handleUpdate);
+      window.removeEventListener('conversion_history_updated', handleUpdate);
+    };
+  }, [isOpen, currentUid]);
+
   const loadAllData = async () => {
     try {
       setIsRefreshing(true);
-      const [convs, mtests, explains] = await Promise.all([
+      const [convsRes, mtestsRes, explainsRes] = await Promise.allSettled([
         getHistoryItems(currentUid),
         getMocktestHistoryItems(currentUid),
         getAllConversations(),
       ]);
+
+      const convs = convsRes.status === 'fulfilled' ? convsRes.value : [];
+      const mtests = mtestsRes.status === 'fulfilled' ? mtestsRes.value : [];
+      const explains = explainsRes.status === 'fulfilled' ? explainsRes.value : [];
+
       setConversionItems(convs);
       setMocktestItems(mtests);
       setConversations(explains);

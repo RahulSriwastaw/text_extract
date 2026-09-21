@@ -13,23 +13,31 @@ export interface UserProfile {
 
 async function ensureUserProfile(user: User): Promise<void> {
   if (!db) return;
-  const ref = doc(db, 'users', user.uid);
-  const snap = await getDoc(ref);
+  try {
+    const ref = doc(db, 'users', user.uid);
+    // 1-second timeout guard so login is never stalled by Firestore
+    const snap = await Promise.race([
+      getDoc(ref),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
+    ]);
 
-  if (!snap.exists()) {
-    const profile: UserProfile = {
-      uid: user.uid,
-      email: user.email || '',
-      displayName: user.displayName || '',
-      photoURL: user.photoURL || '',
-      createdAt: new Date().toISOString(),
-    };
-    await setDoc(ref, profile);
-  } else if (user.displayName || user.photoURL) {
-    await updateDoc(ref, {
-      displayName: user.displayName || snap.data().displayName || '',
-      photoURL: user.photoURL || snap.data().photoURL || '',
-    });
+    if (!snap.exists()) {
+      const profile: UserProfile = {
+        uid: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || '',
+        photoURL: user.photoURL || '',
+        createdAt: new Date().toISOString(),
+      };
+      await setDoc(ref, profile);
+    } else if (user.displayName || user.photoURL) {
+      await updateDoc(ref, {
+        displayName: user.displayName || snap.data().displayName || '',
+        photoURL: user.photoURL || snap.data().photoURL || '',
+      });
+    }
+  } catch (err) {
+    // Gracefully ignore Firestore user profile sync failure when offline / disabled
   }
 }
 

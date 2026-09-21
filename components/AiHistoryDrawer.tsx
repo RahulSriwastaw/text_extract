@@ -16,7 +16,9 @@ import {
   Cloud,
   Layers,
   Copy,
-  Check
+  Check,
+  FolderOpen,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCurrentUser } from '../services/authService';
@@ -41,6 +43,8 @@ import { downloadMockTestCsv } from '../services/mocktestService';
 interface AiHistoryDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  activeTool?: string;
+  onSelectTool?: (tool: any) => void;
   onSelectQuestion?: (questionId: string) => void;
   onSelectConversionItem?: (item: HistoryItem) => void;
 }
@@ -50,11 +54,14 @@ type HistoryTab = 'conversions' | 'mocktests' | 'explanations';
 const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({ 
   isOpen, 
   onClose, 
+  activeTool,
+  onSelectTool,
   onSelectQuestion,
   onSelectConversionItem
 }) => {
   const [user] = useCurrentUser();
   const [activeTab, setActiveTab] = useState<HistoryTab>('conversions');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Data states
   const [conversionItems, setConversionItems] = useState<HistoryItem[]>([]);
@@ -68,12 +75,18 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      if (activeTool === 'mcq-extractor') {
+        setActiveTab('mocktests');
+      } else if (activeTool === 'text-converter') {
+        setActiveTab('conversions');
+      }
       loadAllData();
     }
-  }, [isOpen, user]);
+  }, [isOpen, user, activeTool]);
 
   const loadAllData = async () => {
     try {
+      setIsRefreshing(true);
       const [convs, mtests, explains] = await Promise.all([
         getHistoryItems(currentUid),
         getMocktestHistoryItems(currentUid),
@@ -82,8 +95,19 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
       setConversionItems(convs);
       setMocktestItems(mtests);
       setConversations(explains);
+
+      // Auto-switch to tab with items if active tab is empty
+      if (activeTool !== 'mcq-extractor' && activeTool !== 'text-converter') {
+        if (convs.length === 0 && mtests.length > 0) {
+          setActiveTab('mocktests');
+        } else if (convs.length > 0) {
+          setActiveTab('conversions');
+        }
+      }
     } catch (e) {
       console.error('[AiHistoryDrawer] Error loading history:', e);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -129,6 +153,27 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
         setConversations([]);
       }
     }
+  };
+
+  // --- Load into Editor handlers ---
+  const handleLoadMocktestIntoEditor = (item: MocktestHistoryItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('load_mocktest_history', { detail: item }));
+    if (onSelectTool) {
+      onSelectTool('mcq-extractor');
+    }
+    onClose();
+  };
+
+  const handleLoadConversionIntoEditor = (item: HistoryItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onSelectConversionItem) {
+      onSelectConversionItem(item);
+    }
+    if (onSelectTool) {
+      onSelectTool('text-converter');
+    }
+    onClose();
   };
 
   // --- Export handlers ---
@@ -222,12 +267,12 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                       {user ? (
                         <span className="text-emerald-400 flex items-center gap-1 font-medium">
                           <Cloud className="w-3 h-3" />
-                          Saved to User ID: <span className="text-white font-semibold truncate max-w-[140px]">{user.email || user.uid}</span>
+                          Saved to Account: <span className="text-white font-semibold truncate max-w-[140px]">{user.email || user.uid}</span>
                         </span>
                       ) : (
-                        <span className="text-amber-400/90 flex items-center gap-1">
+                        <span className="text-amber-400/90 flex items-center gap-1 font-medium">
                           <UserIcon className="w-3 h-3" />
-                          Guest Session (Saved on this device)
+                          Local Device Storage (Guest)
                         </span>
                       )}
                     </div>
@@ -235,6 +280,14 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={loadAllData}
+                    disabled={isRefreshing}
+                    title="Refresh history"
+                    className="p-2 text-slate-400 hover:text-white hover:bg-white/[0.08] rounded-lg transition-all"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-[#FF6B2B]' : ''}`} />
+                  </button>
                   {((activeTab === 'conversions' && conversionItems.length > 0) ||
                     (activeTab === 'mocktests' && mocktestItems.length > 0) ||
                     (activeTab === 'explanations' && conversations.length > 0)) && (
@@ -333,7 +386,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                     <FileText className="w-10 h-10 mx-auto opacity-30 text-slate-400" />
                     <p className="text-xs font-bold text-slate-400">No Document Conversions Yet</p>
                     <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
-                      Any document you convert in "Text / Docx" will be automatically saved here on your user account.
+                      Any document converted in "Text / Docx" is automatically saved here on your account.
                     </p>
                   </div>
                 ) : (
@@ -348,12 +401,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                       <div
                         key={item.id}
                         className="p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-[#FF6B2B]/40 transition-all cursor-pointer group flex flex-col gap-2"
-                        onClick={() => {
-                          if (onSelectConversionItem) {
-                            onSelectConversionItem(item);
-                            onClose();
-                          }
-                        }}
+                        onClick={(e) => handleLoadConversionIntoEditor(item, e)}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-3 overflow-hidden">
@@ -370,7 +418,15 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1 shrink-0">
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={(e) => handleLoadConversionIntoEditor(item, e)}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-[#FF6B2B]/15 hover:bg-[#FF6B2B]/30 text-[#FF884D] border border-[#FF6B2B]/30 font-bold rounded-lg text-xs transition-all shadow-sm"
+                              title="Open this document"
+                            >
+                              <FolderOpen className="w-3.5 h-3.5" />
+                              <span>Open</span>
+                            </button>
                             <button
                               onClick={(e) => handleCopyText(item, e)}
                               className="p-1.5 text-slate-400 hover:text-emerald-400 hover:bg-white/[0.06] rounded-lg transition-all"
@@ -410,9 +466,9 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                 filteredMocktests.length === 0 ? (
                   <div className="text-center py-20 text-slate-500 space-y-2">
                     <FileSpreadsheet className="w-10 h-10 mx-auto opacity-30 text-amber-400" />
-                    <p className="text-xs font-bold text-slate-400">No Saved Mock Tests</p>
+                    <p className="text-xs font-bold text-slate-400">No Saved Mock Tests Yet</p>
                     <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
-                      In the "MCQs Extractor", click "Save Set to Account" to store test papers safely under your User ID.
+                      Whenever you extract MCQs or import questions in "MCQs Extractor", they are automatically saved here to your history.
                     </p>
                   </div>
                 ) : (
@@ -431,15 +487,23 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                               {item.setName || 'Mock Test'}
                             </h4>
                             <p className="text-[11px] text-amber-300/80 mt-0.5 font-mono">
-                              {item.questionCount || (item.questions ? item.questions.length : 0)} Questions Loaded
+                              {item.questionCount || (item.questions ? item.questions.length : 0)} Questions Saved
                             </p>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
+                            onClick={(e) => handleLoadMocktestIntoEditor(item, e)}
+                            className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-extrabold rounded-lg text-xs transition-all shadow-sm"
+                            title="Load this test set into MCQs Extractor Editor"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                            <span>Load Set</span>
+                          </button>
+                          <button
                             onClick={(e) => handleDownloadMocktestCsv(item, e)}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-lg text-xs font-bold transition-all"
+                            className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-bold transition-all"
                             title="Download standard 34-column CSV"
                           >
                             <Download className="w-3.5 h-3.5" />
@@ -460,7 +524,9 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                           <Calendar className="w-3 h-3" />
                           {new Date(item.timestamp || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
-                        <span className="text-[10px] text-emerald-400 font-semibold">User Account Sync Ready</span>
+                        <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                          <Check className="w-3 h-3" /> Saved & Available
+                        </span>
                       </div>
                     </div>
                   ))

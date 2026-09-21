@@ -229,6 +229,8 @@ const Navbar: React.FC<NavbarProps> = ({
       <AiHistoryDrawer
         isOpen={showHistoryDrawer}
         onClose={() => setShowHistoryDrawer(false)}
+        activeTool={activeTool}
+        onSelectTool={onSelectTool}
         onSelectConversionItem={() => {
           onSelectTool?.('text-converter');
         }}

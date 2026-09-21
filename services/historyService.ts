@@ -11,8 +11,9 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { HistoryItem, MocktestHistoryItem } from '../types';
+import { saveExtractedDocument, getAllExtractedDocuments } from './aiDbService';
 
-const HISTORY_LIMIT = 30;
+const HISTORY_LIMIT = 35;
 
 function getUserHistoryKey(userId?: string): string {
   return `user_history_${userId && userId.trim() ? userId.trim() : 'guest'}`;
@@ -46,7 +47,7 @@ function sanitizeForFirestore(obj: any): any {
     for (const [key, val] of Object.entries(obj)) {
       if (val !== undefined) {
         // Strip huge base64 images from cloud sync to avoid 1MB limit
-        if (key === 'imageB64' && typeof val === 'string' && val.length > 10000) {
+        if (key === 'imageB64' && typeof val === 'string' && val.length > 5000) {
           cleaned[key] = ''; // Omit heavy payload from cloud
         } else {
           cleaned[key] = sanitizeForFirestore(val);
@@ -62,15 +63,19 @@ function saveToLocalStorage(key: string, data: any): void {
   try {
     localStorage.setItem(key, JSON.stringify(data));
   } catch (e: any) {
-    console.warn('[historyService] LocalStorage quota warning, trimming to top 15 items:', e);
+    console.warn('[historyService] LocalStorage quota reached, pruning oldest items:', e);
     try {
       if (Array.isArray(data)) {
-        // Strip heavy images if quota exceeded
-        const trimmed = data.slice(0, 15).map(item => {
+        // Strip any heavy fields and trim to top 15 items
+        const trimmed = data.slice(0, 15).map((item) => {
           if (item.elements) {
             return {
               ...item,
-              elements: item.elements.map((el: any) => ({ ...el, imageB64: undefined }))
+              elements: item.elements.map((el: any) => ({
+                id: el.id,
+                type: el.type,
+                content: typeof el.content === 'string' ? el.content.slice(0, 1000) : '',
+              })),
             };
           }
           return item;
@@ -78,7 +83,7 @@ function saveToLocalStorage(key: string, data: any): void {
         localStorage.setItem(key, JSON.stringify(trimmed));
       }
     } catch (err) {
-      console.error('[historyService] Failed to save to localStorage:', err);
+      console.error('[historyService] Failed to save to localStorage after trim:', err);
     }
   }
 }
@@ -101,29 +106,54 @@ export async function addHistoryItem(userId: string, item: HistoryItem): Promise
   const uid = userId || 'guest';
   const storageKey = getUserHistoryKey(uid);
 
-  // 1. Always save immediately to user-scoped local storage
+  // Clean elements: strip heavy imageB64 so localStorage and Firestore never hit quota limits!
+  const cleanedElements = (item.elements || []).map((el) => ({
+    id: el.id,
+    type: el.type,
+    content: el.content || '',
+    bbox: el.bbox || null,
+  }));
+
+  const leanItem: HistoryItem = {
+    id: item.id,
+    userId: uid,
+    fileName: item.fileName || 'Untitled Document',
+    timestamp: item.timestamp || Date.now(),
+    pagesCount: item.pagesCount || 1,
+    elements: cleanedElements as any,
+  };
+
+  // 1. Save to user-scoped local storage
   const localItems = loadFromLocalStorage<HistoryItem>(storageKey);
-  const updated = [item, ...localItems.filter((i) => i.id !== item.id)].slice(0, HISTORY_LIMIT);
+  const updated = [leanItem, ...localItems.filter((i) => i.id !== item.id)].slice(0, HISTORY_LIMIT);
   saveToLocalStorage(storageKey, updated);
 
-  // Legacy fallback key for backwards compatibility
+  // Also keep general conversion_history fallback updated
   try {
     localStorage.setItem('conversion_history', JSON.stringify(updated));
   } catch (_) {}
 
-  // 2. Cloud sync to Firestore if user is authenticated and db is available
+  // 2. Also save to browser IndexedDB (stores document safely with no 5MB quota issue)
+  try {
+    const fullText = cleanedElements
+      .map((e) => (e.type === 'text' ? e.content || '' : ''))
+      .join('\n\n');
+    await saveExtractedDocument({
+      id: leanItem.id,
+      fileName: leanItem.fileName,
+      pageCount: leanItem.pagesCount,
+      extractedText: fullText,
+      elements: cleanedElements,
+      timestamp: leanItem.timestamp,
+    });
+  } catch (_) {}
+
+  // 3. Cloud sync to Firestore if user is authenticated and db is available
   if (!db || uid === 'guest') return;
 
   try {
-    const ref = doc(historyCollection(uid), item.id);
-    const sanitized = sanitizeForFirestore({
-      id: item.id,
-      userId: uid,
-      fileName: item.fileName || 'Untitled Document',
-      timestamp: item.timestamp || Date.now(),
-      pagesCount: item.pagesCount || 1,
-      elements: item.elements || [],
-    });
+    const ref = doc(historyCollection(uid), leanItem.id);
+    const sanitized = sanitizeForFirestore(leanItem);
     await setDoc(ref, sanitized, { merge: true });
   } catch (e: any) {
     console.warn(
@@ -135,17 +165,37 @@ export async function addHistoryItem(userId: string, item: HistoryItem): Promise
 export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
   const uid = userId || 'guest';
   const storageKey = getUserHistoryKey(uid);
-  const localItems = loadFromLocalStorage<HistoryItem>(storageKey);
+  let localItems = loadFromLocalStorage<HistoryItem>(storageKey);
+
+  // Check fallback keys if user-scoped key is empty
+  if (localItems.length === 0) {
+    const legacy = loadFromLocalStorage<HistoryItem>('conversion_history');
+    if (legacy.length > 0) {
+      localItems = legacy;
+      saveToLocalStorage(storageKey, legacy);
+    }
+  }
+
+  // If still empty, check IndexedDB
+  if (localItems.length === 0) {
+    try {
+      const idbDocs = await getAllExtractedDocuments();
+      if (idbDocs.length > 0) {
+        localItems = idbDocs.map((d) => ({
+          id: d.id,
+          userId: uid,
+          fileName: d.fileName || 'Untitled Document',
+          timestamp: d.timestamp,
+          pagesCount: d.pageCount || 1,
+          elements: d.elements || [],
+        }));
+        saveToLocalStorage(storageKey, localItems);
+      }
+    } catch (_) {}
+  }
 
   // If guest or no db configured, return local items directly
   if (!db || uid === 'guest') {
-    if (localItems.length === 0) {
-      const legacy = loadFromLocalStorage<HistoryItem>('conversion_history');
-      if (legacy.length > 0) {
-        saveToLocalStorage(storageKey, legacy);
-        return legacy;
-      }
-    }
     return localItems;
   }
 
@@ -176,16 +226,9 @@ export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
     return merged;
   } catch (e: any) {
     console.warn(
-      `[historyService] Cloud fetch skipped for user ${uid}, serving user-scoped local history:`,
+      `[historyService] Cloud fetch skipped for user ${uid}, serving local history:`,
       e?.message || e
     );
-    if (localItems.length === 0) {
-      const legacy = loadFromLocalStorage<HistoryItem>('conversion_history');
-      if (legacy.length > 0) {
-        saveToLocalStorage(storageKey, legacy);
-        return legacy;
-      }
-    }
     return localItems;
   }
 }
@@ -239,28 +282,56 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
   const uid = userId || 'guest';
   const storageKey = getUserMocktestKey(uid);
 
+  const cleanQuestions = (item.questions || []).map((q) => ({
+    ...q,
+    question_hi: q.question_hi || '',
+    question_en: q.question_en || '',
+    option1_hi: q.option1_hi || '',
+    option2_hi: q.option2_hi || '',
+    option3_hi: q.option3_hi || '',
+    option4_hi: q.option4_hi || '',
+    option5_hi: q.option5_hi || '',
+    option1_en: q.option1_en || '',
+    option2_en: q.option2_en || '',
+    option3_en: q.option3_en || '',
+    option4_en: q.option4_en || '',
+    option5_en: q.option5_en || '',
+    answer: q.answer || '',
+    solution_hi: q.solution_hi || '',
+    solution_en: q.solution_en || '',
+    subject: q.subject || '',
+    difficulty_level: q.difficulty_level || 'medium',
+  }));
+
+  const leanItem: MocktestHistoryItem = {
+    id: item.id,
+    userId: uid,
+    setName: item.setName || 'Mock Test',
+    timestamp: item.timestamp || Date.now(),
+    questionCount: item.questionCount || cleanQuestions.length,
+    questions: cleanQuestions,
+  };
+
   // 1. Save locally to user-scoped key
   const localItems = loadFromLocalStorage<MocktestHistoryItem>(storageKey);
-  const updated = [item, ...localItems.filter((i) => i.id !== item.id)].slice(0, HISTORY_LIMIT);
+  const updated = [leanItem, ...localItems.filter((i) => i.id !== item.id)].slice(0, HISTORY_LIMIT);
   saveToLocalStorage(storageKey, updated);
+
+  // Also keep general mocktests fallback updated
+  try {
+    localStorage.setItem('user_mocktests_all', JSON.stringify(updated));
+  } catch (_) {}
 
   // 2. Sync to Firestore
   if (!db || uid === 'guest') return;
 
   try {
-    const ref = doc(mocktestCollection(uid), item.id);
-    const sanitized = sanitizeForFirestore({
-      id: item.id,
-      userId: uid,
-      setName: item.setName || 'Mock Test',
-      timestamp: item.timestamp || Date.now(),
-      questionCount: item.questionCount || (item.questions ? item.questions.length : 0),
-      questions: item.questions || [],
-    });
+    const ref = doc(mocktestCollection(uid), leanItem.id);
+    const sanitized = sanitizeForFirestore(leanItem);
     await setDoc(ref, sanitized, { merge: true });
   } catch (e: any) {
     console.warn(
-      `[historyService] Saved mocktest locally for user ${uid}. (Cloud sync skipped: ${e?.message || e})`
+      `[historyService] Saved mocktest locally for user ${uid}. (Cloud sync notice: ${e?.message || e})`
     );
   }
 }
@@ -268,7 +339,16 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
 export async function getMocktestHistoryItems(userId: string): Promise<MocktestHistoryItem[]> {
   const uid = userId || 'guest';
   const storageKey = getUserMocktestKey(uid);
-  const localItems = loadFromLocalStorage<MocktestHistoryItem>(storageKey);
+  let localItems = loadFromLocalStorage<MocktestHistoryItem>(storageKey);
+
+  // Fallback to general mocktests list if user-scoped is empty
+  if (localItems.length === 0) {
+    const general = loadFromLocalStorage<MocktestHistoryItem>('user_mocktests_all');
+    if (general.length > 0) {
+      localItems = general;
+      saveToLocalStorage(storageKey, general);
+    }
+  }
 
   if (!db || uid === 'guest') {
     return localItems;
@@ -312,6 +392,10 @@ export async function deleteMocktestHistoryItem(userId: string, id: string): Pro
   const filtered = localItems.filter((i) => i.id !== id);
   saveToLocalStorage(storageKey, filtered);
 
+  try {
+    localStorage.setItem('user_mocktests_all', JSON.stringify(filtered));
+  } catch (_) {}
+
   if (!db || uid === 'guest') return;
   try {
     await deleteDoc(doc(mocktestCollection(uid), id));
@@ -324,6 +408,10 @@ export async function clearAllMocktestHistory(userId: string): Promise<void> {
   const uid = userId || 'guest';
   const storageKey = getUserMocktestKey(uid);
   saveToLocalStorage(storageKey, []);
+
+  try {
+    localStorage.removeItem('user_mocktests_all');
+  } catch (_) {}
 
   if (!db || uid === 'guest') return;
   try {

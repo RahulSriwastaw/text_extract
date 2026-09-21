@@ -19,7 +19,8 @@ import { LatexRenderer, useMathJax } from './LatexRenderer';
 import { 
   MockTestMcqItem, 
   DifficultyLevel,
-  LatexRepairScope
+  LatexRepairScope,
+  MocktestHistoryItem
 } from '../types';
 import { useCurrentUser } from '../services/authService';
 import { addMocktestHistoryItem } from '../services/historyService';
@@ -329,6 +330,23 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       onClearInitialPages?.();
     }
   }, [initialPages]);
+
+  // Listen to load requests from the History Drawer
+  useEffect(() => {
+    const handleLoadHistory = (e: any) => {
+      if (e.detail && e.detail.questions && e.detail.questions.length > 0) {
+        setExtractedMcqs(e.detail.questions);
+        if (e.detail.setName) {
+          setSetName(e.detail.setName);
+          setOutputFileName(e.detail.setName);
+        }
+        setLiveStatusText(`✓ Loaded "${e.detail.setName || 'Mock Test'}" (${e.detail.questions.length} MCQs) from Account History!`);
+        alert(`✨ Successfully loaded "${e.detail.setName || 'Mock Test'}" (${e.detail.questions.length} questions) from your history into the Editor!`);
+      }
+    };
+    window.addEventListener('load_mocktest_history', handleLoadHistory);
+    return () => window.removeEventListener('load_mocktest_history', handleLoadHistory);
+  }, []);
 
   const handleProviderChange = (prov: AiProvider) => {
     setSelectedProvider(prov);
@@ -924,6 +942,24 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     } finally {
       setIsProcessingAll(false);
       setActivePageIndex(null);
+      // Automatically save completed extraction set to user history
+      setExtractedMcqs(currentItems => {
+        if (currentItems.length > 0) {
+          const currentUid = user?.uid || 'guest';
+          const autoItem: MocktestHistoryItem = {
+            id: 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            userId: currentUid,
+            setName: outputFileName || setName || 'Mock Test Paper',
+            timestamp: Date.now(),
+            questionCount: currentItems.length,
+            questions: currentItems,
+          };
+          addMocktestHistoryItem(currentUid, autoItem).catch((err) => {
+            console.warn('[history] Auto-save mocktest failed:', err);
+          });
+        }
+        return currentItems;
+      });
     }
   };
 
@@ -1513,10 +1549,24 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       if (text) {
         const parsed = parseAnyMockTestPastedText(text, setName);
         if (parsed.length > 0) {
-          // Standardize imported items: enforce strict <p>...</p> wrapping and MathJax format
           const standardized = parsed.map(it => standardizeItemHtmlAndMathJax(it, mathFormat === 'mathjax'));
           setExtractedMcqs(standardized);
-          alert(`✨ Successfully imported and standardized ${standardized.length} MCQs!\n\nAll bare text fields (e.g. Q.21-25, 46-50, 76) have been wrapped in <p>...</p> and formatted consistently.`);
+
+          // Automatically save imported test set to User Account History
+          const currentUid = user?.uid || 'guest';
+          const importItem: MocktestHistoryItem = {
+            id: 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            userId: currentUid,
+            setName: file.name.replace(/\.[^/.]+$/, '') || setName || 'Imported Test Set',
+            timestamp: Date.now(),
+            questionCount: standardized.length,
+            questions: standardized,
+          };
+          addMocktestHistoryItem(currentUid, importItem).catch((err) => {
+            console.warn('[history] Auto-save imported mocktest failed:', err);
+          });
+
+          alert(`✨ Successfully imported and standardized ${standardized.length} MCQs!\n\nAll bare text fields have been formatted and saved to your Account History.`);
         } else {
           alert('Could not parse any MCQs from this file. Verify format (CSV, TSV, or JSON).');
         }
@@ -1806,6 +1856,21 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
         ? `✓ Questions successfully added to Page ${targetPageNum} via CSV paste (${resolvedItems.length} total)!`
         : `✓ Test questions successfully updated via CSV paste (${resolvedItems.length} total)!`
     );
+
+    // Auto-save merged test paper to User Account History
+    if (resolvedItems.length > 0) {
+      const currentUid = user?.uid || 'guest';
+      addMocktestHistoryItem(currentUid, {
+        id: 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+        userId: currentUid,
+        setName: outputFileName || setName || 'Mock Test Set',
+        timestamp: Date.now(),
+        questionCount: resolvedItems.length,
+        questions: resolvedItems,
+      }).catch((err) => {
+        console.warn('[history] Auto-save pasted mocktest failed:', err);
+      });
+    }
   };
 
   // Single Question AI Repair

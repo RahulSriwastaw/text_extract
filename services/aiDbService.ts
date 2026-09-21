@@ -37,12 +37,13 @@ export interface AiConversation {
 }
 
 const DB_NAME = 'user_gemini_educational_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
   SETTINGS: 'ai_settings',
   CONVERSATIONS: 'ai_conversations',
-  EXTRACTED_PAGES: 'extracted_pages'
+  EXTRACTED_PAGES: 'extracted_pages',
+  MOCKTEST_SETS: 'mocktest_sets'
 };
 
 function openDb(): Promise<IDBDatabase> {
@@ -69,6 +70,11 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORES.EXTRACTED_PAGES)) {
         const pageStore = db.createObjectStore(STORES.EXTRACTED_PAGES, { keyPath: 'id' });
         pageStore.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORES.MOCKTEST_SETS)) {
+        const mockStore = db.createObjectStore(STORES.MOCKTEST_SETS, { keyPath: 'id' });
+        mockStore.createIndex('timestamp', 'timestamp', { unique: false });
       }
     };
 
@@ -316,4 +322,69 @@ export async function deleteExtractedDocument(id: string): Promise<void> {
     req.onerror = () => reject(req.error);
   });
 }
+
+// ----------------- LOCAL MOCKTEST SETS (WITH FULL PAGES & IMAGES) -----------------
+
+export async function saveMocktestSetToDb(item: any): Promise<void> {
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.MOCKTEST_SETS, 'readwrite');
+      const store = tx.objectStore(STORES.MOCKTEST_SETS);
+      const req = store.put(item);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.warn('[aiDbService] Failed to save mocktest to IndexedDB:', err);
+  }
+}
+
+export async function getMocktestSetFromDb(id: string): Promise<any | null> {
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.MOCKTEST_SETS, 'readonly');
+      const store = tx.objectStore(STORES.MOCKTEST_SETS);
+      const req = store.get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+export async function getAllMocktestSetsFromDb(): Promise<any[]> {
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.MOCKTEST_SETS, 'readonly');
+      const store = tx.objectStore(STORES.MOCKTEST_SETS);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const items = req.result || [];
+        items.sort((a: any, b: any) => (b.timestamp || 0) - (a.timestamp || 0));
+        resolve(items);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch (_) {
+    return [];
+  }
+}
+
+export async function deleteMocktestSetFromDb(id: string): Promise<void> {
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORES.MOCKTEST_SETS, 'readwrite');
+      const store = tx.objectStore(STORES.MOCKTEST_SETS);
+      const req = store.delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (_) {}
+}
+
 

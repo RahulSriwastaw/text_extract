@@ -210,7 +210,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
       setName: outputFileName || setName || 'Mock Test',
       timestamp: Date.now(),
       questionCount: extractedMcqs.length,
-      questions: extractedMcqs
+      questions: extractedMcqs,
+      pages: pages
     };
     await addMocktestHistoryItem(currentUid, item);
     setIsSavedToHistory(true);
@@ -417,18 +418,69 @@ Rules:
   // Listen to load requests from the History Drawer
   useEffect(() => {
     const handleLoadHistory = (e: any) => {
-      if (e.detail && e.detail.questions && e.detail.questions.length > 0) {
-        if (e.detail.id) {
-          currentSessionSetIdRef.current = e.detail.id;
-        }
-        setExtractedMcqs(e.detail.questions);
-        if (e.detail.setName) {
-          setSetName(e.detail.setName);
-          setOutputFileName(e.detail.setName);
-        }
-        setLiveStatusText(`✓ Loaded "${e.detail.setName || 'Mock Test'}" (${e.detail.questions.length} MCQs) from Account History!`);
-        alert(`✨ Successfully loaded "${e.detail.setName || 'Mock Test'}" (${e.detail.questions.length} questions) from your history into the Editor!`);
+      const item: MocktestHistoryItem = e.detail;
+      if (!item || !item.questions || item.questions.length === 0) return;
+
+      if (item.id) {
+        currentSessionSetIdRef.current = item.id;
       }
+      setExtractedMcqs(item.questions);
+      if (item.setName) {
+        setSetName(item.setName);
+        setOutputFileName(item.setName);
+      }
+
+      // Restore full PDF pages, images and content so the layout & editor loads completely!
+      if (item.pages && Array.isArray(item.pages) && item.pages.length > 0) {
+        const restoredPages: PageQueueItem[] = item.pages.map((p: any) => {
+          const pageQuestions = (p.items && p.items.length > 0)
+            ? p.items
+            : item.questions.filter((q: MockTestMcqItem) => q.pageNumber === p.pageNumber || q.pageId === p.id);
+
+          return {
+            id: p.id || `page_${p.pageNumber}_${Date.now()}`,
+            pageNumber: p.pageNumber,
+            imageUrl: p.imageUrl || '',
+            status: p.status || 'ready',
+            mcqCount: pageQuestions.length,
+            isSelected: true,
+            items: pageQuestions,
+            rawTextContent: p.rawTextContent || '',
+            sourceType: p.sourceType || (p.rawTextContent ? 'text' : 'image'),
+            fileName: p.fileName || item.setName || `Page ${p.pageNumber}`
+          };
+        });
+        setPages(restoredPages);
+      } else {
+        // Fallback: If pages array was not saved previously, reconstruct pages by grouping questions by pageNumber
+        const pageGroups = new Map<number, MockTestMcqItem[]>();
+        item.questions.forEach((q: MockTestMcqItem) => {
+          const pNum = q.pageNumber || (q.source_pages ? parseInt(String(q.source_pages)) : 1) || 1;
+          if (!pageGroups.has(pNum)) pageGroups.set(pNum, []);
+          pageGroups.get(pNum)!.push(q);
+        });
+
+        const sortedPageNumbers = Array.from(pageGroups.keys()).sort((a, b) => a - b);
+        const reconstructedPages: PageQueueItem[] = sortedPageNumbers.map(pNum => {
+          const pageItems = pageGroups.get(pNum) || [];
+          return {
+            id: `page_${pNum}_${item.id || Date.now()}`,
+            pageNumber: pNum,
+            imageUrl: '',
+            status: 'ready' as const,
+            mcqCount: pageItems.length,
+            isSelected: true,
+            items: pageItems,
+            sourceType: 'text',
+            fileName: item.setName || `Page ${pNum}`
+          };
+        });
+        setPages(reconstructedPages);
+      }
+
+      setActiveTab('split');
+      setLiveStatusText(`✓ Loaded "${item.setName || 'Mock Test'}" (${item.questions.length} MCQs) with pages from History!`);
+      alert(`✨ Successfully loaded "${item.setName || 'Mock Test'}" (${item.questions.length} questions) with pages and content into the Editor!`);
     };
     window.addEventListener('load_mocktest_history', handleLoadHistory);
     return () => window.removeEventListener('load_mocktest_history', handleLoadHistory);
@@ -889,6 +941,7 @@ Rules:
             timestamp: Date.now(),
             questionCount: formattedMcqs.length,
             questions: formattedMcqs,
+            pages: nextPages,
           }).catch(() => {});
         }
 
@@ -1062,6 +1115,7 @@ Rules:
               timestamp: Date.now(),
               questionCount: allMcqs.length,
               questions: allMcqs.map((it, idx) => ({ ...it, question_r: idx + 1 })),
+              pages: currentPages,
             };
             addMocktestHistoryItem(currentUid, autoItem).catch((err) => {
               console.warn('[history] Auto-save mocktest failed:', err);
@@ -1627,6 +1681,7 @@ Rules:
       timestamp: Date.now(),
       questionCount: extractedMcqs.length,
       questions: extractedMcqs,
+      pages: pages,
     }).catch(() => {});
 
     const chosenName = (outputFileName || setName || 'mocktest').trim();
@@ -1651,6 +1706,7 @@ Rules:
         timestamp: Date.now(),
         questionCount: extractedMcqs.length,
         questions: extractedMcqs,
+        pages: pages,
       }).catch(() => {});
 
       const safeBase = (outputFileName || setName || 'mocktest').replace(/[\\/:\*?"<>|]+/g, '_').trim() || 'mocktest';

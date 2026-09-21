@@ -11,7 +11,14 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { HistoryItem, MocktestHistoryItem } from '../types';
-import { saveExtractedDocument, getAllExtractedDocuments } from './aiDbService';
+import { 
+  saveExtractedDocument, 
+  getAllExtractedDocuments,
+  saveMocktestSetToDb,
+  getMocktestSetFromDb,
+  getAllMocktestSetsFromDb,
+  deleteMocktestSetFromDb
+} from './aiDbService';
 
 const HISTORY_LIMIT = 35;
 
@@ -360,11 +367,33 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
     timestamp: item.timestamp || Date.now(),
     questionCount: item.questionCount || cleanQuestions.length,
     questions: cleanQuestions,
+    pages: item.pages || [],
   };
 
-  // 1. Save locally to user-scoped key immediately
+  // 1. Save full set (including PDF pages, images & content) to browser IndexedDB
+  try {
+    await saveMocktestSetToDb(leanItem);
+  } catch (err) {
+    console.warn('[historyService] Failed to save full mocktest to IndexedDB:', err);
+  }
+
+  // 2. Save locally to user-scoped key in localStorage (prune heavy base64 to avoid quota error)
+  const storageLeanItem: MocktestHistoryItem = {
+    ...leanItem,
+    pages: (leanItem.pages || []).map((p: any) => ({
+      id: p.id,
+      pageNumber: p.pageNumber,
+      status: p.status || 'ready',
+      mcqCount: p.mcqCount || 0,
+      fileName: p.fileName || '',
+      sourceType: p.sourceType || 'image',
+      rawTextContent: typeof p.rawTextContent === 'string' ? p.rawTextContent.slice(0, 1500) : '',
+      imageUrl: (typeof p.imageUrl === 'string' && p.imageUrl.length < 40000) ? p.imageUrl : '',
+    }))
+  };
+
   const localItems = loadFromLocalStorage<MocktestHistoryItem>(storageKey);
-  const updated = [leanItem, ...localItems.filter((i) => i.id !== leanItem.id)].slice(0, HISTORY_LIMIT);
+  const updated = [storageLeanItem, ...localItems.filter((i) => i.id !== leanItem.id)].slice(0, HISTORY_LIMIT);
   saveToLocalStorage(storageKey, updated);
 
   // Also keep general mocktests fallback and guest key updated so data is never lost across login
@@ -376,12 +405,12 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
     }
   } catch (_) {}
 
-  // 2. Dispatch custom event so any open UI / Drawer updates immediately
+  // 3. Dispatch custom event so any open UI / Drawer updates immediately
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('mocktest_history_updated', { detail: { item: leanItem } }));
   }
 
-  // 3. Non-blocking cloud sync (fire-and-forget in background, NEVER await!)
+  // 4. Non-blocking cloud sync (fire-and-forget in background, NEVER await!)
   if (!db || uid === 'guest') return;
 
   (async () => {
@@ -415,6 +444,24 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
       }
     }
   }
+
+  // Hydrate full pages from IndexedDB if available!
+  try {
+    const idbSets = await getAllMocktestSetsFromDb();
+    if (idbSets && idbSets.length > 0) {
+      const idbMap = new Map(idbSets.map((s: any) => [s.id, s]));
+      localItems = localItems.map((lit) => {
+        const matched = idbMap.get(lit.id);
+        if (matched && matched.pages && matched.pages.length > 0) {
+          return {
+            ...lit,
+            pages: matched.pages
+          };
+        }
+        return lit;
+      });
+    }
+  } catch (_) {}
 
   // If guest or no db, return local items IMMEDIATELY (0ms)
   if (!db || uid === 'guest') {
@@ -459,6 +506,9 @@ export async function deleteMocktestHistoryItem(userId: string, id: string): Pro
     localStorage.setItem('user_mocktests_all', JSON.stringify(filtered));
   } catch (_) {}
 
+  // Also delete from IndexedDB
+  deleteMocktestSetFromDb(id).catch(() => {});
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('mocktest_history_updated'));
   }
@@ -476,6 +526,12 @@ export async function clearAllMocktestHistory(userId: string): Promise<void> {
 
   try {
     localStorage.removeItem('user_mocktests_all');
+  } catch (_) {}
+
+  // Also clean up all IndexedDB mocktest sets
+  try {
+    const idbSets = await getAllMocktestSetsFromDb();
+    idbSets.forEach((s) => deleteMocktestSetFromDb(s.id).catch(() => {}));
   } catch (_) {}
 
   if (typeof window !== 'undefined') {

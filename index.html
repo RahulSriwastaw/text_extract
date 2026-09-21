@@ -38,6 +38,14 @@
       ]
     }
     </script>
+    <script>
+      // Suppress unhandled AbortError caused by browser extensions intercepting fetch/streams
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason && (event.reason.name === 'AbortError' || event.reason.message === 'The user aborted a request.')) {
+          event.preventDefault();
+        }
+      });
+    </script>
     <!-- PDF.js for rendering PDF pages to images -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>

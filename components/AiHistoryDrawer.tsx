@@ -35,7 +35,8 @@ import {
   deleteConversation, 
   clearAllAiHistory, 
   exportHistoryAsJson, 
-  AiConversation 
+  AiConversation,
+  getMocktestSetFromDb
 } from '../services/aiDbService';
 import { HistoryItem, MocktestHistoryItem } from '../types';
 import { downloadMockTestCsv } from '../services/mocktestService';
@@ -176,9 +177,17 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
   };
 
   // --- Load into Editor handlers ---
-  const handleLoadMocktestIntoEditor = (item: MocktestHistoryItem, e: React.MouseEvent) => {
+  const handleLoadMocktestIntoEditor = async (item: MocktestHistoryItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('load_mocktest_history', { detail: item }));
+    let setItem = item;
+    try {
+      const fullFromDb = await getMocktestSetFromDb(item.id);
+      if (fullFromDb && fullFromDb.questions && fullFromDb.questions.length > 0) {
+        setItem = fullFromDb;
+      }
+    } catch (_) {}
+
+    window.dispatchEvent(new CustomEvent('load_mocktest_history', { detail: setItem }));
     if (onSelectTool) {
       onSelectTool('mcq-extractor');
     }

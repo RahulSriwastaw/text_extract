@@ -67,6 +67,7 @@ export interface MocktestHistoryItem {
   timestamp: number;
   questionCount: number;
   questions: MockTestMcqItem[];
+  pages?: any[];
 }
 
 export type QuestionType = 'MCQ' | 'MSQ' | 'NAT';

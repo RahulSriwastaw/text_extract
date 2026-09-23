@@ -6,9 +6,9 @@
  * systematic, human-like standard.
  */
 
-const EXAM_KEYWORD_REGEX = '(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\\s\\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway|एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\\s\\-]*डी|टेक)';
+const EXAM_KEYWORD_REGEX = '(?:\\b(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\\s\\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway)\\b|(?:एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\\s\\-]*डी|टेक))';
 const SHIFT_KEYWORD_REGEX = '(?:Afternoon|Morning|Evening|Night|Shift[\\s\\-]*[I|II|III|IV|V|1|2|3|4|5]|Batch[\\s\\-]*\\d+|दोपहर|सुबह|शाम|रात|प्रथम[\\s\\-]*पाली|द्वितीय[\\s\\-]*पाली|तृतीय[\\s\\-]*पाली|पाली[\\s\\-]*\\d+)';
-const DATE_PATTERN_REGEX = '(?:\\d{1,2}[\\/\\.\\-]\\d{1,2}[\\/\\.\\-]\\d{2,4}|\\b(?:19|20)\\d{2}\\b)';
+const DATE_PATTERN_REGEX = '(?:\\d{1,2}[\\/\\.\\-]\\d{1,2}[\\/\\.\\-](?:19|20)?\\d{2}|\\b(?:19|20)\\d{2}\\s*(?:Shift|Tier|Stage|पाली))';
 
 const SUB_MAP: Record<string, string> = {
   '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
@@ -28,10 +28,10 @@ export function stripExamTagsAndJunk(text: string): string {
   res = res.replace(new RegExp(`(?:^|<p>)\\s*\\[\\s*${EXAM_KEYWORD_REGEX}[^\\]]*\\]\\s*`, 'gi'), (m) => m.startsWith('<p>') ? '<p>' : '');
   res = res.replace(new RegExp(`(?:^|<p>)\\s*\\(\\s*${EXAM_KEYWORD_REGEX}[^\\)]*\\)\\s*`, 'gi'), (m) => m.startsWith('<p>') ? '<p>' : '');
 
-  // Trailing shift or date pattern
+  // Trailing shift or date pattern on the SAME line only (never match across lines or paragraphs!)
   const trailingPattern = new RegExp(
-    `(?:[\\s\\.\\,\\;\\-\\–\\—]|\\?|\\!)+(${EXAM_KEYWORD_REGEX}[\\s\\S]*?(?:${DATE_PATTERN_REGEX}|${SHIFT_KEYWORD_REGEX})[\\s\\S]*?)(\\s*<\\/p>|$)`,
-    'i'
+    `(?:[\\s\\.\\,\\;\\-\\–\\—]|\\?|\\!)+(${EXAM_KEYWORD_REGEX}[^\\n<]*?(?:${DATE_PATTERN_REGEX}|${SHIFT_KEYWORD_REGEX})[^\\n<]*?)(\\s*<\\/p>|$)`,
+    'im'
   );
   res = res.replace(trailingPattern, (match, _tag, closing) => {
     const preChar = match.trim().charAt(0);
@@ -39,8 +39,8 @@ export function stripExamTagsAndJunk(text: string): string {
     return punct + (closing || '');
   });
 
-  res = res.replace(new RegExp(`(?:[\\s\\-\\–\\—]+)(${DATE_PATTERN_REGEX}\\s*\\(?${SHIFT_KEYWORD_REGEX}\\)?|\\(?${SHIFT_KEYWORD_REGEX}\\)?)(\\s*<\\/p>|$)`, 'i'), '$2');
-  res = res.replace(/(?:Youth\s*Competition\s*Times|Pinnacle\s*Publication|Testbook\.com|Adda247|Exampur|Gradeup|Drishti\s*IAS|Kiran\s*Prakashan|Platform\s*Education|Rukmini\s*Prakashan)[\s\S]*?(?:<\/p>|$)/gi, (m) => m.endsWith('</p>') ? '</p>' : '');
+  res = res.replace(new RegExp(`(?:[\\s\\-\\–\\—]+)(${DATE_PATTERN_REGEX}\\s*\\(?${SHIFT_KEYWORD_REGEX}\\)?|\\(?${SHIFT_KEYWORD_REGEX}\\)?)(\\s*<\\/p>|$)`, 'im'), '$2');
+  res = res.replace(/(?:Youth\s*Competition\s*Times|Pinnacle\s*Publication|Testbook\.com|Adda247|Exampur|Gradeup|Drishti\s*IAS|Kiran\s*Prakashan|Platform\s*Education|Rukmini\s*Prakashan)[^\n<]*?(?:<\/p>|$)/gim, (m) => m.endsWith('</p>') ? '</p>' : '');
   res = res.replace(/\s+<\/p>/gi, '</p>').replace(/[ \t]{2,}/g, ' ');
 
   return res.trim();
@@ -259,8 +259,8 @@ export function cleanMocktestText(text: string): string {
     // Replace HTML <br> with LaTeX newline
     inner = inner.replace(/<br\s*\/?>/gi, ' \\\\ ');
 
-    // Strip remaining HTML tags from inside math
-    inner = inner.replace(/<\/?(?:p|b|strong|i|em|span|div)[^>]*>/gi, '');
+    // Strip remaining HTML formatting tags from inside math
+    inner = inner.replace(/<\/?(?:p|b|strong|i|em|span|div)\b[^>]*>/gi, '');
 
     // Standardize cosec -> csc
     inner = inner.replace(/\\cosec\b/g, '\\csc');
@@ -313,11 +313,11 @@ export function cleanMocktestText(text: string): string {
   res = res.replace(/⅓/g, '$\\frac{1}{3}$');
   res = res.replace(/⅔/g, '$\\frac{2}{3}$');
 
-  // 22. Strip all HTML tags completely (user requested pure normal text without HTML, only LaTeX for math)
+  // 22. Strip HTML container & formatting tags (preserves figure <img> tags and LaTeX math)
   res = res
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/<\/?(?:p|b|strong|i|em|span|div|table|thead|tbody|tr|td|th|ul|ol|li|hr)[^>]*>/gi, '')
+    .replace(/<\/?(?:p|b|strong|i|em|span|div|table|thead|tbody|tr|td|th|ul|ol|li|hr)\b[^>]*>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ');
 

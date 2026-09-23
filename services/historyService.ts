@@ -1,15 +1,4 @@
-import {
-  collection,
-  doc,
-  setDoc,
-  deleteDoc,
-  getDocs,
-  query,
-  orderBy,
-  limit,
-  writeBatch,
-} from 'firebase/firestore';
-import { db } from './firebase';
+import { supabase } from './supabase';
 import { HistoryItem, MocktestHistoryItem } from '../types';
 import { 
   saveExtractedDocument, 
@@ -28,42 +17,6 @@ function getUserHistoryKey(userId?: string): string {
 
 function getUserMocktestKey(userId?: string): string {
   return `user_mocktests_${userId && userId.trim() ? userId.trim() : 'guest'}`;
-}
-
-function historyCollection(userId: string) {
-  if (!db) throw new Error('Cloud history is not configured on this deployment.');
-  return collection(db, 'users', userId, 'history');
-}
-
-function mocktestCollection(userId: string) {
-  if (!db) throw new Error('Cloud history is not configured on this deployment.');
-  return collection(db, 'users', userId, 'mocktests');
-}
-
-/**
- * Clean and sanitize data before sending to Firestore:
- * 1. Recursively strip undefined values (which cause Firestore setDoc to throw)
- * 2. Strip huge base64 images from elements to avoid hitting Firestore's 1MB limit
- */
-function sanitizeForFirestore(obj: any): any {
-  if (obj === undefined) return null;
-  if (obj === null) return null;
-  if (Array.isArray(obj)) return obj.map(sanitizeForFirestore);
-  if (typeof obj === 'object') {
-    const cleaned: Record<string, any> = {};
-    for (const [key, val] of Object.entries(obj)) {
-      if (val !== undefined) {
-        // Strip huge base64 images from cloud sync to avoid 1MB limit
-        if (key === 'imageB64' && typeof val === 'string' && val.length > 5000) {
-          cleaned[key] = ''; // Omit heavy payload from cloud
-        } else {
-          cleaned[key] = sanitizeForFirestore(val);
-        }
-      }
-    }
-    return cleaned;
-  }
-  return obj;
 }
 
 function saveToLocalStorage(key: string, data: any): void {
@@ -109,50 +62,11 @@ function loadFromLocalStorage<T>(key: string): T[] {
 // 1. PDF TO DOCX / TEXT CONVERSION HISTORY
 // ==========================================
 
-let isFirestoreAvailable = true;
-
-/**
- * Executes a Firestore promise guarded by a timeout.
- * Cloud sync runs in the background and does not block the UI.
- */
-async function withFirestoreTimeout<T>(promise: Promise<T>, timeoutMs = 10000): Promise<T> {
-  if (!db) {
-    throw new Error('Firestore is unconfigured');
-  }
-
-  let timer: any;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`Firestore operation timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  try {
-    const result = await Promise.race([promise, timeoutPromise]);
-    clearTimeout(timer);
-    return result;
-  } catch (err: any) {
-    clearTimeout(timer);
-    const msg = String(err?.message || err);
-    if (
-      msg.includes('PERMISSION_DENIED') ||
-      msg.includes('not-found') ||
-      msg.includes('disabled') ||
-      msg.includes('has not been used in project')
-    ) {
-      console.warn(
-        '[Firebase] Cloud Firestore is not active or rules need publishing in Firebase Console. Go to: https://console.firebase.google.com/project/text-extract-8210e/firestore'
-      );
-    }
-    throw err;
-  }
-}
-
 export async function addHistoryItem(userId: string, item: HistoryItem): Promise<void> {
   const uid = userId || 'guest';
   const storageKey = getUserHistoryKey(uid);
 
-  // Clean elements: strip heavy imageB64 so localStorage and Firestore never hit quota limits!
+  // Clean elements: strip heavy imageB64 so localStorage never hits quota limits
   const cleanedElements = (item.elements || []).map((el) => ({
     id: el.id,
     type: el.type,
@@ -180,10 +94,11 @@ export async function addHistoryItem(userId: string, item: HistoryItem): Promise
   } catch (_) {}
 
   // 2. Also save to browser IndexedDB (stores document safely with no 5MB quota issue)
+  const fullText = cleanedElements
+    .map((e) => (e.type === 'text' ? e.content || '' : ''))
+    .join('\n\n');
+
   try {
-    const fullText = cleanedElements
-      .map((e) => (e.type === 'text' ? e.content || '' : ''))
-      .join('\n\n');
     await saveExtractedDocument({
       id: leanItem.id,
       fileName: leanItem.fileName,
@@ -199,17 +114,35 @@ export async function addHistoryItem(userId: string, item: HistoryItem): Promise
     window.dispatchEvent(new CustomEvent('conversion_history_updated', { detail: { item: leanItem } }));
   }
 
-  // 4. Cloud sync to Firestore if authenticated (fire-and-forget in background, NEVER await!)
-  if (!db || uid === 'guest') return;
+  // 4. Cloud sync to Supabase if authenticated
+  if (!supabase || uid === 'guest') return;
 
   (async () => {
     try {
-      const ref = doc(historyCollection(uid), leanItem.id);
-      const sanitized = sanitizeForFirestore(leanItem);
-      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000);
-      console.log(`[Firebase Cloud Sync] ✅ Conversion document "${leanItem.fileName}" synced to Firestore for user: ${uid}`);
+      const { error } = await supabase
+        .from('user_history')
+        .upsert(
+          {
+            id: leanItem.id,
+            user_id: uid,
+            name: leanItem.fileName,
+            original_name: leanItem.fileName,
+            created_at: leanItem.timestamp,
+            page_count: leanItem.pagesCount,
+            elements: cleanedElements,
+            raw_text: fullText.slice(0, 10000),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
+
+      if (error) {
+        console.warn('[Supabase Sync] user_history sync notice:', error.message);
+      } else {
+        console.log(`[Supabase Sync] ✅ Document "${leanItem.fileName}" synced to Supabase PostgreSQL`);
+      }
     } catch (err: any) {
-      console.warn(`[Firebase Cloud Sync] Notice: Cloud sync deferred (${err?.message || err}). Document safely preserved in local history.`);
+      console.warn('[Supabase Sync] Sync deferred:', err?.message || err);
     }
   })();
 }
@@ -246,28 +179,55 @@ export async function getHistoryItems(userId: string): Promise<HistoryItem[]> {
     } catch (_) {}
   }
 
-  // If guest or no db configured, return local items directly (0ms)
-  if (!db || uid === 'guest') {
+  // If guest or no supabase client, return local items directly (0ms)
+  if (!supabase || uid === 'guest') {
     return localItems;
   }
 
-  // Attempt fast fetch from Firestore; fallback to local items immediately
+  // Fetch from Supabase PostgreSQL
   try {
-    const q = query(historyCollection(uid), orderBy('timestamp', 'desc'), limit(HISTORY_LIMIT));
-    const snap = await withFirestoreTimeout(getDocs(q), 4000);
-    const cloudItems = snap.docs.map((d) => d.data() as HistoryItem);
+    const { data: cloudRows, error } = await supabase
+      .from('user_history')
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(HISTORY_LIMIT);
+
+    if (error || !cloudRows) {
+      return localItems;
+    }
+
+    const cloudItems: HistoryItem[] = cloudRows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      fileName: r.name || r.original_name || 'Untitled Document',
+      timestamp: Number(r.created_at) || Date.now(),
+      pagesCount: r.page_count || 1,
+      elements: r.elements || [],
+    }));
 
     // Merge cloud items with local items
     const cloudIds = new Set(cloudItems.map((i) => i.id));
     const localOnly = localItems.filter((i) => !cloudIds.has(i.id));
 
-    // Push local-only items up to cloud in background
+    // Upload local-only items to Supabase in background
     localOnly.forEach((item) => {
-      try {
-        const ref = doc(historyCollection(uid), item.id);
-        const sanitized = sanitizeForFirestore({ ...item, userId: uid });
-        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000).catch(() => {});
-      } catch (_) {}
+      Promise.resolve(
+        supabase
+          .from('user_history')
+          .upsert(
+            {
+              id: item.id,
+              user_id: uid,
+              name: item.fileName,
+              created_at: item.timestamp,
+              page_count: item.pagesCount,
+              elements: item.elements || [],
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          )
+      ).catch(() => {});
     });
 
     const merged = [...cloudItems, ...localOnly]
@@ -296,9 +256,9 @@ export async function deleteHistoryItem(userId: string, id: string): Promise<voi
     window.dispatchEvent(new CustomEvent('conversion_history_updated'));
   }
 
-  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  if (!supabase || uid === 'guest') return;
   try {
-    withFirestoreTimeout(deleteDoc(doc(historyCollection(uid), id)), 1200).catch(() => {});
+    Promise.resolve(supabase.from('user_history').delete().eq('id', id)).catch(() => {});
   } catch (_) {}
 }
 
@@ -315,19 +275,9 @@ export async function clearAllHistory(userId: string): Promise<void> {
     window.dispatchEvent(new CustomEvent('conversion_history_updated'));
   }
 
-  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  if (!supabase || uid === 'guest') return;
   try {
-    withFirestoreTimeout(
-      (async () => {
-        const snap = await getDocs(historyCollection(uid));
-        if (!snap.empty) {
-          const batch = writeBatch(db!);
-          snap.docs.forEach((d) => batch.delete(d.ref));
-          await batch.commit();
-        }
-      })(),
-      1500
-    ).catch(() => {});
+    Promise.resolve(supabase.from('user_history').delete().eq('user_id', uid)).catch(() => {});
   } catch (_) {}
 }
 
@@ -377,7 +327,7 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
     console.warn('[historyService] Failed to save full mocktest to IndexedDB:', err);
   }
 
-  // 2. Save locally to user-scoped key in localStorage (prune heavy base64 to avoid quota error)
+  // 2. Save locally to user-scoped key in localStorage
   const storageLeanItem: MocktestHistoryItem = {
     ...leanItem,
     pages: (leanItem.pages || []).map((p: any) => ({
@@ -396,31 +346,47 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
   const updated = [storageLeanItem, ...localItems.filter((i) => i.id !== leanItem.id)].slice(0, HISTORY_LIMIT);
   saveToLocalStorage(storageKey, updated);
 
-  // Also keep general mocktests fallback and guest key updated so data is never lost across login
+  // Also keep general mocktests fallback and guest key updated
   try {
     localStorage.setItem('user_mocktests_all', JSON.stringify(updated));
     if (uid !== 'guest') {
-      // Also update guest key so switching back preserves history
       localStorage.setItem('user_mocktests_guest', JSON.stringify(updated));
     }
   } catch (_) {}
 
-  // 3. Dispatch custom event so any open UI / Drawer updates immediately
+  // 3. Dispatch custom event so UI updates immediately
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('mocktest_history_updated', { detail: { item: leanItem } }));
   }
 
-  // 4. Non-blocking cloud sync (fire-and-forget in background, NEVER await!)
-  if (!db || uid === 'guest') return;
+  // 4. Non-blocking cloud sync to Supabase
+  if (!supabase || uid === 'guest') return;
 
   (async () => {
     try {
-      const ref = doc(mocktestCollection(uid), leanItem.id);
-      const sanitized = sanitizeForFirestore(leanItem);
-      await withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000);
-      console.log(`[Firebase Cloud Sync] ✅ Mocktest set "${leanItem.setName}" (${leanItem.questionCount} MCQs) successfully saved to Firebase Firestore for user: ${uid}`);
+      const { error } = await supabase
+        .from('user_mocktests')
+        .upsert(
+          {
+            id: leanItem.id,
+            user_id: uid,
+            set_name: leanItem.setName,
+            page_count: (leanItem.pages || []).length || 1,
+            created_at: leanItem.timestamp,
+            items: cleanQuestions,
+            summary: `${cleanQuestions.length} Questions extracted`,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
+
+      if (error) {
+        console.warn('[Supabase Sync] user_mocktests notice:', error.message);
+      } else {
+        console.log(`[Supabase Sync] ✅ Mocktest set "${leanItem.setName}" saved to Supabase PostgreSQL`);
+      }
     } catch (err: any) {
-      console.warn(`[Firebase Cloud Sync] Notice: Cloud sync deferred (${err?.message || err}). Questions safely preserved in local history.`);
+      console.warn('[Supabase Sync] Mocktest sync deferred:', err?.message || err);
     }
   })();
 }
@@ -445,7 +411,7 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
     }
   }
 
-  // Hydrate full pages from IndexedDB if available!
+  // Hydrate full pages from IndexedDB if available
   try {
     const idbSets = await getAllMocktestSetsFromDb();
     if (idbSets && idbSets.length > 0) {
@@ -463,25 +429,54 @@ export async function getMocktestHistoryItems(userId: string): Promise<MocktestH
     }
   } catch (_) {}
 
-  // If guest or no db, return local items IMMEDIATELY (0ms)
-  if (!db || uid === 'guest') {
+  // If guest or no supabase, return local items IMMEDIATELY (0ms)
+  if (!supabase || uid === 'guest') {
     return localItems;
   }
 
   try {
-    const q = query(mocktestCollection(uid), orderBy('timestamp', 'desc'), limit(HISTORY_LIMIT));
-    const snap = await withFirestoreTimeout(getDocs(q), 4000);
-    const cloudItems = snap.docs.map((d) => d.data() as MocktestHistoryItem);
+    const { data: cloudRows, error } = await supabase
+      .from('user_mocktests')
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(HISTORY_LIMIT);
+
+    if (error || !cloudRows) {
+      return localItems;
+    }
+
+    const cloudItems: MocktestHistoryItem[] = cloudRows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      setName: r.set_name || 'Mock Test',
+      timestamp: Number(r.created_at) || Date.now(),
+      questionCount: Array.isArray(r.items) ? r.items.length : 0,
+      questions: r.items || [],
+      pages: [],
+    }));
 
     const cloudIds = new Set(cloudItems.map((i) => i.id));
     const localOnly = localItems.filter((i) => !cloudIds.has(i.id));
 
+    // Upload local-only items to Supabase in background
     localOnly.forEach((item) => {
-      try {
-        const ref = doc(mocktestCollection(uid), item.id);
-        const sanitized = sanitizeForFirestore({ ...item, userId: uid });
-        withFirestoreTimeout(setDoc(ref, sanitized, { merge: true }), 10000).catch(() => {});
-      } catch (_) {}
+      Promise.resolve(
+        supabase
+          .from('user_mocktests')
+          .upsert(
+            {
+              id: item.id,
+              user_id: uid,
+              set_name: item.setName,
+              page_count: (item.pages || []).length || 1,
+              created_at: item.timestamp,
+              items: item.questions || [],
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+          )
+      ).catch(() => {});
     });
 
     const merged = [...cloudItems, ...localOnly]
@@ -513,9 +508,9 @@ export async function deleteMocktestHistoryItem(userId: string, id: string): Pro
     window.dispatchEvent(new CustomEvent('mocktest_history_updated'));
   }
 
-  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  if (!supabase || uid === 'guest') return;
   try {
-    withFirestoreTimeout(deleteDoc(doc(mocktestCollection(uid), id)), 1200).catch(() => {});
+    Promise.resolve(supabase.from('user_mocktests').delete().eq('id', id)).catch(() => {});
   } catch (_) {}
 }
 
@@ -538,18 +533,8 @@ export async function clearAllMocktestHistory(userId: string): Promise<void> {
     window.dispatchEvent(new CustomEvent('mocktest_history_updated'));
   }
 
-  if (!db || uid === 'guest' || !isFirestoreAvailable) return;
+  if (!supabase || uid === 'guest') return;
   try {
-    withFirestoreTimeout(
-      (async () => {
-        const snap = await getDocs(mocktestCollection(uid));
-        if (!snap.empty) {
-          const batch = writeBatch(db!);
-          snap.docs.forEach((d) => batch.delete(d.ref));
-          await batch.commit();
-        }
-      })(),
-      1500
-    ).catch(() => {});
+    Promise.resolve(supabase.from('user_mocktests').delete().eq('user_id', uid)).catch(() => {});
   } catch (_) {}
 }

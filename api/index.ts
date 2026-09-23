@@ -23,15 +23,16 @@ try {
 } catch (e) {}
 
 export const getPrimaryModel = (): string => {
-  return 'gemini-3.5-flash';
+  return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 };
 
 export const getFallbackModel = (): string => {
-  return 'gemini-flash-latest';
+  return process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash';
 };
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 app.get('/api/config', (req, res) => {
   try {
@@ -65,11 +66,13 @@ interface KeyHealthMetrics {
   totalSuccesses: number;
   cooldownUntil: number;
   errorType?: string;
+  inFlight?: number;
 }
 
 const keyHealth = new Map<string, KeyHealthMetrics>();
 const deadKeys = new Set<string>();
 const dailyExhaustedKeys = new Map<string, number>();
+const activeInFlightRequests = new Map<string, number>();
 
 const FALLBACK_KEYS: string[] = [];
 
@@ -196,6 +199,7 @@ app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
       keyPrefix: k.substring(0, 8) + '...',
       key: k,
       ...health,
+      inFlight: activeInFlightRequests.get(k) || 0,
       isDead: deadKeys.has(k),
       isDailyExhausted: dailyCooldownUntil > now,
       dailyCooldownRemainingSec: Math.max(0, Math.round((dailyCooldownUntil - now) / 1000)),
@@ -210,6 +214,7 @@ app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
       keyPrefix: k.substring(0, 8) + '...',
       key: k,
       ...health,
+      inFlight: activeInFlightRequests.get(k) || 0,
       isDead: true,
       isDailyExhausted: false,
       dailyCooldownRemainingSec: 0,
@@ -230,11 +235,27 @@ app.post('/api/admin/dead-key', checkAdminAuth, (req, res) => {
   }
 });
 
+app.post('/api/admin/reset-key-health', checkAdminAuth, (req, res) => {
+  const { key } = req.body;
+  if (key) {
+    deadKeys.delete(key);
+    dailyExhaustedKeys.delete(key);
+    keyHealth.delete(key);
+    activeInFlightRequests.delete(key);
+  } else {
+    deadKeys.clear();
+    dailyExhaustedKeys.clear();
+    keyHealth.clear();
+    activeInFlightRequests.clear();
+  }
+  res.json({ success: true, message: "Key health and rotation states reset successfully." });
+});
+
 /**
- * Sequential round-robin API key selector with instant failover.
- * - Guarantees sequential distribution starting from globalKeyRotationIndex.
+ * Intelligent Concurrency-Aware API Key Selector with Instant Failover.
+ * - Prioritizes completely idle keys (activeInFlightRequests === 0) for true parallel execution.
  * - Excludes keys currently in deadKeys, dailyExhaustedKeys, or temporary cooldown.
- * - Immediately advances pointer so subsequent attempts/requests NEVER repeat the same key.
+ * - Distributes load smoothly across all healthy keys in the pool without bottle-necking.
  */
 const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: string) => {
   const allKeys = getAllKeys(userKeyInput);
@@ -247,73 +268,71 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
 
   const total = allKeys.length;
 
-  // Pass 1: Find a healthy key starting from globalKeyRotationIndex
-  for (let i = 0; i < total; i++) {
-    const idx = (globalKeyRotationIndex + i) % total;
-    const k = allKeys[idx];
-
-    if (skipSet.has(k)) continue;
-    if (deadKeys.has(k)) continue;
-
+  const isHealthyKey = (k: string) => {
+    if (deadKeys.has(k)) return false;
     const dailyCd = dailyExhaustedKeys.get(k) || 0;
-    if (dailyCd > now) continue;
-
+    if (dailyCd > now) return false;
     const health = keyHealth.get(k);
-    if (health && health.cooldownUntil > now) continue;
+    if (health && health.cooldownUntil > now) return false;
+    return true;
+  };
 
-    // Healthy key found! Advance global pointer immediately for fair distribution
-    globalKeyRotationIndex = (idx + 1) % total;
+  // Pass 1: Healthy keys not yet tried in this request sequence
+  const untriedHealthy = allKeys.filter(k => !skipSet.has(k) && isHealthyKey(k));
+  // Pass 2: If all healthy were in skipSet, consider all healthy keys in pool
+  const candidatePool = untriedHealthy.length > 0 ? untriedHealthy : allKeys.filter(k => isHealthyKey(k));
+
+  if (candidatePool.length > 0) {
+    // Smart Load-Balancing Sort:
+    // 1. In-flight active requests ASC (idle keys first)
+    // 2. Consecutive errors ASC (most stable keys first)
+    // 3. Sequential rotation offset for fair distribution
+    candidatePool.sort((a, b) => {
+      const activeA = activeInFlightRequests.get(a) || 0;
+      const activeB = activeInFlightRequests.get(b) || 0;
+      if (activeA !== activeB) return activeA - activeB;
+
+      const errA = keyHealth.get(a)?.consecutiveErrors || 0;
+      const errB = keyHealth.get(b)?.consecutiveErrors || 0;
+      if (errA !== errB) return errA - errB;
+
+      const idxA = allKeys.indexOf(a);
+      const idxB = allKeys.indexOf(b);
+      const distA = (idxA - globalKeyRotationIndex + total) % total;
+      const distB = (idxB - globalKeyRotationIndex + total) % total;
+      return distA - distB;
+    });
+
+    const selectedKey = candidatePool[0];
+    const selIdx = allKeys.indexOf(selectedKey);
+    globalKeyRotationIndex = (selIdx + 1) % total;
+
     return {
-      client: new GoogleGenAI({ apiKey: k }),
-      key: k,
-      keyIndex: idx + 1,
-      totalKeys: total,
-      waitNeededMs: 0
-    };
-  }
-
-  // Pass 2: If all healthy keys were already tried in this request sequence (skipSet),
-  // pick the next key from the pool that is not dead or daily exhausted
-  for (let i = 0; i < total; i++) {
-    const idx = (globalKeyRotationIndex + i) % total;
-    const k = allKeys[idx];
-
-    if (deadKeys.has(k)) continue;
-
-    const dailyCd = dailyExhaustedKeys.get(k) || 0;
-    if (dailyCd > now) continue;
-
-    const health = keyHealth.get(k);
-    if (health && health.cooldownUntil > now) continue;
-
-    globalKeyRotationIndex = (idx + 1) % total;
-    return {
-      client: new GoogleGenAI({ apiKey: k }),
-      key: k,
-      keyIndex: idx + 1,
+      client: new GoogleGenAI({ apiKey: selectedKey }),
+      key: selectedKey,
+      keyIndex: selIdx + 1,
       totalKeys: total,
       waitNeededMs: 0
     };
   }
 
   // Pass 3: All keys are in temporary cooldown or daily exhausted/dead
-  // Find non-dead, non-daily-exhausted candidate whose temporary cooldown expires earliest
+  // Find non-dead, non-daily-exhausted candidates whose cooldown expires earliest
   const eligibleTemporary = allKeys.filter(k => !deadKeys.has(k) && (dailyExhaustedKeys.get(k) || 0) <= now);
 
   if (eligibleTemporary.length === 0) {
-    throw new Error(`All ${total} API keys have reached their daily free-tier limit or are unavailable. Please add fresh Gemini API keys in Settings or wait for quota reset.`);
+    throw new Error(`All ${total} API keys have reached daily limit or are unavailable. Please add fresh Gemini API keys in Settings.`);
   }
 
-  const sorted = [...eligibleTemporary].sort((a, b) => {
+  eligibleTemporary.sort((a, b) => {
     const cdA = keyHealth.get(a)?.cooldownUntil || 0;
     const cdB = keyHealth.get(b)?.cooldownUntil || 0;
     return cdA - cdB;
   });
 
-  const selectedKey = sorted[0];
+  const selectedKey = eligibleTemporary[0];
   const earliestCd = keyHealth.get(selectedKey)?.cooldownUntil || 0;
   const waitNeededMs = Math.max(0, earliestCd - now);
-
   const selIdx = allKeys.indexOf(selectedKey);
   globalKeyRotationIndex = (selIdx + 1) % total;
 
@@ -347,34 +366,31 @@ const reportKeyError = (key: string, error: any) => {
   const errorStr = (error?.message || String(error)).toUpperCase();
   const keyPrefix = key.substring(0, 8) + '...' + key.slice(-4);
 
-  // 1. Permanent Key Invalidation
+  // 1. Permanent Key Invalidation - ONLY genuinely invalid/deleted keys
   const isInvalid = errorStr.includes("API KEY NOT VALID") || 
                     errorStr.includes("API_KEY_INVALID") ||
-                    errorStr.includes("PERMISSION_DENIED") ||
                     errorStr.includes("CONSUMER HAS BEEN SUSPENDED") ||
                     errorStr.includes("PROJECT HAS BEEN DELETED") ||
                     errorStr.includes("ACCOUNT_DEACTIVATED");
 
   if (isInvalid) {
     deadKeys.add(key);
-    console.error(`[API-Rotate] Key ${keyPrefix} marked as PERMANENTLY DEAD (Invalid/Denied)`);
+    console.error(`[API-Rotate] Key ${keyPrefix} marked as PERMANENTLY DEAD (Invalid/Deleted)`);
     return { type: 'DEAD', isDaily: false };
   }
 
   // 2. Daily Quota Exhaustion vs temporary rate limits
-  // Note: If error contains 'RETRY IN', 'RETRYDELAY' or 'RETRYINFO', it is a temporary burst rate limit, NOT a 24h daily lockout!
   const hasShortRetry = errorStr.includes("RETRY IN") || errorStr.includes("RETRYDELAY") || errorStr.includes("RETRYINFO");
   const isDailyLimit = !hasShortRetry && (
-                       errorStr.includes("PERDAY") || 
-                       errorStr.includes("PER_DAY") || 
-                       errorStr.includes("PERMODEL-FREETIER") || 
-                       errorStr.includes("GENERATE_CONTENT_FREE_TIER_REQUESTS"));
+                       errorStr.includes("GENERATE_CONTENT_FREE_TIER_REQUESTS_PER_DAY") ||
+                       (errorStr.includes("PERDAY") && errorStr.includes("RESOURCE_EXHAUSTED")) || 
+                       (errorStr.includes("PER_DAY") && errorStr.includes("RESOURCE_EXHAUSTED")));
 
   if (isDailyLimit) {
-    // Quarantine key for 15 minutes before re-checking
-    const quarantineDurationMs = 15 * 60 * 1000;
+    // Quarantine key for 5 minutes before re-checking
+    const quarantineDurationMs = 5 * 60 * 1000;
     dailyExhaustedKeys.set(key, now + quarantineDurationMs);
-    console.warn(`[API-Rotate] Key ${keyPrefix} reached daily limit. Quarantined for 15m. Switching to next key.`);
+    console.warn(`[API-Rotate] Key ${keyPrefix} reached daily limit. Quarantined for 5m. Switching to next key.`);
     return { type: 'DAILY_EXHAUSTED', isDaily: true };
   }
 
@@ -401,19 +417,19 @@ const reportKeyError = (key: string, error: any) => {
                      errorStr.includes("ECONNRESET") ||
                      errorStr.includes("ETIMEDOUT");
 
-  // Set a 25-second cooldown for RPM rate limits to give priority to remaining healthy keys
-  let cooldownMs = 25000;
+  // Fast 15-second cooldown for RPM limits to clear the rolling 1-min window while other keys work
+  let cooldownMs = 15000;
   if (isOverload) {
-    cooldownMs = 10000;
+    cooldownMs = 4000;
   } else if (!isRateLimit) {
-    cooldownMs = 3000;
+    cooldownMs = 2000;
   }
 
   health.cooldownUntil = now + cooldownMs;
   health.errorType = isRateLimit ? 'RATE_LIMIT' : (isOverload ? 'OVERLOAD' : 'TRANSIENT');
   keyHealth.set(key, health);
 
-  console.warn(`[API-Rotate] Key ${keyPrefix} failed (${health.errorType}). Quarantined for ${Math.round(cooldownMs / 1000)}s. Switching to next key immediately.`);
+  console.warn(`[API-Rotate] Key ${keyPrefix} paused (${health.errorType}) for ${Math.round(cooldownMs / 1000)}s. Switching to next healthy key immediately.`);
   return { type: health.errorType, isDaily: false };
 };
 
@@ -425,13 +441,12 @@ export async function runAIAction(
   maxRetries?: number
 ) {
   const allKeys = getAllKeys(userKeyInput);
-  // Allow enough attempts to rotate across available keys
-  const effectiveRetries = maxRetries ?? Math.max(10, allKeys.length * 2);
+  const effectiveRetries = maxRetries ?? Math.max(12, allKeys.length * 2);
   const triedKeys = new Set<string>();
   let lastError: any = null;
 
   for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
-    // If all keys have been tried in this request, reset the set to allow a second pass if needed
+    // If all keys have been tried in this request sequence, clear to allow subsequent attempt
     if (triedKeys.size >= allKeys.length && allKeys.length > 0) {
       triedKeys.clear();
     }
@@ -448,24 +463,23 @@ export async function runAIAction(
 
     const keyPrefix = key.substring(0, 8) + '...' + key.slice(-4);
 
-    // If all healthy keys are temporarily cooling down, wait for earliest one
+    // If all keys are temporarily cooling down, wait for the earliest one
     if (waitNeededMs > 0) {
       const waitSec = Math.ceil(waitNeededMs / 1000);
-      console.log(`[API-Rotate] All healthy keys temporarily cooling down. Waiting ${waitSec}s for key [${keyIndex}/${totalKeys}] ${keyPrefix}...`);
-      await delay(Math.min(waitNeededMs, 10000));
+      console.log(`[API-Rotate] All healthy keys cooling down. Waiting ${waitSec}s for key [${keyIndex}/${totalKeys}] ${keyPrefix}...`);
+      await delay(Math.min(waitNeededMs, 4000));
     }
 
-    console.log(`[API-Rotate] Attempt ${attempt + 1}/${effectiveRetries + 1} using Key [${keyIndex}/${totalKeys}]: ${keyPrefix}`);
+    // Register active in-flight request for load balancing
+    activeInFlightRequests.set(key, (activeInFlightRequests.get(key) || 0) + 1);
 
     try {
       const result = await action(client);
       reportKeySuccess(key);
-      console.log(`[API-Rotate] Key [${keyIndex}/${totalKeys}] ${keyPrefix} SUCCESS!`);
       return result;
     } catch (error: any) {
       lastError = error;
       const errorStr = (error?.message || String(error)).toUpperCase();
-
       const { type } = reportKeyError(key, error);
 
       const isRetryable = type === 'DEAD' || 
@@ -474,6 +488,7 @@ export async function runAIAction(
                           type === 'OVERLOAD' ||
                           errorStr.includes("429") ||
                           errorStr.includes("RESOURCE_EXHAUSTED") ||
+                          errorStr.includes("QUOTA") ||
                           errorStr.includes("EMPTY RESPONSE") || 
                           errorStr.includes("FAILED TO PARSE") ||
                           errorStr.includes("JSON") ||
@@ -489,13 +504,19 @@ export async function runAIAction(
                           errorStr.includes("OTHER");
 
       if (isRetryable && attempt < effectiveRetries) {
-        console.warn(`[API-Rotate] Key [${keyIndex}/${totalKeys}] ${keyPrefix} FAILED (${error?.message || errorStr}). Instantly switching to next API key...`);
-        // Brief pacing delay of 100ms before rotating to next key
-        await delay(100);
+        console.warn(`[API-Rotate] Key [${keyIndex}/${totalKeys}] ${keyPrefix} FAILED (${error?.message || errorStr}). Instantly switching to next healthy API key...`);
+        // Instant failover: no sleep needed because we have multiple healthy keys in pool!
         continue;
       }
 
       throw error;
+    } finally {
+      const current = activeInFlightRequests.get(key) || 1;
+      if (current <= 1) {
+        activeInFlightRequests.delete(key);
+      } else {
+        activeInFlightRequests.set(key, current - 1);
+      }
     }
   }
 
@@ -518,8 +539,8 @@ const safeExtractResponseText = (response: any): string => {
 };
 
 /**
- * Calls Gemini models with automatic multi-model fallback (gemini-flash-latest -> gemini-3.5-flash -> gemini-3.1-flash-lite).
- * Throws a retryable error if all models produce empty output or fail, so runAIAction can retry with a different key.
+ * High-speed Gemini model invocation with instant failover on rate limits.
+ * Avoids hammering alternate models on a rate-limited key, immediately delegating rotation to runAIAction.
  */
 export const callGeminiWithFallback = async (
   client: any,
@@ -532,9 +553,7 @@ export const callGeminiWithFallback = async (
   const modelsToTry = [
     primaryModel || getPrimaryModel(),
     fallbackModel || getFallbackModel(),
-    'gemini-flash-latest',
-    'gemini-3.5-flash',
-    'gemini-3.1-flash-lite'
+    'gemini-flash-latest'
   ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
   // Optimize token usage and speed: disable heavy thinking tokens
@@ -561,10 +580,15 @@ export const callGeminiWithFallback = async (
     } catch (err: any) {
       lastErr = err;
       const errStr = (err?.message || String(err)).toUpperCase();
+
+      // If key is rate-limited (429/RESOURCE_EXHAUSTED/QUOTA), do not waste 20s trying other models on this key!
+      // Immediately throw so runAIAction rotates to a FRESH key in the pool!
+      if (errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('QUOTA')) {
+        throw err;
+      }
+
       if (
         errStr.includes('404') ||
-        errStr.includes('429') ||
-        errStr.includes('RESOURCE_EXHAUSTED') ||
         errStr.includes('503') ||
         errStr.includes('UNAVAILABLE') ||
         errStr.includes('EMPTY OUTPUT')
@@ -1892,9 +1916,14 @@ RULES:
 2. LATEX FOR MATH & SCIENCE ONLY:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
-3. Populate both Hindi and English fields.
+3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
+   - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original English text.
+   - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original Hindi text.
+   - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
 4. Comprehensive Solutions: Provide a detailed, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete intermediate calculation or factual background) so any level of student can understand easily. NEVER write "Option A is correct" (options shuffle dynamically).
 5. Answer: Correct option single letter ("A", "B", "C", or "D").
+6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
+   - If reference questions are based on a reading comprehension passage or गद्यांश, create a relevant passage and PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION belonging to that passage set in both question_hi and question_en, separated by "\\n---\\n".
 
 Output ONLY a valid JSON array of objects:
 [
@@ -1927,10 +1956,16 @@ RULES:
 2. LATEX FOR MATH & SCIENCE ONLY:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
-3. Populate both Hindi and English fields. If original is in one language only, translate to provide both.
+3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
+   - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original English text.
+   - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original Hindi text.
+   - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
 4. Comprehensive Solutions: Provide a detailed, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete intermediate calculation or factual background) so any level of student can understand easily. NEVER write "Option A is correct" (options shuffle dynamically).
 5. Answer: Correct option single letter ("A", "B", "C", or "D").
-6. If this is a passage/comprehension question (गद्यांश), prepend the passage text to the question text separated by "\\n---\\n".
+6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
+   - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g. "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
+     YOU MUST PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION BELONGING TO THAT SET in both question_hi and question_en, separated by "\\n---\\n" (e.g. "[Full Passage Text]\\n---\\n[Question Text]").
+   - NEVER output the passage only once or only with the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so each question can be understood and answered independently.
 
 Output ONLY a valid JSON array of objects:
 [
@@ -2611,6 +2646,58 @@ app.post('/api/latex/repair', async (req, res) => {
       confidence: 0,
       error: error?.message || 'Failed to repair LaTeX'
     });
+  }
+});
+
+// -------------------------------------------------------------
+// Endpoint: Upload & Store Cropped Question/Option Figure Images
+// -------------------------------------------------------------
+app.post('/api/upload-figure', async (req, res) => {
+  try {
+    const { imageData, questionNumber, targetField, setName } = req.body;
+    if (!imageData) {
+      return res.status(400).json({ error: 'Missing imageData' });
+    }
+
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'figures');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    // Extract mime type and clean base64 data
+    const matches = imageData.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+    let ext = 'png';
+    let rawBase64 = imageData;
+    if (matches) {
+      const mime = matches[1].toLowerCase();
+      ext = mime === 'jpeg' ? 'jpg' : mime;
+      rawBase64 = matches[2];
+    }
+
+    const buffer = Buffer.from(rawBase64, 'base64');
+    const safeQNum = questionNumber !== undefined && questionNumber !== null ? `q${questionNumber}` : 'q';
+    const safeTarget = targetField ? `_${targetField}` : '';
+    const timestamp = Date.now();
+    const filename = `${safeQNum}${safeTarget}_${timestamp}.${ext}`;
+    const filePath = path.join(uploadsDir, filename);
+
+    fs.writeFileSync(filePath, buffer);
+
+    const relativeUrl = `/uploads/figures/${filename}`;
+    const host = req.get('host') || 'localhost:3000';
+    const protocol = req.protocol || 'http';
+    const absoluteUrl = `${protocol}://${host}${relativeUrl}`;
+
+    return res.json({
+      success: true,
+      url: relativeUrl,
+      absoluteUrl,
+      filename,
+      size: buffer.length
+    });
+  } catch (error: any) {
+    console.error('[API /api/upload-figure] Error:', error);
+    return res.status(500).json({ error: error?.message || 'Failed to save figure image' });
   }
 });
 

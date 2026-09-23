@@ -332,11 +332,22 @@ Required CSV Header:
 question_r,question_hi,question_en,option1_hi,option2_hi,option3_hi,option4_hi,option1_en,option2_en,option3_en,option4_en,answer,solution_hi,solution_en
 
 Rules:
-1. If questions are bilingual (Hindi & English), place the Hindi question & options into the _hi columns, and English into the _en columns. If single language, fill the matching column.
+1. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
+   - For English Language tests (English Comprehension, Grammar, Vocab, Error Spotting, etc.):
+     DO NOT translate into Hindi! Both _hi and _en columns (question_hi and question_en, option1_hi and option1_en, etc.) MUST contain ONLY the original English text.
+   - For Hindi Language tests (हिंदी भाषा, गद्यांश, व्याकरण, मुहावरे, पर्यायवाची आदि):
+     DO NOT translate into English! Both _hi and _en columns (question_hi and question_en, option1_hi and option1_en, etc.) MUST contain ONLY the original Hindi text.
+   - For other general subjects (Maths, Reasoning, Science, GS, Social Studies):
+     Place Hindi in _hi columns and English in _en columns as normal.
 2. The "answer" column must be the single uppercase letter: A, B, C, D, or E.
 3. Every field containing commas or quotes must be enclosed in double quotes ("...").
 4. Keep all mathematical formulas in clean LaTeX notation (e.g., $x^2 + y^2 = r^2$).
-5. Provide a detailed, step-by-step explanatory solution for every question.`;
+5. Provide a detailed, step-by-step explanatory solution for every question.
+6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
+   - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g., "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
+     YOU MUST INCLUDE THE FULL PASSAGE TEXT WITH EVERY SINGLE QUESTION IN THAT SET!
+   - Prepend the complete passage to both question_hi and question_en, separated by "\\n---\\n" (e.g., "[Full Passage Text]\\n---\\n[Question Text]").
+   - NEVER output the passage only once or only with the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so each question can be understood and answered independently.`;
                     navigator.clipboard.writeText(promptText);
                     alert('📋 AI Extraction Prompt copied to clipboard!\n\nPaste this into ChatGPT / Claude with your page image. Once it outputs the CSV, copy its CSV and click "Paste Clipboard" here!');
                   }}

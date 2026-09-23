@@ -44,36 +44,104 @@ export function clearItemBackup(itemId: string): void {
 }
 
 /**
- * Validates a single formula or block on the client using KaTeX.
+ * Validates formulas or mixed question/solution content on the client using KaTeX.
+ * Handles:
+ * 1. Pure single formulas (e.g. `\frac{a}{b}`, `$x^2$`, `$$E=mc^2$$`)
+ * 2. Mixed text with embedded LaTeX formulas (e.g. English/Hindi explanations with `$v$` and `$$t = ...$$`)
  * Returns { valid: true } or { valid: false, error: string }.
  */
 export function validateFormulaClient(formula: string): { valid: boolean; error?: string } {
   const trimmed = formula.trim();
   if (!trimmed) return { valid: true };
 
-  // Strip enclosing $ or $$ if user included them in single formula preview
-  let inner = trimmed;
-  let isDisplay = false;
-  if (inner.startsWith('$$') && inner.endsWith('$$') && inner.length >= 4) {
-    inner = inner.slice(2, -2).trim();
-    isDisplay = true;
-  } else if (inner.startsWith('$') && inner.endsWith('$') && inner.length >= 2) {
-    inner = inner.slice(1, -1).trim();
+  // Case 1: Pure single formula (e.g. user typed directly \frac{a}{b} or single $...$)
+  const isPureSingle = (trimmed.startsWith('$$') && trimmed.endsWith('$$') && trimmed.length >= 4) ||
+                       (trimmed.startsWith('$') && trimmed.endsWith('$') && trimmed.length >= 2 && !trimmed.slice(1, -1).includes('$')) ||
+                       (!trimmed.includes('\n') && !trimmed.includes(' ') && trimmed.startsWith('\\'));
+
+  if (isPureSingle) {
+    let inner = trimmed;
+    let isDisplay = false;
+    if (inner.startsWith('$$') && inner.endsWith('$$')) {
+      inner = inner.slice(2, -2).trim();
+      isDisplay = true;
+    } else if (inner.startsWith('$') && inner.endsWith('$')) {
+      inner = inner.slice(1, -1).trim();
+    }
+    try {
+      katex.renderToString(inner, {
+        throwOnError: true,
+        displayMode: isDisplay,
+        strict: false
+      });
+      return { valid: true };
+    } catch (err: any) {
+      return {
+        valid: false,
+        error: err?.message || 'KaTeX parse error'
+      };
+    }
   }
 
-  try {
-    katex.renderToString(inner, {
-      throwOnError: true,
-      displayMode: isDisplay,
-      strict: false
-    });
-    return { valid: true };
-  } catch (err: any) {
+  // Case 2: Mixed text containing embedded formulas ($...$ or $$...$$)
+  // Check for unclosed display delimiters $$
+  const displayMatches = trimmed.match(/\$\$/g) || [];
+  if (displayMatches.length % 2 !== 0) {
     return {
       valid: false,
-      error: err?.message || 'KaTeX parse error'
+      error: 'Unclosed display math delimiter ($$) detected.'
     };
   }
+
+  // Check for unclosed single dollar delimiters (excluding display $$)
+  const textWithoutDisplay = trimmed.replace(/\$\$[\s\S]*?\$\$/g, '');
+  const singleDollarMatches = textWithoutDisplay.match(/(?<!\\)\$/g) || [];
+  if (singleDollarMatches.length % 2 !== 0) {
+    return {
+      valid: false,
+      error: 'Unclosed inline math delimiter ($) detected.'
+    };
+  }
+
+  // Validate every display math block $$...$$
+  const displayBlocks = trimmed.match(/\$\$[\s\S]*?\$\$/g) || [];
+  for (const block of displayBlocks) {
+    const formulaInner = block.slice(2, -2).trim();
+    try {
+      katex.renderToString(formulaInner, {
+        throwOnError: true,
+        displayMode: true,
+        strict: false
+      });
+    } catch (err: any) {
+      const snippet = formulaInner.length > 30 ? formulaInner.slice(0, 30) + '...' : formulaInner;
+      return {
+        valid: false,
+        error: `KaTeX error in $$${snippet}$$: ${err?.message || 'Syntax error'}`
+      };
+    }
+  }
+
+  // Validate every inline math block $...$
+  const inlineBlocks = textWithoutDisplay.match(/\$[^\$\n]+?\$/g) || [];
+  for (const block of inlineBlocks) {
+    const formulaInner = block.slice(1, -1).trim();
+    try {
+      katex.renderToString(formulaInner, {
+        throwOnError: true,
+        displayMode: false,
+        strict: false
+      });
+    } catch (err: any) {
+      const snippet = formulaInner.length > 30 ? formulaInner.slice(0, 30) + '...' : formulaInner;
+      return {
+        valid: false,
+        error: `KaTeX error in $${snippet}$: ${err?.message || 'Syntax error'}`
+      };
+    }
+  }
+
+  return { valid: true };
 }
 
 /**

@@ -250,7 +250,7 @@ export function buildBridgePrompt(
     : 'Do NOT output any answers or answer keys.';
 
   const bilingualInstruction = isBilingual
-    ? 'Translate every question and textual option so both Hindi and English are provided. Two-line question format: Line 1 Hindi, Line 2 English. Options: (a) Hindi / English.'
+    ? 'Translate every question and textual option so both Hindi and English are provided (EXCEPT for English Language tests which must remain 100% English, and Hindi Language tests which must remain 100% Hindi). Two-line question format: Line 1 Hindi, Line 2 English. Options: (a) Hindi / English.'
     : 'Extract in the original language without translation.';
 
   const refineInstruction = refineMode
@@ -286,6 +286,11 @@ RULES:
    - Use standard LaTeX for formulas, equations, roots, powers, fractions, and variables ($...$ or $$...$$).
    - Regular words, numbers, and units should remain normal plain text.
 8. Each option must be on its own line: (a)... \\n (b)... \\n (c)... \\n (d)...
+9. READING COMPREHENSION / PASSAGES (CRITICAL):
+   - If questions are based on a passage, comprehension text, or directions (e.g., "SET - 34 [Q.164 to Q.168]", "Directions (439-443)", "गद्यांश"):
+     YOU MUST INCLUDE THE FULL PASSAGE TEXT WITH EVERY SINGLE QUESTION IN THAT SET!
+   - Prepend the complete passage to each question stem (separated by "\\n---\\n").
+   - NEVER output the passage only once with the first question! Every question in that set must have the complete passage attached.
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of objects inside \`\`\`json ... \`\`\` code block:

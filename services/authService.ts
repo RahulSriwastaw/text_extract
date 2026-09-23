@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
-import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { auth, db, googleProvider } from './firebase';
+import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { auth, googleProvider } from './firebase';
+import { supabase } from './supabase';
+
+export interface User {
+  uid: string;
+  email: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
+}
 
 export interface UserProfile {
   uid: string;
@@ -11,76 +18,94 @@ export interface UserProfile {
   createdAt?: string;
 }
 
-async function ensureUserProfile(user: User): Promise<void> {
-  if (!db) return;
+/**
+ * Syncs the Firebase authenticated user into Supabase's public.users table.
+ */
+async function ensureUserProfileInSupabase(user: User): Promise<void> {
+  if (!supabase) return;
   try {
-    const ref = doc(db, 'users', user.uid);
-    // 1-second timeout guard so login is never stalled by Firestore
-    const snap = await Promise.race([
-      getDoc(ref),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
-    ]);
-
-    if (!snap.exists()) {
-      const profile: UserProfile = {
-        uid: user.uid,
-        email: user.email || '',
-        displayName: user.displayName || '',
-        photoURL: user.photoURL || '',
-        createdAt: new Date().toISOString(),
-      };
-      await setDoc(ref, profile);
-    } else if (user.displayName || user.photoURL) {
-      await updateDoc(ref, {
-        displayName: user.displayName || snap.data().displayName || '',
-        photoURL: user.photoURL || snap.data().photoURL || '',
-      });
-    }
+    await supabase
+      .from('users')
+      .upsert(
+        {
+          id: user.uid,
+          email: user.email || '',
+          display_name: user.displayName || '',
+          photo_url: user.photoURL || '',
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
   } catch (err) {
-    // Gracefully ignore Firestore user profile sync failure when offline / disabled
+    // Non-fatal background sync
   }
-}
-
-export async function signInWithGoogle(): Promise<User> {
-  if (!auth) {
-    throw new Error('Login is not configured on this deployment yet.');
-  }
-  const result = await signInWithPopup(auth, googleProvider);
-  try {
-    await ensureUserProfile(result.user);
-  } catch (e) {
-    console.error('[authService] Failed to sync user profile:', e);
-  }
-  return result.user;
-}
-
-export async function signOutUser(): Promise<void> {
-  if (!auth) return;
-  await signOut(auth);
 }
 
 /**
- * Safe replacement for react-firebase-hooks' useAuthState: that hook reads
- * `auth.currentUser` synchronously, which throws if `auth` is null (i.e. when
- * Firebase env vars aren't configured on this deployment).
+ * Sign in using Firebase Google Popup Auth
+ */
+export async function signInWithGoogle(): Promise<User> {
+  if (!auth) {
+    throw new Error('Firebase Auth is not configured on this deployment.');
+  }
+
+  const result = await signInWithPopup(auth, googleProvider);
+  const appUser: User = {
+    uid: result.user.uid,
+    email: result.user.email,
+    displayName: result.user.displayName,
+    photoURL: result.user.photoURL,
+  };
+
+  ensureUserProfileInSupabase(appUser).catch(() => {});
+  return appUser;
+}
+
+/**
+ * Sign out from Firebase Auth
+ */
+export async function signOutUser(): Promise<void> {
+  if (!auth) return;
+  try {
+    await signOut(auth);
+  } catch (err) {
+    console.warn('[authService] Sign out warning:', err);
+  }
+}
+
+/**
+ * Hook to listen to Firebase Auth state changes while syncing with Supabase data layer.
  */
 export function useCurrentUser(): [User | null, boolean] {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(!!auth);
+  const [loading, setLoading] = useState<boolean>(!!auth);
 
   useEffect(() => {
     if (!auth) {
       setLoading(false);
       return;
     }
+
     const unsubscribe = onAuthStateChanged(
       auth,
-      (u) => {
-        setUser(u);
+      (u: FirebaseUser | null) => {
+        if (u) {
+          const appUser: User = {
+            uid: u.uid,
+            email: u.email,
+            displayName: u.displayName,
+            photoURL: u.photoURL,
+          };
+          setUser(appUser);
+          ensureUserProfileInSupabase(appUser).catch(() => {});
+        } else {
+          setUser(null);
+        }
         setLoading(false);
       },
       () => setLoading(false)
     );
+
     return unsubscribe;
   }, []);
 

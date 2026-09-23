@@ -35,3 +35,4 @@ firebase-applet-config.json
 test_*
 unzipped_*
 scratch/
+uploads/

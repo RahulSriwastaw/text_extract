@@ -4,7 +4,7 @@ import {
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, StopCircle, Zap, Settings, RefreshCw, Key,
   ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare, Clipboard, ClipboardPaste, Save, History,
-  Image as ImageIcon
+  Image as ImageIcon, Scissors, Crosshair, Cloud, HardDrive, CheckCheck, Hand, ExternalLink
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -12,6 +12,24 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import mammoth from 'mammoth';
+import { 
+  cropImageRegion, 
+  uploadFigureImage, 
+  buildQuestionFigureTag, 
+  buildOptionFigureTag,
+  hasFigureImage,
+  extractFigureUrls,
+  FigureTargetField,
+  CropPercentageBox
+} from '../services/figureStorageService';
+
+export interface StagedCropItem {
+  id: string;
+  box: CropPercentageBox;
+  dataUrl: string;
+  targetField: FigureTargetField;
+}
+import { HighResPageLightbox } from './HighResPageLightbox';
 import { MocktestAiChatModal } from './MocktestAiChatModal';
 import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
 import { MocktestPasteCsvModal } from './MocktestPasteCsvModal';
@@ -237,14 +255,68 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [latexRepairTarget, setLatexRepairTarget] = useState<{ item: MockTestMcqItem; scope: LatexRepairScope } | null>(null);
   const [undoToast, setUndoToast] = useState<{ itemId: string; questionNum: number } | null>(null);
 
-  // Inline editing & High-Res Image Zoom modal with 500% Zoom, Pan & Page Navigation
+  // Inline editing & High-Res Image Zoom modal state
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null);
   const [zoomPageIndex, setZoomPageIndex] = useState<number | null>(null);
-  const [zoomLevel, setZoomLevel] = useState<number>(1);
-  const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isFigureCropMode, setIsFigureCropMode] = useState<boolean>(false);
+  const [selectedTargetQuestionId, setSelectedTargetQuestionId] = useState<string>('');
+  const [selectedTargetField, setSelectedTargetField] = useState<FigureTargetField>('question');
+
+  const handleQuickCropForQuestion = (item: MockTestMcqItem, field: FigureTargetField = 'question') => {
+    const targetPageNum = item.pageNumber || parseInt(String(item.source_pages || '1'), 10) || 1;
+    const targetIdx = pages.findIndex(p => p.pageNumber === targetPageNum);
+    const validIdx = targetIdx !== -1 ? targetIdx : (zoomPageIndex !== null ? zoomPageIndex : 0);
+    setZoomPageIndex(validIdx);
+    setIsFigureCropMode(true);
+    setSelectedTargetQuestionId(item.id);
+    setSelectedTargetField(field);
+  };
+
+  const [previewLightboxUrl, setPreviewLightboxUrl] = useState<string | null>(null);
+
+  const handleRemoveFigureFromItem = (itemId: string, field: FigureTargetField, urlToRemove: string) => {
+    const targetQuestion = extractedMcqs.find(q => q.id === itemId) ||
+      pages.flatMap(p => p.items || []).find(q => q.id === itemId);
+    if (!targetQuestion) return;
+
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const cleanField = (val: string | undefined) => {
+      if (!val) return '';
+      return val
+        .replace(new RegExp(`<p>\\s*<img[^>]*src=["']${escapeRegex(urlToRemove)}["'][^>]*>\\s*<\\/p>`, 'gi'), '')
+        .replace(new RegExp(`<img[^>]*src=["']${escapeRegex(urlToRemove)}["'][^>]*>`, 'gi'), '')
+        .replace(new RegExp(`!\\[[^\\]]*\\]\\(${escapeRegex(urlToRemove)}\\)`, 'gi'), '')
+        .replace(new RegExp(`\\[(?:FIGURE|IMAGE|FIG)[^\]]*:\\s*${escapeRegex(urlToRemove)}\\]`, 'gi'), '')
+        .replace(new RegExp(escapeRegex(urlToRemove), 'gi'), '')
+        .trim();
+    };
+
+    const updates: Partial<MockTestMcqItem> = {};
+    if (field === 'question') {
+      updates.question_hi = cleanField(targetQuestion.question_hi);
+      updates.question_en = cleanField(targetQuestion.question_en);
+    } else if (field === 'solution') {
+      updates.solution_hi = cleanField(targetQuestion.solution_hi);
+      updates.solution_en = cleanField(targetQuestion.solution_en);
+    } else if (field.startsWith('option')) {
+      const keyHi = `${field}_hi` as keyof MockTestMcqItem;
+      const keyEn = `${field}_en` as keyof MockTestMcqItem;
+      (updates as any)[keyHi] = cleanField(targetQuestion[keyHi] as string);
+      (updates as any)[keyEn] = cleanField(targetQuestion[keyEn] as string);
+    }
+
+    if (targetQuestion.hash_figure) {
+      const nextHash = targetQuestion.hash_figure
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s && s !== urlToRemove)
+        .join(', ');
+      updates.hash_figure = nextHash;
+    }
+
+    updateItem(itemId, updates);
+  };
 
   // Copy Page Image & AI CSV Prompt to Clipboard for external AIs (ChatGPT, Claude, etc.)
   const [copiedImagePageId, setCopiedImagePageId] = useState<string | null>(null);
@@ -312,11 +384,22 @@ Required CSV Header:
 question_r,question_hi,question_en,option1_hi,option2_hi,option3_hi,option4_hi,option1_en,option2_en,option3_en,option4_en,answer,solution_hi,solution_en
 
 Rules:
-1. If questions are bilingual (Hindi & English), place the Hindi question & options into the _hi columns, and English into the _en columns. If single language, fill the matching column.
+1. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
+   - For English Language tests (English Comprehension, Grammar, Vocab, Error Spotting, etc.):
+     DO NOT translate into Hindi! Both _hi and _en columns (question_hi and question_en, option1_hi and option1_en, etc.) MUST contain ONLY the original English text.
+   - For Hindi Language tests (हिंदी भाषा, गद्यांश, व्याकरण, मुहावरे, पर्यायवाची आदि):
+     DO NOT translate into English! Both _hi and _en columns (question_hi and question_en, option1_hi and option1_en, etc.) MUST contain ONLY the original Hindi text.
+   - For other general subjects (Maths, Reasoning, Science, GS, Social Studies):
+     Place Hindi in _hi columns and English in _en columns as normal.
 2. The "answer" column must be the single uppercase letter: A, B, C, D, or E.
 3. Every field containing commas or quotes must be enclosed in double quotes ("...").
 4. Keep all mathematical formulas in clean LaTeX notation (e.g., $x^2 + y^2 = r^2$).
-5. Provide a detailed, step-by-step explanatory solution for every question.`;
+5. Provide a detailed, step-by-step explanatory solution for every question.
+6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
+   - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g., "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
+     YOU MUST INCLUDE THE FULL PASSAGE TEXT WITH EVERY SINGLE QUESTION IN THAT SET!
+   - Prepend the complete passage to both question_hi and question_en, separated by "\\n---\\n" (e.g., "[Full Passage Text]\\n---\\n[Question Text]").
+   - NEVER output the passage only once or only with the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so each question can be understood and answered independently.`;
 
     navigator.clipboard.writeText(promptText);
     setCopiedPromptPageId(page.id);
@@ -324,39 +407,6 @@ Rules:
     alert(`📋 AI Extraction Prompt for Page ${page.pageNumber} copied to clipboard!\n\n1. Paste (Ctrl+V) this prompt along with the image into ChatGPT / Claude.\n2. Once generated, copy its CSV.\n3. Click "Paste to Page" here to import all questions directly into Page ${page.pageNumber}!`);
   };
 
-  // Keyboard navigation & zoom for Lightbox modal
-  useEffect(() => {
-    if (zoomPageIndex === null) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setZoomPageIndex(null);
-        setZoomLevel(1);
-        setPanOffset({ x: 0, y: 0 });
-      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-        e.preventDefault();
-        setZoomPageIndex(prev => (prev !== null && prev > 0 ? prev - 1 : prev));
-        setPanOffset({ x: 0, y: 0 });
-      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
-        e.preventDefault();
-        setZoomPageIndex(prev => (prev !== null && prev < pages.length - 1 ? prev + 1 : prev));
-        setPanOffset({ x: 0, y: 0 });
-      } else if (e.key === '+' || e.key === '=') {
-        e.preventDefault();
-        setZoomLevel(prev => Math.min(5, Number((prev + 0.5).toFixed(2))));
-      } else if (e.key === '-' || e.key === '_') {
-        e.preventDefault();
-        setZoomLevel(prev => Math.max(0.5, Number((prev - 0.5).toFixed(2))));
-      } else if (e.key === '0') {
-        e.preventDefault();
-        setZoomLevel(1);
-        setPanOffset({ x: 0, y: 0 });
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [zoomPageIndex, pages.length]);
   const [activeChatQuestion, setActiveChatQuestion] = useState<MockTestMcqItem | null>(null);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
   const [addQuestionTargetPage, setAddQuestionTargetPage] = useState<number>(1);
@@ -1084,8 +1134,8 @@ Rules:
           }
         }
 
-        // Brief delay between sequential pages to avoid rate limiting
-        await new Promise(res => setTimeout(res, 600));
+        // Fast pacing delay between sequential pages (keys rotate automatically across pool)
+        await new Promise(res => setTimeout(res, 150));
       }
 
       setLiveStatusText(
@@ -3304,7 +3354,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                         {page.imageUrl ? (
                           <div
                             className="relative group rounded-xl overflow-hidden border border-white/[0.08] bg-black cursor-pointer aspect-[3/4] max-h-[380px] flex items-center justify-center shadow-inner"
-                            onClick={() => { setZoomPageIndex(idx); setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
+                            onClick={() => { setZoomPageIndex(idx); setIsFigureCropMode(false); }}
                             title="Click to view full image in lightbox"
                           >
                             <img
@@ -3318,6 +3368,21 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                               className="absolute top-2 right-2 flex items-center gap-1.5 z-20"
                               onClick={(e) => e.stopPropagation()}
                             >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setZoomPageIndex(idx);
+                                  setIsFigureCropMode(true);
+                                  const firstQ = pageQuestions[0];
+                                  if (firstQ) setSelectedTargetQuestionId(firstQ.id);
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 bg-orange-600/90 hover:bg-orange-500 border border-orange-400/50 text-white rounded-lg text-[10px] font-extrabold transition-all shadow-lg backdrop-blur-md cursor-pointer active:scale-95"
+                                title={`Open Page ${page.pageNumber} in Figure Cropper`}
+                              >
+                                <Scissors className="w-3 h-3 text-white" />
+                                <span>Crop Figures</span>
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={() => handleCopyPageImage(page)}
@@ -4123,15 +4188,26 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                       <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
                                         Hindi Question & Options
                                       </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenLatexRepair(item, 'question')}
-                                        className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
-                                        title="Fix LaTeX in Question"
-                                      >
-                                        <Sparkles className="w-2.5 h-2.5" />
-                                        <span>Fix LaTeX</span>
-                                      </button>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleQuickCropForQuestion(item, 'question')}
+                                          className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                          title="Crop diagram/figure and attach to Question"
+                                        >
+                                          <Scissors className="w-2.5 h-2.5" />
+                                          <span>Crop Fig</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'question')}
+                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                          title="Fix LaTeX in Question"
+                                        >
+                                          <Sparkles className="w-2.5 h-2.5" />
+                                          <span>Fix LaTeX</span>
+                                        </button>
+                                      </div>
                                     </div>
 
                                     {isEditing ? (
@@ -4142,22 +4218,73 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none"
                                       />
                                     ) : (
-                                      <LatexRenderer content={item.question_hi} className="text-slate-200 font-medium" />
+                                      <>
+                                        <LatexRenderer 
+                                          content={(item.question_hi || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim()} 
+                                          className="text-slate-200 font-medium" 
+                                        />
+                                        {/* Live Attached Question Diagrams */}
+                                        {(() => {
+                                          const rawUrls = extractFigureUrls(item.question_hi);
+                                          const qFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.question_en);
+                                          if (qFigUrls.length === 0) return null;
+                                          return (
+                                            <div className="mt-2.5 p-2 rounded-xl bg-white/[0.03] border border-orange-500/30 space-y-1.5 animate-in fade-in duration-200">
+                                              <div className="flex items-center justify-between text-[10px] font-bold text-orange-300">
+                                                <span className="flex items-center gap-1">
+                                                  <ImageIcon className="w-3 h-3 text-orange-400" />
+                                                  <span>Question Diagram ({qFigUrls.length})</span>
+                                                </span>
+                                                <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                              </div>
+                                              <div className="flex flex-wrap gap-2 pt-0.5">
+                                                {qFigUrls.map((url, uIdx) => (
+                                                  <div key={uIdx} className="relative group/qfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
+                                                    <img 
+                                                      src={url} 
+                                                      alt={`Question Figure ${uIdx + 1}`} 
+                                                      className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
+                                                      onClick={() => setPreviewLightboxUrl(url)}
+                                                      title="Click to view full size"
+                                                    />
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleRemoveFigureFromItem(item.id, 'question', url);
+                                                      }}
+                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      title="Remove diagram"
+                                                    >
+                                                      ✕
+                                                    </button>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          );
+                                        })()}
+                                      </>
                                     )}
 
                                     {/* Options List */}
-                                    <div className="space-y-1.5 pt-1">
+                                    <div className="space-y-2 pt-1">
                                       {(['option1_hi', 'option2_hi', 'option3_hi', 'option4_hi'] as const).map((key, optIdx) => {
                                         const optLetter = String.fromCharCode(65 + optIdx);
                                         const optNum = String(optIdx + 1);
                                         const isCorrect = item.answer === optLetter || item.answer === optNum || item.answer?.includes(optLetter) || item.answer?.includes(optNum);
-                                        const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
-                                        const isBlank = !valClean || valClean.toLowerCase() === 'blank';
+                                        const enKey = `option${optIdx + 1}_en` as keyof MockTestMcqItem;
+                                        const rawUrls = extractFigureUrls(item[key]);
+                                        const optFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item[enKey] as string);
+                                        const hasImg = optFigUrls.length > 0 || hasFigureImage(item[key]) || hasFigureImage(item[enKey] as string);
+                                        const cleanOptText = (item[key] || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim();
+                                        const isBlank = !hasImg && (!cleanOptText || cleanOptText.toLowerCase() === 'blank');
+                                        const targetOptField = `option${optIdx + 1}` as FigureTargetField;
 
                                         return (
                                           <div
                                             key={key}
-                                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+                                            className={`group/opt flex flex-col gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs transition-all ${
                                               isCorrect
                                                 ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
                                                 : isBlank
@@ -4165,32 +4292,79 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
                                             }`}
                                           >
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
-                                              isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
-                                            }`}>
-                                              {optLetter}
-                                            </span>
-                                            {isEditing ? (
-                                              <input
-                                                type="text"
-                                                value={item[key] || ''}
-                                                onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
-                                                placeholder={`Option ${optLetter}`}
-                                                className="w-full bg-transparent text-xs text-white focus:outline-none"
-                                              />
-                                            ) : (
-                                              <span className="flex-1 min-w-0" title={item[key]}>
-                                                {!isBlank ? (
-                                                  <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
-                                                ) : (
-                                                  <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
-                                                    <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                                    <span>Blank Option (Click "⚡ Auto-Fill" above)</span>
-                                                  </span>
-                                                )}
+                                            <div className="flex items-center gap-2">
+                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
+                                                isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
+                                              }`}>
+                                                {optLetter}
                                               </span>
+                                              {isEditing ? (
+                                                <input
+                                                  type="text"
+                                                  value={item[key] || ''}
+                                                  onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                  placeholder={`Option ${optLetter}`}
+                                                  className="w-full bg-transparent text-xs text-white focus:outline-none"
+                                                />
+                                              ) : (
+                                                <span className="flex-1 min-w-0" title={item[key]}>
+                                                  {cleanOptText ? (
+                                                    <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                                  ) : hasImg ? (
+                                                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300/90">
+                                                      <ImageIcon className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                                                      <span>Figure Option ({optLetter})</span>
+                                                    </span>
+                                                  ) : (
+                                                    <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
+                                                      <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                                                      <span>Blank Option (Click "⚡ Auto-Fill" or ✂ Crop)</span>
+                                                    </span>
+                                                  )}
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleQuickCropForQuestion(item, targetOptField);
+                                                }}
+                                                className="p-1 rounded hover:bg-orange-500/20 text-slate-400 hover:text-orange-300 transition-all opacity-60 hover:opacity-100 group-hover/opt:opacity-100 shrink-0 flex items-center gap-1 text-[10px]"
+                                                title={`Crop & attach diagram for Option ${optLetter}`}
+                                              >
+                                                <Scissors className="w-3 h-3" />
+                                                <span className="hidden sm:inline text-[9px]">{hasImg ? 'Re-crop' : 'Crop'}</span>
+                                              </button>
+                                              {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                                            </div>
+
+                                            {/* Live Image Thumbnail for Option */}
+                                            {optFigUrls.length > 0 && (
+                                              <div className="flex flex-wrap gap-2 pl-6 pt-0.5">
+                                                {optFigUrls.map((url, uIdx) => (
+                                                  <div key={uIdx} className="relative group/optfig rounded-lg bg-white p-1 border border-white/20 shadow-md inline-block">
+                                                    <img 
+                                                      src={url} 
+                                                      alt={`Option ${optLetter} Diagram`} 
+                                                      className="max-h-20 max-w-[140px] object-contain rounded cursor-pointer hover:scale-105 transition-transform"
+                                                      onClick={() => setPreviewLightboxUrl(url)}
+                                                      title="Click to view full size"
+                                                    />
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleRemoveFigureFromItem(item.id, targetOptField, url);
+                                                      }}
+                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      title="Remove figure"
+                                                    >
+                                                      ✕
+                                                    </button>
+                                                  </div>
+                                                ))}
+                                              </div>
                                             )}
-                                            {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                                           </div>
                                         );
                                       })}
@@ -4202,15 +4376,26 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         <span className="text-[10px] font-bold text-amber-400/80 uppercase">
                                           Solution (Hindi)
                                         </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleOpenLatexRepair(item, 'solution')}
-                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
-                                          title="Fix LaTeX in Hindi Solution"
-                                        >
-                                          <Sparkles className="w-2.5 h-2.5" />
-                                          <span>Fix LaTeX</span>
-                                        </button>
+                                        <div className="flex items-center gap-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleQuickCropForQuestion(item, 'solution')}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                            title="Crop diagram/figure and attach to Hindi Solution"
+                                          >
+                                            <Scissors className="w-2.5 h-2.5" />
+                                            <span>Crop Fig</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenLatexRepair(item, 'solution')}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                            title="Fix LaTeX in Hindi Solution"
+                                          >
+                                            <Sparkles className="w-2.5 h-2.5" />
+                                            <span>Fix LaTeX</span>
+                                          </button>
+                                        </div>
                                       </div>
                                       {isEditing ? (
                                         <textarea
@@ -4220,8 +4405,51 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                           className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-200 focus:outline-none"
                                         />
                                       ) : (
-                                        <div className="p-2.5 rounded-lg bg-amber-500/[0.03] border border-amber-500/20">
-                                          <LatexRenderer content={item.solution_hi || '<p>हल उपलब्ध नहीं है</p>'} className="text-amber-200/90 text-xs" />
+                                        <div className="p-2.5 rounded-lg bg-amber-500/[0.03] border border-amber-500/20 space-y-2">
+                                          <LatexRenderer 
+                                            content={(item.solution_hi || '<p>हल उपलब्ध नहीं है</p>').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim() || '<p>हल उपलब्ध नहीं है</p>'} 
+                                            className="text-amber-200/90 text-xs" 
+                                          />
+                                          {(() => {
+                                            const rawUrls = extractFigureUrls(item.solution_hi);
+                                            const solFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.solution_en);
+                                            if (solFigUrls.length === 0) return null;
+                                            return (
+                                              <div className="pt-2 border-t border-amber-500/20 space-y-1.5 animate-in fade-in duration-200">
+                                                <div className="flex items-center justify-between text-[10px] font-bold text-amber-300">
+                                                  <span className="flex items-center gap-1">
+                                                    <ImageIcon className="w-3 h-3 text-amber-400" />
+                                                    <span>Solution Diagram ({solFigUrls.length})</span>
+                                                  </span>
+                                                  <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                  {solFigUrls.map((url, uIdx) => (
+                                                    <div key={uIdx} className="relative group/solfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
+                                                      <img 
+                                                        src={url} 
+                                                        alt={`Solution Figure ${uIdx + 1}`} 
+                                                        className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
+                                                        onClick={() => setPreviewLightboxUrl(url)}
+                                                        title="Click to view full size"
+                                                      />
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleRemoveFigureFromItem(item.id, 'solution', url);
+                                                        }}
+                                                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                        title="Remove diagram"
+                                                      >
+                                                        ✕
+                                                      </button>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
                                       )}
                                     </div>
@@ -4233,15 +4461,26 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                       <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider block">
                                         English Question & Options
                                       </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenLatexRepair(item, 'question')}
-                                        className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
-                                        title="Fix LaTeX in Question"
-                                      >
-                                        <Sparkles className="w-2.5 h-2.5" />
-                                        <span>Fix LaTeX</span>
-                                      </button>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleQuickCropForQuestion(item, 'question')}
+                                          className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                          title="Crop diagram/figure and attach to Question"
+                                        >
+                                          <Scissors className="w-2.5 h-2.5" />
+                                          <span>Crop Fig</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenLatexRepair(item, 'question')}
+                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                          title="Fix LaTeX in Question"
+                                        >
+                                          <Sparkles className="w-2.5 h-2.5" />
+                                          <span>Fix LaTeX</span>
+                                        </button>
+                                      </div>
                                     </div>
 
                                     {isEditing ? (
@@ -4252,7 +4491,52 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none"
                                       />
                                     ) : (
-                                      <LatexRenderer content={item.question_en} className="text-slate-200 font-medium" />
+                                      <>
+                                        <LatexRenderer 
+                                          content={(item.question_en || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim()} 
+                                          className="text-slate-200 font-medium" 
+                                        />
+                                        {(() => {
+                                          const rawUrls = extractFigureUrls(item.question_en);
+                                          const qFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.question_hi);
+                                          if (qFigUrls.length === 0) return null;
+                                          return (
+                                            <div className="mt-2.5 p-2 rounded-xl bg-white/[0.03] border border-blue-500/30 space-y-1.5 animate-in fade-in duration-200">
+                                              <div className="flex items-center justify-between text-[10px] font-bold text-blue-300">
+                                                <span className="flex items-center gap-1">
+                                                  <ImageIcon className="w-3 h-3 text-blue-400" />
+                                                  <span>Question Diagram ({qFigUrls.length})</span>
+                                                </span>
+                                                <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                              </div>
+                                              <div className="flex flex-wrap gap-2 pt-0.5">
+                                                {qFigUrls.map((url, uIdx) => (
+                                                  <div key={uIdx} className="relative group/qfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
+                                                    <img 
+                                                      src={url} 
+                                                      alt={`Question Figure ${uIdx + 1}`} 
+                                                      className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
+                                                      onClick={() => setPreviewLightboxUrl(url)}
+                                                      title="Click to view full size"
+                                                    />
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleRemoveFigureFromItem(item.id, 'question', url);
+                                                      }}
+                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      title="Remove diagram"
+                                                    >
+                                                      ✕
+                                                    </button>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          );
+                                        })()}
+                                      </>
                                     )}
 
                                     {/* Options List */}
@@ -4261,13 +4545,18 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         const optLetter = String.fromCharCode(65 + optIdx);
                                         const optNum = String(optIdx + 1);
                                         const isCorrect = item.answer === optLetter || item.answer === optNum || item.answer?.includes(optLetter) || item.answer?.includes(optNum);
-                                        const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
-                                        const isBlank = !valClean || valClean.toLowerCase() === 'blank';
+                                        const hiKey = `option${optIdx + 1}_hi` as keyof MockTestMcqItem;
+                                        const rawUrls = extractFigureUrls(item[key]);
+                                        const optFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item[hiKey] as string);
+                                        const hasImg = optFigUrls.length > 0 || hasFigureImage(item[key]) || hasFigureImage(item[hiKey] as string);
+                                        const cleanOptText = (item[key] || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim();
+                                        const isBlank = !hasImg && (!cleanOptText || cleanOptText.toLowerCase() === 'blank');
+                                        const targetOptField = `option${optIdx + 1}` as FigureTargetField;
 
                                         return (
                                           <div
                                             key={key}
-                                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-all ${
+                                            className={`group/opt flex flex-col gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs transition-all ${
                                               isCorrect
                                                 ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
                                                 : isBlank
@@ -4275,32 +4564,79 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
                                             }`}
                                           >
-                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
-                                              isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
-                                            }`}>
-                                              {optLetter}
-                                            </span>
-                                            {isEditing ? (
-                                              <input
-                                                type="text"
-                                                value={item[key] || ''}
-                                                onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
-                                                placeholder={`Option ${optLetter}`}
-                                                className="w-full bg-transparent text-xs text-white focus:outline-none"
-                                              />
-                                            ) : (
-                                              <span className="flex-1 min-w-0" title={item[key]}>
-                                                {!isBlank ? (
-                                                  <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
-                                                ) : (
-                                                  <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
-                                                    <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                                    <span>Blank Option (Click "⚡ Auto-Fill" above)</span>
-                                                  </span>
-                                                )}
+                                            <div className="flex items-center gap-2">
+                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
+                                                isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
+                                              }`}>
+                                                {optLetter}
                                               </span>
+                                              {isEditing ? (
+                                                <input
+                                                  type="text"
+                                                  value={item[key] || ''}
+                                                  onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                  placeholder={`Option ${optLetter}`}
+                                                  className="w-full bg-transparent text-xs text-white focus:outline-none"
+                                                />
+                                              ) : (
+                                                <span className="flex-1 min-w-0" title={item[key]}>
+                                                  {cleanOptText ? (
+                                                    <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                                  ) : hasImg ? (
+                                                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300/90">
+                           <ImageIcon className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                           <span>Figure Option ({optLetter})</span>
+                         </span>
+                                                  ) : (
+                                                    <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
+                                                      <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                                                      <span>Blank Option (Click "⚡ Auto-Fill" or ✂ Crop)</span>
+                                                    </span>
+                                                  )}
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleQuickCropForQuestion(item, targetOptField);
+                                                }}
+                                                className="p-1 rounded hover:bg-orange-500/20 text-slate-400 hover:text-orange-300 transition-all opacity-60 hover:opacity-100 group-hover/opt:opacity-100 shrink-0 flex items-center gap-1 text-[10px]"
+                                                title={`Crop & attach diagram for Option ${optLetter}`}
+                                              >
+                                                <Scissors className="w-3 h-3" />
+                                                <span className="hidden sm:inline text-[9px]">{hasImg ? 'Re-crop' : 'Crop'}</span>
+                                              </button>
+                                              {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                                            </div>
+
+                                            {/* Live Image Thumbnail for Option (English) */}
+                                            {optFigUrls.length > 0 && (
+                                              <div className="flex flex-wrap gap-2 pl-6 pt-0.5">
+                                                {optFigUrls.map((url, uIdx) => (
+                                                  <div key={uIdx} className="relative group/optfig rounded-lg bg-white p-1 border border-white/20 shadow-md inline-block">
+                                                    <img 
+                                                      src={url} 
+                                                      alt={`Option ${optLetter} Diagram`} 
+                                                      className="max-h-20 max-w-[140px] object-contain rounded cursor-pointer hover:scale-105 transition-transform"
+                                                      onClick={() => setPreviewLightboxUrl(url)}
+                                                      title="Click to view full size"
+                                                    />
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleRemoveFigureFromItem(item.id, targetOptField, url);
+                                                      }}
+                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      title="Remove figure"
+                                                    >
+                                                      ✕
+                                                    </button>
+                                                  </div>
+                                                ))}
+                                              </div>
                                             )}
-                                            {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                                           </div>
                                         );
                                       })}
@@ -4312,15 +4648,26 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         <span className="text-[10px] font-bold text-blue-400/80 uppercase">
                                           Solution (English)
                                         </span>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleOpenLatexRepair(item, 'solution')}
-                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
-                                          title="Fix LaTeX in English Solution"
-                                        >
-                                          <Sparkles className="w-2.5 h-2.5" />
-                                          <span>Fix LaTeX</span>
-                                        </button>
+                                        <div className="flex items-center gap-1.5">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleQuickCropForQuestion(item, 'solution')}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                            title="Crop diagram/figure and attach to English Solution"
+                                          >
+                                            <Scissors className="w-2.5 h-2.5" />
+                                            <span>Crop Fig</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenLatexRepair(item, 'solution')}
+                                            className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                            title="Fix LaTeX in English Solution"
+                                          >
+                                            <Sparkles className="w-2.5 h-2.5" />
+                                            <span>Fix LaTeX</span>
+                                          </button>
+                                        </div>
                                       </div>
                                       {isEditing ? (
                                         <textarea
@@ -4330,8 +4677,51 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                           className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-blue-200 focus:outline-none"
                                         />
                                       ) : (
-                                        <div className="p-2.5 rounded-lg bg-blue-500/[0.03] border border-blue-500/20">
-                                          <LatexRenderer content={item.solution_en || '<p>Solution not available</p>'} className="text-blue-200/90 text-xs" />
+                                        <div className="p-2.5 rounded-lg bg-blue-500/[0.03] border border-blue-500/20 space-y-2">
+                                          <LatexRenderer 
+                                            content={(item.solution_en || '<p>Solution not available</p>').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim() || '<p>Solution not available</p>'} 
+                                            className="text-blue-200/90 text-xs" 
+                                          />
+                                          {(() => {
+                                            const rawUrls = extractFigureUrls(item.solution_en);
+                          const solFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.solution_hi);
+                                            if (solFigUrls.length === 0) return null;
+                                            return (
+                                              <div className="pt-2 border-t border-blue-500/20 space-y-1.5 animate-in fade-in duration-200">
+                                                <div className="flex items-center justify-between text-[10px] font-bold text-blue-300">
+                                                  <span className="flex items-center gap-1">
+                                                    <ImageIcon className="w-3 h-3 text-blue-400" />
+                                                    <span>Solution Diagram ({solFigUrls.length})</span>
+                                                  </span>
+                                                  <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                  {solFigUrls.map((url, uIdx) => (
+                                                    <div key={uIdx} className="relative group/solfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
+                                                      <img 
+                                                        src={url} 
+                                                        alt={`Solution Figure ${uIdx + 1}`} 
+                                                        className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
+                                                        onClick={() => setPreviewLightboxUrl(url)}
+                                                        title="Click to view full size"
+                                                      />
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleRemoveFigureFromItem(item.id, 'solution', url);
+                                                        }}
+                                                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                        title="Remove diagram"
+                                                      >
+                                                        ✕
+                                                      </button>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            );
+                                          })()}
                                         </div>
                                       )}
                                     </div>
@@ -4574,275 +4964,27 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
         </div>
       )}
 
-      {/* High-Res Page Lightbox Modal: 500% Zoom, Drag-to-Pan, Prev/Next Page Navigation */}
-      {zoomPageIndex !== null && pages[zoomPageIndex] && (() => {
-        const activePage = pages[zoomPageIndex];
-        const canPrev = zoomPageIndex > 0;
-        const canNext = zoomPageIndex < pages.length - 1;
-
-        const handleMouseDown = (e: React.MouseEvent) => {
-          setIsDragging(true);
-          dragStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
-        };
-
-        const handleMouseMove = (e: React.MouseEvent) => {
-          if (!isDragging) return;
-          setPanOffset({
-            x: e.clientX - dragStartRef.current.x,
-            y: e.clientY - dragStartRef.current.y
-          });
-        };
-
-        const handleMouseUp = () => {
-          setIsDragging(false);
-        };
-
-        const handleWheel = (e: React.WheelEvent) => {
-          e.stopPropagation();
-          const delta = e.deltaY < 0 ? 0.25 : -0.25;
-          setZoomLevel(prev => Math.max(0.5, Math.min(5, Number((prev + delta).toFixed(2)))));
-        };
-
-        const handleDoubleClick = (e: React.MouseEvent) => {
-          e.stopPropagation();
-          if (zoomLevel === 1) {
-            setZoomLevel(2.5);
-          } else {
-            setZoomLevel(1);
-            setPanOffset({ x: 0, y: 0 });
-          }
-        };
-
-        return (
-          <div 
-            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col select-none overflow-hidden animate-fade-in"
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          >
-            {/* Top Control Bar */}
-            <div className="flex items-center justify-between px-5 py-3 bg-slate-950/90 border-b border-white/[0.1] z-20 shrink-0">
-              {/* Page Indicator & Title */}
-              <div className="flex items-center gap-3">
-                <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-black font-extrabold text-xs shadow-md shadow-amber-500/20">
-                  Page {activePage.pageNumber} of {pages.length}
-                </span>
-                <span className="text-xs text-slate-300 font-medium hidden sm:inline truncate max-w-xs">
-                  {setName || 'Mock Test Examination Paper'}
-                </span>
-                <span className="text-[11px] text-slate-400 hidden md:inline">
-                  (Drag to Move, Scroll to Zoom up to 500%)
-                </span>
-              </div>
-
-              {/* Zoom Controls Bar (Up to 500%) */}
-              <div className="flex items-center gap-1.5 bg-white/[0.06] p-1 rounded-xl border border-white/[0.1]">
-                <button
-                  type="button"
-                  onClick={() => setZoomLevel(prev => Math.max(0.5, Number((prev - 0.5).toFixed(2))))}
-                  disabled={zoomLevel <= 0.5}
-                  className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/[0.1] transition-all disabled:opacity-30"
-                  title="Zoom Out (Hotkey: -)"
-                >
-                  <ZoomOut className="w-4 h-4" />
-                </button>
-
-                <div className="px-2.5 py-0.5 text-xs font-mono font-extrabold text-amber-300 min-w-[54px] text-center bg-black/40 rounded-lg">
-                  {Math.round(zoomLevel * 100)}%
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setZoomLevel(prev => Math.min(5, Number((prev + 0.5).toFixed(2))))}
-                  disabled={zoomLevel >= 5}
-                  className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/[0.1] transition-all disabled:opacity-30"
-                  title="Zoom In (Hotkey: +)"
-                >
-                  <ZoomIn className="w-4 h-4" />
-                </button>
-
-                <div className="w-[1px] h-4 bg-white/[0.15] mx-0.5" />
-
-                {/* Quick Zoom Presets */}
-                <button
-                  type="button"
-                  onClick={() => { setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
-                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all ${
-                    zoomLevel === 1 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
-                  }`}
-                  title="Reset to 100% Fit"
-                >
-                  100%
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setZoomLevel(2.5)}
-                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all hidden sm:block ${
-                    zoomLevel === 2.5 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
-                  }`}
-                  title="Zoom 250%"
-                >
-                  250%
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setZoomLevel(5)}
-                  className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all ${
-                    zoomLevel === 5 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
-                  }`}
-                  title="Maximum 500% Zoom"
-                >
-                  500%
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { setZoomLevel(1); setPanOffset({ x: 0, y: 0 }); }}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.1] transition-all"
-                  title="Reset Zoom and Center (Hotkey: 0)"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* Close Button */}
-              <div className="flex items-center gap-2">
-                <button 
-                  type="button" 
-                  onClick={() => {
-                    setZoomPageIndex(null);
-                    setZoomLevel(1);
-                    setPanOffset({ x: 0, y: 0 });
-                  }} 
-                  className="p-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white border border-white/[0.1] transition-all flex items-center gap-1.5 text-xs font-semibold"
-                  title="Close (Esc)"
-                >
-                  <X className="w-4 h-4" />
-                  <span className="hidden sm:inline">Close (Esc)</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Main Viewport */}
-            <div 
-              className={`flex-1 relative overflow-hidden flex items-center justify-center p-2 ${
-                isDragging ? 'cursor-grabbing' : 'cursor-grab'
-              }`}
-              onMouseDown={handleMouseDown}
-              onWheel={handleWheel}
-              onDoubleClick={handleDoubleClick}
-            >
-              {/* Floating Previous Page Button */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (canPrev) {
-                    setZoomPageIndex(zoomPageIndex - 1);
-                    setPanOffset({ x: 0, y: 0 });
-                  }
-                }}
-                disabled={!canPrev}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-30 p-3 rounded-2xl bg-black/80 hover:bg-amber-500 border border-white/[0.15] text-white hover:text-black shadow-2xl transition-all disabled:opacity-20 disabled:pointer-events-none group"
-                title="Previous Page (Hotkey: Left Arrow ←)"
-              >
-                <ChevronLeft className="w-6 h-6 group-hover:-translate-x-0.5 transition-transform" />
-              </button>
-
-              {/* Floating Next Page Button */}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (canNext) {
-                    setZoomPageIndex(zoomPageIndex + 1);
-                    setPanOffset({ x: 0, y: 0 });
-                  }
-                }}
-                disabled={!canNext}
-                className="absolute right-4 top-1/2 -translate-y-1/2 z-30 p-3 rounded-2xl bg-black/80 hover:bg-amber-500 border border-white/[0.15] text-white hover:text-black shadow-2xl transition-all disabled:opacity-20 disabled:pointer-events-none group"
-                title="Next Page (Hotkey: Right Arrow →)"
-              >
-                <ChevronRight className="w-6 h-6 group-hover:translate-x-0.5 transition-transform" />
-              </button>
-
-              {/* Zoomable & Draggable Page Image */}
-              <div 
-                className="transition-transform duration-75 ease-out select-none"
-                style={{
-                  transform: `translate3d(${panOffset.x}px, ${panOffset.y}px, 0) scale(${zoomLevel})`,
-                  transformOrigin: 'center center'
-                }}
-              >
-                <img 
-                  src={activePage.imageUrl} 
-                  alt={`Page ${activePage.pageNumber} High-Res`} 
-                  draggable={false}
-                  className="max-w-[85vw] max-h-[82vh] object-contain rounded-lg shadow-2xl pointer-events-none border border-white/[0.1]" 
-                />
-              </div>
-
-              {/* Bottom Quick Page Thumbnails Strip */}
-              <div 
-                className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-slate-950/90 border border-white/[0.15] shadow-2xl backdrop-blur-md max-w-[90vw] overflow-x-auto no-scrollbar"
-                onClick={e => e.stopPropagation()}
-                onMouseDown={e => e.stopPropagation()}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (canPrev) {
-                      setZoomPageIndex(zoomPageIndex - 1);
-                      setPanOffset({ x: 0, y: 0 });
-                    }
-                  }}
-                  disabled={!canPrev}
-                  className="px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs font-bold text-slate-300 disabled:opacity-30 flex items-center gap-1"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Prev</span>
-                </button>
-
-                <div className="flex items-center gap-1 px-1 overflow-x-auto max-w-[60vw]">
-                  {pages.map((p, pIdx) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setZoomPageIndex(pIdx);
-                        setPanOffset({ x: 0, y: 0 });
-                      }}
-                      className={`w-7 h-7 rounded-lg text-xs font-extrabold transition-all shrink-0 ${
-                        pIdx === zoomPageIndex
-                          ? 'bg-amber-500 text-black shadow-md shadow-amber-500/30'
-                          : 'bg-white/[0.04] text-slate-400 hover:text-white hover:bg-white/[0.1]'
-                      }`}
-                      title={`Go to Page ${p.pageNumber}`}
-                    >
-                      {p.pageNumber}
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (canNext) {
-                      setZoomPageIndex(zoomPageIndex + 1);
-                      setPanOffset({ x: 0, y: 0 });
-                    }
-                  }}
-                  disabled={!canNext}
-                  className="px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-xs font-bold text-slate-300 disabled:opacity-30 flex items-center gap-1"
-                >
-                  <span className="hidden sm:inline">Next</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {/* High-Res Page Lightbox Modal: 500% Zoom, Zero-Lag Direct Pan, Multi-Crop Tool & ImgBB Cloud */}
+      <HighResPageLightbox
+        isOpen={zoomPageIndex !== null}
+        pageIndex={zoomPageIndex}
+        pages={pages}
+        setName={setName}
+        extractedMcqs={extractedMcqs}
+        initialTargetQuestionId={selectedTargetQuestionId}
+        initialTargetField={selectedTargetField}
+        initialCropMode={isFigureCropMode}
+        onClose={() => {
+          setZoomPageIndex(null);
+          setIsFigureCropMode(false);
+        }}
+        onUpdateQuestion={(questionId, updated) => {
+          updateItem(questionId, updated);
+        }}
+        onPageIndexChange={(newIdx) => {
+          setZoomPageIndex(newIdx);
+        }}
+      />
 
       {/* Modals for Settings and Connect */}
       <GeminiSettingsModal
@@ -4901,6 +5043,52 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
           initialScope={latexRepairTarget.scope}
           onApply={handleApplyLatexRepair}
         />
+      )}
+
+      {/* Zoom / Lightbox Preview Modal for Cropped Figures */}
+      {previewLightboxUrl && (
+        <div 
+          className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setPreviewLightboxUrl(null)}
+        >
+          <div 
+            className="relative max-w-4xl max-h-[90vh] bg-slate-900 border border-white/20 rounded-2xl p-4 shadow-2xl flex flex-col items-center gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between w-full px-1">
+              <div className="flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-orange-400" />
+                <span className="text-xs font-bold text-slate-200">Figure Preview</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewLightboxUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-white/10 hover:bg-white/20 text-slate-200 rounded-lg transition-colors flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Open Raw</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPreviewLightboxUrl(null)}
+                  className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl p-3 max-h-[75vh] max-w-full flex items-center justify-center overflow-auto shadow-inner">
+              <img 
+                src={previewLightboxUrl} 
+                alt="Figure Full Size" 
+                className="max-h-[70vh] max-w-full object-contain rounded select-none"
+              />
+            </div>
+            <span className="text-[10px] text-slate-400">Click outside or ✕ to close</span>
+          </div>
+        </div>
       )}
 
       {/* Floating Undo Toast for LaTeX Repair */}

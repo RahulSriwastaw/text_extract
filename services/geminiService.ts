@@ -43,9 +43,9 @@ export const extractLayoutFromImage = async (
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    if (response.status === 429 && retryCount < 3) {
-      const waitTime = Math.min(errorData.waitTime || (2000 + retryCount * 1500), 5000);
-      console.warn(`[Client] Quota burst. Fast-retrying with rotated keys in ${Math.round(waitTime / 1000)}s (Attempt ${retryCount + 1}/3)...`);
+    if ((response.status === 429 || response.status >= 500) && retryCount < 3) {
+      const waitTime = Math.min(errorData.waitTime || (1000 + retryCount * 1000), 4000);
+      console.warn(`[Client] API error (${response.status}). Fast-retrying with rotated key in ${waitTime}ms (Attempt ${retryCount + 1}/3)...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, retryCount + 1);
     }

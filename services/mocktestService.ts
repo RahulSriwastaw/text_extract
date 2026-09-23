@@ -1,5 +1,6 @@
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
 import { getAiSettings } from './aiDbService';
+import { hasFigureImage } from './figureStorageService';
 
 export type { MockTestMcqItem };
 
@@ -384,33 +385,35 @@ export function detectItemFieldIssues(item: MockTestMcqItem): ItemFieldIssues {
   const missingOptionsList: string[] = [];
   const missingFieldNames: string[] = [];
   
-  const opt1 = (item.option1_hi || item.option1_en || '').replace(/<[^>]*>/g, '').trim();
-  const opt2 = (item.option2_hi || item.option2_en || '').replace(/<[^>]*>/g, '').trim();
-  const opt3 = (item.option3_hi || item.option3_en || '').replace(/<[^>]*>/g, '').trim();
-  const opt4 = (item.option4_hi || item.option4_en || '').replace(/<[^>]*>/g, '').trim();
+  const isOptValid = (hi?: string, en?: string) => {
+    if (hasFigureImage(hi) || hasFigureImage(en)) return true;
+    const text = (hi || en || '').replace(/<[^>]*>/g, '').trim();
+    return !!text && text.toLowerCase() !== 'blank';
+  };
 
-  if (!opt1 || opt1.toLowerCase() === 'blank') {
+  if (!isOptValid(item.option1_hi, item.option1_en)) {
     missingOptionsList.push('A');
     missingFieldNames.push('Option A');
   }
-  if (!opt2 || opt2.toLowerCase() === 'blank') {
+  if (!isOptValid(item.option2_hi, item.option2_en)) {
     missingOptionsList.push('B');
     missingFieldNames.push('Option B');
   }
-  if (!opt3 || opt3.toLowerCase() === 'blank') {
+  if (!isOptValid(item.option3_hi, item.option3_en)) {
     missingOptionsList.push('C');
     missingFieldNames.push('Option C');
   }
-  if (!opt4 || opt4.toLowerCase() === 'blank') {
+  if (!isOptValid(item.option4_hi, item.option4_en)) {
     missingOptionsList.push('D');
     missingFieldNames.push('Option D');
   }
 
   const hasMissingOptions = missingOptionsList.length > 0;
   
+  const hasFigureInQuestion = hasFigureImage(item.question_hi) || hasFigureImage(item.question_en);
   const qHi = (item.question_hi || '').replace(/<[^>]*>/g, '').trim();
   const qEn = (item.question_en || '').replace(/<[^>]*>/g, '').trim();
-  const hasEmptyQuestion = !qHi && !qEn;
+  const hasEmptyQuestion = !qHi && !qEn && !hasFigureInQuestion;
   if (hasEmptyQuestion) {
     missingFieldNames.push('Question Text');
   }
@@ -421,11 +424,12 @@ export function detectItemFieldIssues(item: MockTestMcqItem): ItemFieldIssues {
     missingFieldNames.push('Answer');
   }
 
+  const hasFigureInSol = hasFigureImage(item.solution_hi) || hasFigureImage(item.solution_en);
   const solHi = (item.solution_hi || '').replace(/<[^>]*>/g, '').trim();
   const solEn = (item.solution_en || '').replace(/<[^>]*>/g, '').trim();
   const isGenericHi = !solHi || /^(?:हल:)?\s*सही उत्तर विकल्प\s+[A-E1-5]\s*है।?$/i.test(solHi) || solHi.length < 25;
   const isGenericEn = !solEn || /^(?:Solution:)?\s*The correct option is\s+[A-E1-5]\.?$/i.test(solEn) || solEn.length < 25;
-  const hasDummySolution = isGenericHi && isGenericEn;
+  const hasDummySolution = !hasFigureInSol && isGenericHi && isGenericEn;
   if (hasDummySolution) {
     missingFieldNames.push('Solution');
   }
@@ -695,17 +699,23 @@ export function mergePendingCarryOver(
  * extracting them into Option 1-4 and cleaning the stem cleanly.
  */
 export function autoRecoverItemOptionsFromStem(item: MockTestMcqItem): MockTestMcqItem {
-  // Check if options are already fully populated and not empty/blank
+  // Check if options are already fully populated and not empty/blank (including figure options)
+  const hasFig1 = hasFigureImage(item.option1_hi) || hasFigureImage(item.option1_en);
+  const hasFig2 = hasFigureImage(item.option2_hi) || hasFigureImage(item.option2_en);
+  const hasFig3 = hasFigureImage(item.option3_hi) || hasFigureImage(item.option3_en);
+  const hasFig4 = hasFigureImage(item.option4_hi) || hasFigureImage(item.option4_en);
+
   const opt1 = (item.option1_hi || item.option1_en || '').replace(/<[^>]*>/g, '').trim();
   const opt2 = (item.option2_hi || item.option2_en || '').replace(/<[^>]*>/g, '').trim();
   const opt3 = (item.option3_hi || item.option3_en || '').replace(/<[^>]*>/g, '').trim();
   const opt4 = (item.option4_hi || item.option4_en || '').replace(/<[^>]*>/g, '').trim();
 
-  const allFilled = opt1 && opt2 && opt3 && opt4 && 
-    opt1.toLowerCase() !== 'blank' && opt2.toLowerCase() !== 'blank' &&
-    opt3.toLowerCase() !== 'blank' && opt4.toLowerCase() !== 'blank';
+  const isFilled1 = hasFig1 || (!!opt1 && opt1.toLowerCase() !== 'blank');
+  const isFilled2 = hasFig2 || (!!opt2 && opt2.toLowerCase() !== 'blank');
+  const isFilled3 = hasFig3 || (!!opt3 && opt3.toLowerCase() !== 'blank');
+  const isFilled4 = hasFig4 || (!!opt4 && opt4.toLowerCase() !== 'blank');
 
-  if (allFilled) {
+  if (isFilled1 && isFilled2 && isFilled3 && isFilled4) {
     return item;
   }
 
@@ -768,14 +778,14 @@ export function autoRecoverItemOptionsFromStem(item: MockTestMcqItem): MockTestM
     ...item,
     question_en: extractedEn ? extractedEn.stem : qEn,
     question_hi: extractedHi ? extractedHi.stem : qHi,
-    option1_hi: (!item.option1_hi || item.option1_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[0] : opt1Val) : item.option1_hi,
-    option2_hi: (!item.option2_hi || item.option2_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[1] : opt2Val) : item.option2_hi,
-    option3_hi: (!item.option3_hi || item.option3_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[2] : opt3Val) : item.option3_hi,
-    option4_hi: (!item.option4_hi || item.option4_hi.toLowerCase() === 'blank') ? (extractedHi ? extractedHi.opts[3] : opt4Val) : item.option4_hi,
-    option1_en: (!item.option1_en || item.option1_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[0] : opt1Val) : item.option1_en,
-    option2_en: (!item.option2_en || item.option2_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[1] : opt2Val) : item.option2_en,
-    option3_en: (!item.option3_en || item.option3_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[2] : opt3Val) : item.option3_en,
-    option4_en: (!item.option4_en || item.option4_en.toLowerCase() === 'blank') ? (extractedEn ? extractedEn.opts[3] : opt4Val) : item.option4_en,
+    option1_hi: (!hasFig1 && (!item.option1_hi || item.option1_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[0] : opt1Val) : item.option1_hi,
+    option2_hi: (!hasFig2 && (!item.option2_hi || item.option2_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[1] : opt2Val) : item.option2_hi,
+    option3_hi: (!hasFig3 && (!item.option3_hi || item.option3_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[2] : opt3Val) : item.option3_hi,
+    option4_hi: (!hasFig4 && (!item.option4_hi || item.option4_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[3] : opt4Val) : item.option4_hi,
+    option1_en: (!hasFig1 && (!item.option1_en || item.option1_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[0] : opt1Val) : item.option1_en,
+    option2_en: (!hasFig2 && (!item.option2_en || item.option2_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[1] : opt2Val) : item.option2_en,
+    option3_en: (!hasFig3 && (!item.option3_en || item.option3_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[2] : opt3Val) : item.option3_en,
+    option4_en: (!hasFig4 && (!item.option4_en || item.option4_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[3] : opt4Val) : item.option4_en,
   };
 }
 
@@ -1299,7 +1309,146 @@ export function parseCsvToMockTestItems(csvText: string, defaultSetName = 'Paper
     });
   }
 
-  return items.map(cleanMockTestItem);
+  return distributePassagesAcrossItems(items).map(cleanMockTestItem);
+}
+
+/**
+ * Helper to detect question range in passage headers:
+ * e.g. "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "निर्देश (प्रश्न 1 से 5)", etc.
+ */
+export function extractPassageRange(text: string): { start: number; end: number; label: string } | null {
+  if (!text) return null;
+  const p1 = text.match(/(?:Directions?|SET\s*-\s*\d+|निर्देश|Questions?|प्र(?:श्न)?|Q(?:uestion)?\.?)[^(\d\n]*[\[\(]?\s*(?:प्र(?:श्न)?|Q(?:uestion)?\.?\s*)?(\d+)\.?\s*(?:to|-|–|—|से)\s*(?:प्र(?:श्न)?|Q(?:uestion)?\.?\s*)?(\d+)\.?\s*[\]\)]?/i);
+  if (p1) {
+    const s = parseInt(p1[1], 10);
+    const e = parseInt(p1[2], 10);
+    if (!isNaN(s) && !isNaN(e) && e >= s) {
+      return { start: s, end: e, label: `Q.${s}-${e}` };
+    }
+  }
+
+  const p2 = text.match(/[\[\(]\s*(\d{1,4})\s*(?:to|-|–|—|से)\s*(\d{1,4})\s*[\]\)]/i);
+  if (p2) {
+    const s = parseInt(p2[1], 10);
+    const e = parseInt(p2[2], 10);
+    if (!isNaN(s) && !isNaN(e) && e >= s) {
+      return { start: s, end: e, label: `Q.${s}-${e}` };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Automatically detects reading comprehension / गद्यांश passages and guarantees
+ * that EVERY single question belonging to a passage set has the full passage prepended (separated by \n---\n).
+ */
+export function distributePassagesAcrossItems(items: MockTestMcqItem[]): MockTestMcqItem[] {
+  if (!items || items.length === 0) return items;
+
+  let currentPassageHi = '';
+  let currentPassageEn = '';
+  let currentPassageRange = '';
+  let activeUntilQNum = 0;
+
+  const result: MockTestMcqItem[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const qNum = Number(item.question_r) || (i + 1);
+    const qHi = String(item.question_hi || '');
+    const qEn = String(item.question_en || '');
+
+    const hasOptions = Boolean(
+      item.option1_hi || item.option2_hi || item.option1_en || item.option2_en ||
+      item.option3_hi || item.option4_hi
+    );
+
+    // 1. Check if this is a standalone passage item (no options, passage keywords or long text)
+    const isPassageKw = /(?:गद्यांश|काव्यांश|पद्यांश|निर्देश|अनुच्छेद|passage|comprehension|SET\s*-\s*\d+|Directions|Read the following)/i.test(qHi);
+    const isStandalone = !hasOptions && isPassageKw && qHi.length > 40;
+
+    if (isStandalone) {
+      const range = extractPassageRange(qHi);
+      if (range) {
+        activeUntilQNum = range.end;
+        currentPassageRange = range.label;
+      } else {
+        activeUntilQNum = qNum + 5;
+        currentPassageRange = 'Passage Set';
+      }
+      currentPassageHi = qHi;
+      currentPassageEn = qEn || qHi;
+      // Do not include standalone passage placeholder as an MCQ item
+      continue;
+    }
+
+    // 2. Check if this question stem has an embedded passage separated by '---'
+    const hiParts = qHi.split(/\n\s*---\s*\n|\n---\n|---/);
+    if (hiParts.length >= 2 && hiParts[0].trim().length > 40) {
+      const passageSnippet = hiParts[0].trim();
+      const isLikelyPassage = /(?:गद्यांश|काव्यांश|पद्यांश|निर्देश|अनुच्छेद|passage|comprehension|SET\s*-\s*\d+|Directions|Read the following)/i.test(passageSnippet) || passageSnippet.length > 80;
+
+      if (isLikelyPassage) {
+        currentPassageHi = passageSnippet;
+        const enParts = qEn.split(/\n\s*---\s*\n|\n---\n|---/);
+        currentPassageEn = enParts.length >= 2 ? enParts[0].trim() : (qEn.length > 80 ? qEn : currentPassageHi);
+
+        const range = extractPassageRange(passageSnippet);
+        if (range) {
+          activeUntilQNum = range.end;
+          currentPassageRange = range.label;
+        } else {
+          activeUntilQNum = qNum + 4;
+          currentPassageRange = 'Passage Set';
+        }
+      }
+    }
+
+    // Also check item.passage_hi if provided directly
+    if (item.passage_hi) {
+      currentPassageHi = item.passage_hi;
+      currentPassageEn = item.passage_en || currentPassageHi;
+    }
+
+    // 3. Check if active passage is valid for this question
+    const inRange = activeUntilQNum > 0 && qNum > 0 ? qNum <= activeUntilQNum : Boolean(currentPassageHi);
+
+    let updatedQHi = qHi;
+    let updatedQEn = qEn;
+
+    if (currentPassageHi && inRange) {
+      const snippet = currentPassageHi.slice(0, 30);
+      if (!updatedQHi.includes(snippet)) {
+        updatedQHi = `${currentPassageHi}\n---\n${updatedQHi}`;
+      }
+      if (currentPassageEn) {
+        const snippetEn = currentPassageEn.slice(0, 30);
+        if (!updatedQEn.includes(snippetEn)) {
+          updatedQEn = `${currentPassageEn}\n---\n${updatedQEn}`;
+        }
+      }
+      item.passage_hi = currentPassageHi;
+      item.passage_en = currentPassageEn;
+      if (!item.figure_notes) {
+        item.figure_notes = currentPassageRange ? `गद्यांश / Passage: ${currentPassageRange}` : 'गद्यांश / Passage';
+      }
+    } else if (activeUntilQNum > 0 && qNum > activeUntilQNum) {
+      // Passage range completed
+      currentPassageHi = '';
+      currentPassageEn = '';
+      currentPassageRange = '';
+      activeUntilQNum = 0;
+    }
+
+    result.push({
+      ...item,
+      question_hi: updatedQHi,
+      question_en: updatedQEn
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -1734,9 +1883,16 @@ CARRY-OVER CONTINUATION INSTRUCTIONS:
 FORMAT & TYPOGRAPHY RULES:
 1. NO HTML TAGS: Output question stems, options, and solutions as clean normal text. Never output <p>, <br>, <b>, <table>, or <span>. Use simple \\n for line breaks.
 2. LATEX FOR MATH/SCIENCE ONLY: Wrap formulas, equations, fractions, and roots in $...$ (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$, $H_2O$). Keep normal text, units (e.g. km/h), and currency (₹500) as normal plain text.
-3. BOTH LANGUAGES: Provide both Hindi (_hi) and English (_en). If document has only one, translate the counterpart.
+3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
+   - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both question_hi and question_en (and their options) MUST contain ONLY the original English text.
+   - For Hindi Language tests (हिंदी गद्यांश, व्याकरण, मुहावरे आदि): DO NOT translate into English! Both question_hi and question_en (and their options) MUST contain ONLY the original Hindi text.
+   - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi (_hi) and English (_en). If document has only one, translate the counterpart.
 4. COMPREHENSIVE SOLUTION: Provide an in-depth, step-by-step pedagogical explanation (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. NO EXAM BOILERPLATE: Strip exam dates, shifts, and book publisher watermarks.
+6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
+   - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g., "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
+     YOU MUST PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION BELONGING TO THAT SET in both question_hi and question_en, separated by "\\n---\\n" (e.g., "[Full Passage Text]\\n---\\n[Question Text]").
+   - NEVER attach the passage only once or only to the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so each question is fully self-contained.
 
 TARGET JSON FIELDS FOR EACH OBJECT:
 question_r, question_hi, option1_hi, option2_hi, option3_hi, option4_hi, option5_hi, solution_hi,
@@ -2104,14 +2260,14 @@ export function parseAiOutputToMockTestItems(
         );
 
         // Check if this is a standalone passage block
-        const isPassageKw = /(?:गद्यांश|काव्यांश|पद्यांश|निर्देश|अनुच्छेद|passage|comprehension)/i.test(rawQHi);
-        const isStandalone = !hasOpts && isPassageKw && rawQHi.length > 50;
+        const isPassageKw = /(?:गद्यांश|काव्यांश|पद्यांश|निर्देश|अनुच्छेद|passage|comprehension|SET\s*-\s*\d+|Directions|Read the following)/i.test(rawQHi);
+        const isStandalone = !hasOpts && isPassageKw && rawQHi.length > 40;
 
         if (isStandalone) {
-          const rangeMatch = rawQHi.match(/(?:प्र(?:\.|श्न)?|Q(?:uestion)?\.?)\s*(\d+)\s*(?:-|से|to)\s*(\d+)/i);
+          const rangeMatch = extractPassageRange(rawQHi);
           if (rangeMatch) {
-            activeUntilQNum = parseInt(rangeMatch[2], 10);
-            currentPassageRange = `Q.${rangeMatch[1]}-${rangeMatch[2]}`;
+            activeUntilQNum = rangeMatch.end;
+            currentPassageRange = rangeMatch.label;
           } else {
             activeUntilQNum = (parseInt(rawObj.question_r, 10) || (startIndex + idx)) + 5;
             currentPassageRange = 'Passage Set';
@@ -2119,6 +2275,28 @@ export function parseAiOutputToMockTestItems(
           currentPassageHi = rawQHi;
           currentPassageEn = rawQEn || rawQHi;
           continue;
+        }
+
+        // Check if this question stem has an embedded passage separated by '---'
+        const hiParts = rawQHi.split(/\n\s*---\s*\n|\n---\n|---/);
+        if (hiParts.length >= 2 && hiParts[0].trim().length > 40) {
+          const passageSnippet = hiParts[0].trim();
+          const isLikelyPassage = /(?:गद्यांश|काव्यांश|पद्यांश|निर्देश|अनुच्छेद|passage|comprehension|SET\s*-\s*\d+|Directions|Read the following)/i.test(passageSnippet) || passageSnippet.length > 80;
+
+          if (isLikelyPassage) {
+            currentPassageHi = passageSnippet;
+            const enParts = rawQEn.split(/\n\s*---\s*\n|\n---\n|---/);
+            currentPassageEn = enParts.length >= 2 ? enParts[0].trim() : (rawQEn.length > 80 ? rawQEn : currentPassageHi);
+
+            const rangeMatch = extractPassageRange(passageSnippet);
+            if (rangeMatch) {
+              activeUntilQNum = rangeMatch.end;
+              currentPassageRange = rangeMatch.label;
+            } else {
+              activeUntilQNum = (parseInt(rawObj.question_r, 10) || (startIndex + idx)) + 4;
+              currentPassageRange = 'Passage Set';
+            }
+          }
         }
 
         if (rawObj.passage_hi || rawObj.gadyansh || rawObj.passage) {
@@ -2157,7 +2335,7 @@ export function parseAiOutputToMockTestItems(
         });
       }
 
-      return normalizedList.map((obj, i) => {
+      return distributePassagesAcrossItems(normalizedList.map((obj, i) => {
         const qNum = parseInt(obj.question_r, 10) || (startIndex + i);
         let rawAns = String(obj.answer || obj.ans || obj.correct || obj.correct_option || 'A').trim();
         rawAns = rawAns.replace(/^(?:Answer|Ans|उत्तर)\s*[:\-]?\s*/i, '').trim().toUpperCase();
@@ -2322,7 +2500,7 @@ export function parseAiOutputToMockTestItems(
             passage_hi: obj.passage_hi || '',
             passage_en: obj.passage_en || ''
           });
-        });
+        }));
       } catch (e) {
         console.warn('JSON parse failed in parseAiOutputToMockTestItems, falling back to heuristic parsing:', e);
       }
@@ -2365,9 +2543,16 @@ RULES:
 2. LATEX FOR MATH & SCIENCE ONLY:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
-3. Both Hindi and English fields must be filled.
+3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
+   - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original English text.
+   - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original Hindi text.
+   - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
 4. Comprehensive Solutions: Provide an in-depth, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. Correct Answer: Single letter "A", "B", "C", or "D".
+6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
+   - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g., "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
+     YOU MUST PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION BELONGING TO THAT SET in both question_hi and question_en, separated by "\\n---\\n" (e.g., "[Full Passage Text]\\n---\\n[Question Text]").
+   - NEVER attach the passage only once or only with the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so students can read the passage with every question.
 
 Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:
 [
@@ -2413,9 +2598,14 @@ RULES:
 2. LATEX FOR MATH & SCIENCE ONLY:
    - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
    - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
-3. Both Hindi and English fields must be filled.
+3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
+   - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original English text.
+   - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original Hindi text.
+   - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
 4. Comprehensive Solutions: Provide an in-depth, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. Correct Answer: Single letter "A", "B", "C", or "D".
+6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
+   - If reference questions are based on a reading comprehension passage or गद्यांश, create a relevant passage and PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION belonging to that passage set in both question_hi and question_en, separated by "\\n---\\n".
 
 Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:
 [
@@ -2467,43 +2657,60 @@ export async function extractMockTestWithDirectApi(
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  // First try direct mocktest-extract
-  try {
-    const response = await fetch('/api/mocktest-extract', {
-      method: 'POST',
-      headers,
-      signal,
-      body: JSON.stringify({
-        base64Image,
-        rawText,
-        setName,
-        pendingContext: pendingContext || undefined,
-        pageNumber: pageNumber || undefined,
-        generateSimilar
-      })
-    });
+  // Try direct mocktest-extract with automatic retry (each attempt rotates to a fresh Gemini key)
+  let lastExtractError = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (signal?.aborted) {
+      throw new DOMException('Extraction stopped by user.', 'AbortError');
+    }
 
-    if (response.ok) {
-      const data = await response.json();
-      const rawText = data.rawJson || data.rawText || (data.items ? JSON.stringify(data.items) : '');
-      if (rawText) {
-        const parsed = parseAiOutputToMockTestItems(rawText, setName, startIndex);
-        if (parsed.length > 0) return parsed;
+    try {
+      const response = await fetch('/api/mocktest-extract', {
+        method: 'POST',
+        headers,
+        signal,
+        body: JSON.stringify({
+          base64Image,
+          rawText,
+          setName,
+          pendingContext: pendingContext || undefined,
+          pageNumber: pageNumber || undefined,
+          generateSimilar
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const rawText = data.rawJson || data.rawText || (data.items ? JSON.stringify(data.items) : '');
+        if (rawText) {
+          const parsed = parseAiOutputToMockTestItems(rawText, setName, startIndex);
+          if (parsed.length > 0) return parsed;
+        }
+        if (Array.isArray(data.items) && data.items.length > 0) {
+          return data.items.map((it: any, idx: number) => cleanMockTestItem({
+            ...it,
+            question_r: startIndex + idx
+          }));
+        }
+      } else {
+        const errJson = await response.json().catch(() => ({}));
+        lastExtractError = errJson.error || `HTTP ${response.status}`;
+        console.warn(`[Client] /api/mocktest-extract attempt ${attempt + 1} failed (${lastExtractError}). Rotating to next key...`);
+        if (attempt === 0 && !signal?.aborted) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          continue;
+        }
       }
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        return data.items.map((it: any, idx: number) => cleanMockTestItem({
-          ...it,
-          question_r: startIndex + idx
-        }));
+    } catch (e: any) {
+      if (e?.name === 'AbortError' || signal?.aborted) {
+        throw e;
       }
-    }
-  } catch (e: any) {
-    if (e?.name === 'AbortError' || signal?.aborted) {
-      throw e;
-    }
-    console.warn('/api/mocktest-extract error:', e);
-    if (generateSimilar) {
-      throw e;
+      lastExtractError = e?.message || String(e);
+      console.warn(`[Client] /api/mocktest-extract attempt ${attempt + 1} network error:`, e);
+      if (attempt === 0) {
+        await new Promise(resolve => setTimeout(resolve, 300));
+        continue;
+      }
     }
   }
 
@@ -2512,7 +2719,7 @@ export async function extractMockTestWithDirectApi(
   }
 
   if (generateSimilar) {
-    throw new Error('Failed to generate similar questions from reference page. Please check Gemini API connection.');
+    throw new Error(lastExtractError ? `Failed to generate similar MCQs: ${lastExtractError}` : 'Failed to generate similar questions from reference page. Please check Gemini API connection.');
   }
 
   // Fallback to /api/extract only for exact extraction mode
@@ -2533,7 +2740,7 @@ export async function extractMockTestWithDirectApi(
 
   if (!extractRes.ok) {
     const err = await extractRes.json().catch(() => ({}));
-    throw new Error(err.error || 'Direct API extraction failed. Please check your Gemini API key in Settings.');
+    throw new Error(err.error || lastExtractError || 'Direct API extraction failed. Please check your Gemini API key in Settings.');
   }
 
   const data = await extractRes.json();

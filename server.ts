@@ -14,6 +14,10 @@ async function startServer() {
   // API routes FIRST
   app.use(apiApp);
 
+  // Static uploads serving for cropped figures
+  const uploadsPath = path.join(process.cwd(), 'uploads');
+  app.use('/uploads', express.static(uploadsPath));
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");

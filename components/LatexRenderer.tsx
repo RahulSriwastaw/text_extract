@@ -96,6 +96,9 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
     .replace(/<\/p>\s*<p>/gi, '\n\n')
     .replace(/<\/?p[^>]*>/gi, '\n\n');
 
+  // Convert HTML img tags to Markdown images
+  clean = clean.replace(/<img\s+[^>]*src=["']([^"']+)["'][^>]*>/gi, '\n\n![figure]($1)\n\n');
+
   const lines = clean.split('\n');
   const normalizedLines: string[] = [];
   let inTable = false;
@@ -154,6 +157,15 @@ export const LatexRenderer: React.FC<{ content: string; className?: string; inli
       <td className="py-2 px-3 border-r border-white/[0.06] last:border-r-0 font-medium text-slate-200 leading-relaxed">
         {children}
       </td>
+    ),
+    img: ({ src, alt, ...props }: any) => (
+      <img
+        src={src}
+        alt={alt || 'Figure'}
+        className="max-h-44 max-w-full rounded-lg border border-white/20 my-1 inline-block shadow bg-white p-1"
+        loading="lazy"
+        {...props}
+      />
     )
   };
 

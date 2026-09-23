@@ -25,6 +25,7 @@ import {
   repairMockTestItemWithAi,
   detectMissingQuestionNumbers
 } from '../services/mocktestService';
+import { hasFigureImage, extractFigureUrls } from '../services/figureStorageService';
 import { downloadMcqAsDocx } from '../services/mcqDocxService';
 
 interface MocktestStudioModalProps {
@@ -879,8 +880,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               const label = String.fromCharCode(65 + optIdx);
                               const optNum = String(optIdx + 1);
                               const isCorrect = item.answer === label || item.answer === optNum || item.answer?.includes(label) || item.answer?.includes(optNum);
+                              const optUrls = extractFigureUrls(item[key]);
+                              const hasImg = optUrls.length > 0 || hasFigureImage(item[key]);
                               const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
-                              const isBlank = !valClean || valClean.toLowerCase() === 'blank';
+                              const isBlank = !hasImg && (!valClean || valClean.toLowerCase() === 'blank');
 
                               if (isCardEditing(item.id)) {
                                 return (
@@ -932,7 +935,18 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                   </span>
                                   <div className="flex-1 min-w-0">
                                     {!isBlank ? (
-                                      <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                      hasImg ? (
+                                        <div className="flex flex-col gap-1">
+                                          {valClean && <LatexRenderer content={valClean} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />}
+                                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                            {optUrls.map((u, i) => (
+                                              <img key={i} src={u} alt={`Option ${label}`} className="max-h-16 max-w-[120px] object-contain rounded bg-white p-0.5" />
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                      )
                                     ) : (
                                       <span className="text-amber-400/90 italic text-[11px]">Blank Option (Click Auto-Fill)</span>
                                     )}
@@ -1013,8 +1027,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               const label = String.fromCharCode(65 + optIdx);
                               const optNum = String(optIdx + 1);
                               const isCorrect = item.answer === label || item.answer === optNum || item.answer?.includes(label) || item.answer?.includes(optNum);
+                              const optUrls = extractFigureUrls(item[key]);
+                              const hasImg = optUrls.length > 0 || hasFigureImage(item[key]);
                               const valClean = (item[key] || '').replace(/<[^>]*>/g, '').trim();
-                              const isBlank = !valClean || valClean.toLowerCase() === 'blank';
+                              const isBlank = !hasImg && (!valClean || valClean.toLowerCase() === 'blank');
 
                               if (isCardEditing(item.id)) {
                                 return (
@@ -1066,7 +1082,18 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                   </span>
                                   <div className="flex-1 min-w-0">
                                     {!isBlank ? (
-                                      <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                      hasImg ? (
+                                        <div className="flex flex-col gap-1">
+                                          {valClean && <LatexRenderer content={valClean} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />}
+                                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                            {optUrls.map((u, i) => (
+                                              <img key={i} src={u} alt={`Option ${label}`} className="max-h-16 max-w-[120px] object-contain rounded bg-white p-0.5" />
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <LatexRenderer content={item[key]} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                      )
                                     ) : (
                                       <span className="text-amber-400/90 italic text-[11px]">Blank Option (Click Auto-Fill)</span>
                                     )}

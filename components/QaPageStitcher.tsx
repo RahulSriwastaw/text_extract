@@ -6,7 +6,7 @@ import {
   Layers, Plus, CheckCircle2, Split, ZoomIn, ZoomOut,
   Maximize2, RotateCw, CheckSquare, Square, Copy, RefreshCcw,
   GripVertical, ChevronUp, ChevronDown, Search, ArrowLeft, ArrowRight, X,
-  ChevronsLeft, ChevronsRight
+  ChevronsLeft, ChevronsRight, Grid, Columns
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { convertPdfToImages } from '../services/pdfUtils';
@@ -19,6 +19,8 @@ import {
   cropImageByPercentage,
   ensureCardItems
 } from '../services/pdfStitchService';
+import { PdfLayoutModal } from './PdfLayoutModal';
+import { exportCardsWithPdfLayout, PdfLayoutConfig } from '../services/pdfLayoutService';
 
 interface QaPageStitcherProps {
   onSendToMcqExtractor?: (images: string[]) => void;
@@ -54,6 +56,14 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   const [addModalPage, setAddModalPage] = useState<number>(1);
   const ADD_MODAL_PAGE_SIZE = 24;
 
+  // Dual-Card Comparison & Inspection Mode State
+  const [viewMode, setViewMode] = useState<'grid' | 'dual'>('grid');
+  const [dualLeftIndex, setDualLeftIndex] = useState<number>(0);
+  const [dualRightIndex, setDualRightIndex] = useState<number>(1);
+  const [dualZoomScale, setDualZoomScale] = useState<number>(1.0);
+  const [expandedImageModal, setExpandedImageModal] = useState<{ src: string; title: string; pageNum: number } | null>(null);
+  const [lightboxZoom, setLightboxZoom] = useState<number>(1.0);
+
   // Card Reorder Drag State
   const [reorderDragCardId, setReorderDragCardId] = useState<string | null>(null);
   const [reorderDropTargetId, setReorderDropTargetId] = useState<string | null>(null);
@@ -82,6 +92,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
   // Batch Range Modal
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [showLayoutModal, setShowLayoutModal] = useState(false);
   const [batchQStart, setBatchQStart] = useState<number>(1);
   const [batchQEnd, setBatchQEnd] = useState<number>(10);
   const [batchSolStart, setBatchSolStart] = useState<number>(11);
@@ -504,6 +515,43 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       return;
     }
 
+    // Transfer item drop between cards
+    const itemData = e.dataTransfer.getData('text/item-transfer');
+    if (itemData) {
+      setDragOverTargetId(null);
+      setDraggedCardId(null);
+      try {
+        const payload = JSON.parse(itemData);
+        if (payload.type === 'item' && payload.cardId !== targetCardId) {
+          const sourceCard = cards.find(c => c.id === payload.cardId);
+          const targetCard = cards.find(c => c.id === targetCardId);
+          if (sourceCard && targetCard) {
+            const sourceItems = ensureCardItems(sourceCard);
+            const movingItem = sourceItems[payload.itemIndex];
+            if (movingItem) {
+              const remaining = sourceItems.filter((_, idx) => idx !== payload.itemIndex);
+              const nextTargetItems = [...ensureCardItems(targetCard), movingItem];
+              setCards(prev => {
+                if (remaining.length === 0) {
+                  return prev.filter(c => c.id !== sourceCard.id).map(c => {
+                    if (c.id === targetCard.id) return syncCardFromItems(c, nextTargetItems);
+                    return c;
+                  });
+                } else {
+                  return prev.map(c => {
+                    if (c.id === sourceCard.id) return syncCardFromItems(c, remaining);
+                    if (c.id === targetCard.id) return syncCardFromItems(c, nextTargetItems);
+                    return c;
+                  });
+                }
+              });
+            }
+          }
+          return;
+        }
+      } catch (err) {}
+    }
+
     // Merge drop
     const sourceId = e.dataTransfer.getData('text/plain') || draggedCardId;
     setDragOverTargetId(null);
@@ -696,9 +744,652 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   };
 
   // -------------------------------------------------------------
+  // Dynamic N-Page Sheet Grouping (2, 3, 4, 6, 8, etc. per card)
+  // -------------------------------------------------------------
+  const handleBatchGroupByN = (n: number) => {
+    if (cards.length === 0) return;
+    const allItems = cards.flatMap(c => ensureCardItems(c));
+    if (allItems.length === 0) return;
+
+    const countPerCard = Math.max(1, n);
+    const newCards: PageCard[] = [];
+
+    for (let i = 0; i < allItems.length; i += countPerCard) {
+      const chunk = allItems.slice(i, i + countPerCard);
+      const firstItem = chunk[0];
+      const newCard: PageCard = {
+        id: `card-group-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
+        originalPageNum: firstItem.pageNum,
+        questionImage: firstItem.image,
+        croppedQuestionImage: firstItem.croppedImage,
+        isMerged: chunk.length > 1,
+        isSelected: true,
+        showDivider: showDividerLine,
+        items: chunk.map((it, idx) => ({
+          ...it,
+          label: chunk.length === 1 ? `Page ${it.pageNum}` : `Part ${idx + 1} (P.${it.pageNum})`
+        }))
+      };
+      newCards.push(syncCardFromItems(newCard, newCard.items || []));
+    }
+
+    setCards(newCards);
+    setCurrentPage(1);
+    setPageSize(newCards.length > 30 ? 24 : newCards.length);
+  };
+
+  // -------------------------------------------------------------
+  // Inter-Card Item Transfer (Shift item between adjacent cards)
+  // -------------------------------------------------------------
+  const handleMoveItemToAdjacentCard = (cardId: string, itemIndex: number, direction: 'prev' | 'next') => {
+    const currentIdx = cards.findIndex(c => c.id === cardId);
+    if (currentIdx === -1) return;
+    const targetIdx = direction === 'prev' ? currentIdx - 1 : currentIdx + 1;
+    if (targetIdx < 0 || targetIdx >= cards.length) return;
+
+    const sourceCard = cards[currentIdx];
+    const targetCard = cards[targetIdx];
+    const sourceItems = ensureCardItems(sourceCard);
+    if (itemIndex < 0 || itemIndex >= sourceItems.length) return;
+
+    const movingItem = sourceItems[itemIndex];
+    const remainingSourceItems = sourceItems.filter((_, idx) => idx !== itemIndex);
+    const targetItems = [...ensureCardItems(targetCard), movingItem];
+
+    setCards(prev => {
+      if (remainingSourceItems.length === 0) {
+        return prev.filter(c => c.id !== sourceCard.id).map(c => {
+          if (c.id === targetCard.id) {
+            return syncCardFromItems(c, targetItems);
+          }
+          return c;
+        });
+      } else {
+        return prev.map(c => {
+          if (c.id === sourceCard.id) {
+            return syncCardFromItems(c, remainingSourceItems);
+          }
+          if (c.id === targetCard.id) {
+            return syncCardFromItems(c, targetItems);
+          }
+          return c;
+        });
+      }
+    });
+  };
+
+  // -------------------------------------------------------------
+  // Dual-Card Split Comparison & Inspection Workspace Logic
+  // -------------------------------------------------------------
+  const handleDualNavigate = (side: 'left' | 'right', direction: 'prev' | 'next') => {
+    if (cards.length === 0) return;
+    if (side === 'left') {
+      setDualLeftIndex(prev => {
+        const next = direction === 'prev' ? prev - 1 : prev + 1;
+        return Math.max(0, Math.min(cards.length - 1, next));
+      });
+    } else {
+      setDualRightIndex(prev => {
+        const next = direction === 'prev' ? prev - 1 : prev + 1;
+        return Math.max(0, Math.min(cards.length - 1, next));
+      });
+    }
+  };
+
+  const handleDualStepBoth = (direction: 'prev' | 'next') => {
+    if (cards.length === 0) return;
+    const delta = direction === 'prev' ? -1 : 1;
+    setDualLeftIndex(prev => Math.max(0, Math.min(cards.length - 1, prev + delta)));
+    setDualRightIndex(prev => Math.max(0, Math.min(cards.length - 1, prev + delta)));
+  };
+
+  const handleTransferBetweenDualCards = (sourceSide: 'left' | 'right', itemIndex: number) => {
+    if (cards.length < 2) return;
+    const safeLeft = Math.min(Math.max(0, dualLeftIndex), cards.length - 1);
+    const safeRight = Math.min(Math.max(0, dualRightIndex), cards.length - 1);
+
+    if (safeLeft === safeRight) {
+      alert('Both panels are currently showing the same card. Please pick two different cards using the dropdown to transfer pages between them.');
+      return;
+    }
+
+    const sourceCard = sourceSide === 'left' ? cards[safeLeft] : cards[safeRight];
+    const targetCard = sourceSide === 'left' ? cards[safeRight] : cards[safeLeft];
+    if (!sourceCard || !targetCard) return;
+
+    const sourceItems = ensureCardItems(sourceCard);
+    if (itemIndex < 0 || itemIndex >= sourceItems.length) return;
+
+    const movingItem = sourceItems[itemIndex];
+    const remainingSourceItems = sourceItems.filter((_, idx) => idx !== itemIndex);
+    const targetItems = [...ensureCardItems(targetCard), movingItem];
+
+    setCards(prev => {
+      if (remainingSourceItems.length === 0) {
+        return prev.filter(c => c.id !== sourceCard.id).map(c => {
+          if (c.id === targetCard.id) {
+            return syncCardFromItems(c, targetItems);
+          }
+          return c;
+        });
+      } else {
+        return prev.map(c => {
+          if (c.id === sourceCard.id) {
+            return syncCardFromItems(c, remainingSourceItems);
+          }
+          if (c.id === targetCard.id) {
+            return syncCardFromItems(c, targetItems);
+          }
+          return c;
+        });
+      }
+    });
+  };
+
+  const renderDualCardPanel = (side: 'left' | 'right', card: PageCard | undefined, activeIdx: number) => {
+    const isLeft = side === 'left';
+    if (!card) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 rounded-3xl border border-white/10 bg-[#121622] text-center">
+          <p className="text-sm font-bold text-slate-400">No card available for {isLeft ? 'Left' : 'Right'} Panel</p>
+        </div>
+      );
+    }
+
+    const items = ensureCardItems(card);
+    const isMulti = items.length > 1;
+
+    return (
+      <div
+        id={`dual-card-${card.id}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => handleCardDrop(e, card.id)}
+        className={`flex flex-col rounded-3xl border transition-all duration-150 overflow-hidden shadow-2xl ${
+          card.isSelected === false ? 'opacity-50 grayscale-[0.3]' : 'opacity-100'
+        } ${
+          isLeft
+            ? 'border-amber-500/40 bg-[#11141F] ring-1 ring-amber-500/20'
+            : 'border-blue-500/40 bg-[#11141F] ring-1 ring-blue-500/20'
+        }`}
+      >
+        {/* PANEL HEADER */}
+        <div className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2.5 ${
+          isLeft ? 'bg-amber-500/10 border-amber-500/20' : 'bg-blue-500/10 border-blue-500/20'
+        }`}>
+          {/* Side Badge & Navigation */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className={`px-2.5 py-1 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm ${
+              isLeft ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+            }`}>
+              <span>{isLeft ? 'CARD A (Questions)' : 'CARD B (Solutions)'}</span>
+              <span className="text-white font-mono bg-black/40 px-1.5 py-0.5 rounded">#{activeIdx + 1}</span>
+            </div>
+
+            {/* Steppers */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handleDualNavigate(side, 'prev')}
+                disabled={activeIdx <= 0}
+                className="p-1.5 rounded-lg bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white disabled:opacity-20 transition-all border border-white/10"
+                title={`Previous Card (#${activeIdx})`}
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Jump Dropdown */}
+              <select
+                value={activeIdx}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  if (isLeft) setDualLeftIndex(val);
+                  else setDualRightIndex(val);
+                }}
+                className="bg-black/60 border border-white/15 text-white text-xs font-bold rounded-lg px-2 py-1 outline-none max-w-[170px] sm:max-w-[210px] cursor-pointer"
+                title="Jump this panel to any card"
+              >
+                {cards.map((c, i) => {
+                  const cItems = ensureCardItems(c);
+                  return (
+                    <option key={c.id} value={i} className="bg-zinc-900 text-white">
+                      Card #{i + 1} • {cItems.length}P ({cItems.map(p => `P.${p.pageNum}`).join(',')})
+                    </option>
+                  );
+                })}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => handleDualNavigate(side, 'next')}
+                disabled={activeIdx >= cards.length - 1}
+                className="p-1.5 rounded-lg bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white disabled:opacity-20 transition-all border border-white/10"
+                title={`Next Card (#${activeIdx + 2})`}
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Card Meta & Actions */}
+          <div className="flex items-center gap-1.5">
+            {/* Selection Checkbox */}
+            <button
+              type="button"
+              onClick={() => toggleSelectCard(card.id)}
+              className="p-1.5 rounded-lg bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition-all flex items-center gap-1"
+              title={card.isSelected !== false ? "Included in PDF export" : "Excluded from PDF export"}
+            >
+              {card.isSelected !== false ? <CheckSquare className="w-3.5 h-3.5 text-emerald-400" /> : <Square className="w-3.5 h-3.5 text-slate-500" />}
+              <span className="text-[11px] font-bold hidden sm:inline">{card.isSelected !== false ? "Selected" : "Omitted"}</span>
+            </button>
+
+            {/* Page Count Badge */}
+            <span className="px-2 py-1 rounded-lg bg-black/40 border border-white/10 text-[11px] font-mono font-bold text-slate-300">
+              {items.length} {items.length === 1 ? 'Page' : 'Pages'}
+            </span>
+
+            {/* Add Page Modal Trigger */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveAddModalCardId(card.id);
+                setSearchModalPageQuery('');
+              }}
+              className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1 transition-all"
+              title="Search & attach another page from PDF to this card"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Page</span>
+            </button>
+
+            {/* Unmerge if multi */}
+            {isMulti && (
+              <button
+                type="button"
+                onClick={() => handleUnmerge(card.id)}
+                className="px-2 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 text-[11px] font-bold transition-all border border-white/10"
+                title="Split all pages of this card into separate cards"
+              >
+                Unmerge
+              </button>
+            )}
+
+            {/* Duplicate */}
+            <button
+              type="button"
+              onClick={() => handleDuplicate(card.id)}
+              className="p-1.5 rounded-lg bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition-all"
+              title="Duplicate card"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Delete */}
+            <button
+              type="button"
+              onClick={() => handleDelete(card.id)}
+              className="p-1.5 rounded-lg bg-black/40 hover:bg-rose-500/30 text-slate-400 hover:text-rose-300 border border-white/10 transition-all"
+              title="Delete card"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* PANEL BODY: SUB-PAGES / SNIPPETS */}
+        <div className={`p-4 flex-1 ${items.length >= 3 ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : items.length === 2 ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'flex flex-col gap-4'} bg-black/20 overflow-y-auto max-h-[calc(100vh-16rem)]`}>
+          {items.map((item, itemIdx) => {
+            const isCropped = Boolean(item.croppedImage);
+            const displayImg = item.croppedImage || item.image;
+
+            return (
+              <div
+                key={item.id || `${card.id}-${itemIdx}`}
+                draggable
+                onDragStart={(e) => {
+                  e.stopPropagation();
+                  e.dataTransfer.setData('text/item-transfer', JSON.stringify({ type: 'item', cardId: card.id, itemIndex: itemIdx }));
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+                className="flex flex-col rounded-2xl border border-white/10 bg-white/[0.02] hover:bg-white/[0.04] p-2.5 transition-all group shadow-md"
+              >
+                {/* Item Top Toolbar */}
+                <div className="flex items-center justify-between pb-2 px-1 text-xs gap-2 flex-wrap border-b border-white/[0.06] mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold text-[11px] border border-amber-500/30">
+                      #{itemIdx + 1}
+                    </span>
+                    <span className="font-bold text-white text-xs">
+                      Page {item.pageNum}
+                    </span>
+                    {isCropped && (
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/20 px-1.5 py-0.2 rounded border border-emerald-500/30">
+                        Cropped
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Transfer & Action Controls */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {/* One-Click Transfer Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleTransferBetweenDualCards(side, itemIdx)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 shadow-md transition-all active:scale-95 ${
+                        isLeft
+                          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-500/20'
+                          : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white shadow-orange-500/20'
+                      }`}
+                      title={isLeft ? 'Move this page into Right Card' : 'Move this page into Left Card'}
+                    >
+                      {isLeft ? (
+                        <>
+                          <span>Send to Right</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </>
+                      ) : (
+                        <>
+                          <ArrowLeft className="w-3.5 h-3.5" />
+                          <span>Send to Left</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Expand Lightbox Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLightboxZoom(1.0);
+                        setExpandedImageModal({
+                          src: displayImg,
+                          title: `Card #${activeIdx + 1} • Page ${item.pageNum} (Snippet #${itemIdx + 1})`,
+                          pageNum: item.pageNum
+                        });
+                      }}
+                      className="px-2 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-xs font-bold flex items-center gap-1 transition-all"
+                      title="Inspect in High-Resolution Lightbox"
+                    >
+                      <Maximize2 className="w-3 h-3 text-cyan-300" />
+                      <span>Expand</span>
+                    </button>
+
+                    {/* Crop Button */}
+                    <button
+                      type="button"
+                      onClick={() => setCropTarget({
+                        cardId: card.id,
+                        itemIndex: itemIdx,
+                        type: itemIdx === 0 ? 'question' : 'solution'
+                      })}
+                      className="px-2 py-1 rounded-lg bg-white/[0.08] hover:bg-[#FF6B2B] text-white text-xs font-bold flex items-center gap-1 transition-all border border-white/10"
+                      title="Adjust crop box"
+                    >
+                      <Scissors className="w-3 h-3 text-amber-400" />
+                      <span>{isCropped ? 'Re-Crop' : 'Crop'}</span>
+                    </button>
+
+                    {isCropped && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetCropOnCard(card.id, itemIdx)}
+                        className="p-1 rounded-lg bg-white/[0.06] hover:bg-rose-500/30 text-rose-300 text-xs transition-all"
+                        title="Reset Crop to Full Page"
+                      >
+                        <RotateCw className="w-3 h-3" />
+                      </button>
+                    )}
+
+                    {/* Reorder inside card */}
+                    {items.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveItemInsideCard(card.id, itemIdx, 'up')}
+                          disabled={itemIdx === 0}
+                          className="p-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 disabled:opacity-20 transition-all"
+                          title="Move snippet up"
+                        >
+                          <ChevronUp className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleMoveItemInsideCard(card.id, itemIdx, 'down')}
+                          disabled={itemIdx === items.length - 1}
+                          className="p-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 disabled:opacity-20 transition-all"
+                          title="Move snippet down"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveItemFromCard(card.id, itemIdx)}
+                          className="p-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs transition-all ml-1"
+                          title="Detach this page to a new separate card"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Big Preview Image */}
+                <div 
+                  onClick={() => {
+                    setLightboxZoom(1.0);
+                    setExpandedImageModal({
+                      src: displayImg,
+                      title: `Card #${activeIdx + 1} • Page ${item.pageNum} (Snippet #${itemIdx + 1})`,
+                      pageNum: item.pageNum
+                    });
+                  }}
+                  className="relative group/thumb rounded-xl border border-white/10 overflow-hidden bg-white p-1 flex items-center justify-center cursor-zoom-in min-h-[160px] max-h-[380px] shadow-inner"
+                  title="Click to view fullscreen expanded page"
+                >
+                  <img
+                    src={displayImg}
+                    alt={`Page ${item.pageNum}`}
+                    loading="lazy"
+                    decoding="async"
+                    className="w-full h-auto max-h-[360px] object-contain block mx-auto transition-transform group-hover/thumb:scale-[1.01]"
+                    style={{
+                      transform: item.scale && item.scale !== 1 ? `scale(${item.scale})` : undefined,
+                      transformOrigin: 'center center'
+                    }}
+                  />
+                  
+                  {/* Hover hint */}
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                    <span className="px-3 py-1.5 rounded-xl bg-black/80 text-white text-xs font-bold flex items-center gap-1.5 shadow-xl border border-white/20">
+                      <Maximize2 className="w-3.5 h-3.5 text-cyan-300" />
+                      Click to Expand / Zoom
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDualCompareWorkspace = () => {
+    const safeLeft = Math.min(Math.max(0, dualLeftIndex), cards.length - 1);
+    const safeRight = Math.min(Math.max(0, dualRightIndex), cards.length - 1);
+    const leftCard = cards[safeLeft];
+    const rightCard = cards[safeRight];
+
+    return (
+      <div className="flex flex-col gap-5 w-full">
+        {/* Dual Control Navigation Bar */}
+        <div className="bg-[#121624] border border-white/[0.1] rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="p-2 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md">
+                <Columns className="w-4 h-4" />
+              </span>
+              <div>
+                <h2 className="text-sm font-extrabold text-white">Dual-Card Split Comparison Workspace</h2>
+                <p className="text-[11px] text-slate-400">
+                  Compare two cards side-by-side, zoom out/in, expand pages, and move snippets between cards.
+                </p>
+              </div>
+            </div>
+
+            {/* Linked Stepper Controls */}
+            <div className="flex items-center gap-1.5 pl-2 sm:border-l sm:border-white/10">
+              <button
+                type="button"
+                onClick={() => handleDualStepBoth('prev')}
+                disabled={safeLeft === 0 && safeRight === 0}
+                className="px-2.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs font-bold flex items-center gap-1 transition-all disabled:opacity-30"
+                title="Step both cards backward"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Prev Pair</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDualStepBoth('next')}
+                disabled={safeLeft >= cards.length - 1 && safeRight >= cards.length - 1}
+                className="px-2.5 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 text-xs font-bold flex items-center gap-1 transition-all disabled:opacity-30"
+                title="Step both cards forward"
+              >
+                <span>Next Pair</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setDualLeftIndex(safeRight);
+                  setDualRightIndex(safeLeft);
+                }}
+                className="p-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white transition-all ml-1"
+                title="Swap Left and Right cards"
+              >
+                <ArrowLeftRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Zoom Slider Controls & Return */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10">
+              <span className="text-[11px] font-bold text-slate-400">Card Zoom:</span>
+              <button
+                type="button"
+                onClick={() => setDualZoomScale(s => Math.max(0.7, Number((s - 0.1).toFixed(1))))}
+                className="p-0.5 rounded hover:bg-white/10 text-slate-300"
+                title="Zoom Out Cards"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+              <input
+                type="range"
+                min="0.7"
+                max="1.6"
+                step="0.05"
+                value={dualZoomScale}
+                onChange={(e) => setDualZoomScale(parseFloat(e.target.value))}
+                className="w-24 accent-[#FF6B2B] cursor-pointer"
+              />
+              <button
+                type="button"
+                onClick={() => setDualZoomScale(s => Math.min(1.6, Number((s + 0.1).toFixed(1))))}
+                className="p-0.5 rounded hover:bg-white/10 text-slate-300"
+                title="Zoom In Cards"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-[11px] font-mono font-bold text-white w-9 text-right">
+                {Math.round(dualZoomScale * 100)}%
+              </span>
+              {dualZoomScale !== 1.0 && (
+                <button
+                  type="button"
+                  onClick={() => setDualZoomScale(1.0)}
+                  className="text-[10px] font-bold text-[#FF6B2B] hover:underline ml-1"
+                >
+                  100%
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              className="px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all"
+            >
+              <Grid className="w-3.5 h-3.5" />
+              <span>Back to Grid</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 2-Column Split Workspace */}
+        <div 
+          className="w-full transition-transform origin-top"
+          style={{ transform: dualZoomScale !== 1.0 ? `scale(${dualZoomScale})` : undefined }}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {renderDualCardPanel('left', leftCard, safeLeft)}
+            {renderDualCardPanel('right', rightCard, safeRight)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // -------------------------------------------------------------
   // Exports & AI Transfers (Filtered by isSelected)
   // -------------------------------------------------------------
-  const handleDownloadPdf = async () => {
+  const handleDownloadPdf = () => {
+    const selectedCards = cards.filter(c => c.isSelected !== false);
+    if (selectedCards.length === 0) {
+      alert('Please select at least one page to download.');
+      return;
+    }
+    setShowLayoutModal(true);
+  };
+
+  const handleExportWithLayout = async (config: PdfLayoutConfig) => {
+    const selectedCards = cards.filter(c => c.isSelected !== false);
+    if (selectedCards.length === 0) {
+      alert('Please select at least one page to download.');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const cardsToExport = selectedCards.map(c => ({ ...c, showDivider: showDividerLine }));
+      const blob = await exportCardsWithPdfLayout(cardsToExport, config, (current, total) => {
+        setExportProgress({ current, total });
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cleanOutName = (config.outputFileName || 'converted').trim();
+      const finalName = cleanOutName.toLowerCase().endsWith('.pdf') ? cleanOutName : `${cleanOutName}.pdf`;
+      a.download = finalName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setShowLayoutModal(false);
+    } catch (err: any) {
+      alert('Failed to generate PDF: ' + (err?.message || err));
+    } finally {
+      setIsExporting(false);
+      setExportProgress(null);
+    }
+  };
+
+  const handleQuickDownload = async () => {
     const selectedCards = cards.filter(c => c.isSelected !== false);
     if (selectedCards.length === 0) {
       alert('Please select at least one page to download.');
@@ -713,13 +1404,15 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Merged_QA_${Date.now()}.pdf`;
+      const baseName = (fileName || 'document').replace(/\.pdf$/i, '').trim();
+      a.download = `${baseName} - converted.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      setShowLayoutModal(false);
     } catch (err: any) {
-      alert('Failed to generate PDF: ' + err.message);
+      alert('Failed to generate PDF: ' + (err?.message || err));
     } finally {
       setIsExporting(false);
       setExportProgress(null);
@@ -964,12 +1657,23 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     );
   };
 
-  // Keyboard arrow keys for crop navigation
+  // Keyboard arrow keys for crop navigation & lightbox
   useEffect(() => {
-    if (!cropTarget) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+
+      if (e.key === 'Escape') {
+        if (expandedImageModal) {
+          setExpandedImageModal(null);
+          return;
+        }
+        if (cropTarget) {
+          setCropTarget(null);
+          return;
+        }
+      }
+
+      if (!cropTarget) return;
 
       if (e.key === 'ArrowLeft' && hasPrevPage) {
         e.preventDefault();
@@ -977,14 +1681,12 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       } else if (e.key === 'ArrowRight' && hasNextPage) {
         e.preventDefault();
         handleNavigateCrop('next');
-      } else if (e.key === 'Escape') {
-        setCropTarget(null);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cropTarget, currentTargetIndex, flatTargets, hasPrevPage, hasNextPage, activeCropBox, activeScale]);
+  }, [cropTarget, currentTargetIndex, flatTargets, hasPrevPage, hasNextPage, activeCropBox, activeScale, expandedImageModal]);
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-[#0B0D13] text-slate-100 flex flex-col select-none">
@@ -1100,6 +1802,65 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 <span>⚡ Batch Range</span>
               </button>
+
+              {/* Group Pages per Sheet dropdown */}
+              <div className="flex items-center gap-1.5 bg-blue-500/10 border border-blue-400/30 rounded-xl px-2.5 py-1 text-xs shadow-sm">
+                <Grid className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <span className="text-[11px] font-bold text-slate-300">Group:</span>
+                <select
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    if (val >= 1) handleBatchGroupByN(val);
+                    e.target.value = "";
+                  }}
+                  defaultValue=""
+                  className="bg-transparent text-xs font-extrabold text-blue-300 outline-none cursor-pointer"
+                  title="Automatically partition all pages into sheets with N pages per card"
+                >
+                  <option value="" disabled className="bg-zinc-900 text-slate-400">Pages/Sheet...</option>
+                  <option value={1} className="bg-zinc-900 text-white">1 / Sheet (Ungroup All)</option>
+                  <option value={2} className="bg-zinc-900 text-white">2 / Sheet (Pair)</option>
+                  <option value={3} className="bg-zinc-900 text-white">3 / Sheet</option>
+                  <option value={4} className="bg-zinc-900 text-white">4 / Sheet (2×2)</option>
+                  <option value={6} className="bg-zinc-900 text-white">6 / Sheet (3×2)</option>
+                  <option value={8} className="bg-zinc-900 text-white">8 / Sheet (4×2)</option>
+                </select>
+              </div>
+
+              {/* View Mode Toggle: Grid vs Dual Compare */}
+              <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/[0.12] shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('grid')}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    viewMode === 'grid'
+                      ? 'bg-[#FF6B2B] text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Grid View (All Cards Overview)"
+                >
+                  <Grid className="w-3.5 h-3.5" />
+                  <span>Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('dual');
+                    if (dualLeftIndex === dualRightIndex && cards.length > 1) {
+                      setDualRightIndex(1);
+                    }
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    viewMode === 'dual'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Dual Compare Mode (Compare 2 cards side-by-side with zoom out & expansion)"
+                >
+                  <Columns className="w-3.5 h-3.5" />
+                  <span>2-Card Compare</span>
+                </button>
+              </div>
             </>
           )}
 
@@ -1115,20 +1876,32 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
             />
           </label>
 
-          {/* Download PDF */}
-          <button
-            type="button"
-            onClick={handleDownloadPdf}
-            disabled={selectedCount === 0 || isExporting}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-blue-600/20 disabled:opacity-40"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>
-              {isExporting && exportProgress 
-                ? `Compiling PDF (${exportProgress.current}/${exportProgress.total})...` 
-                : `Download PDF (${selectedCount})`}
-            </span>
-          </button>
+          {/* Download PDF & Layout Config */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={selectedCount === 0 || isExporting}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-blue-600/20 disabled:opacity-40"
+              title="Configure PDF layout (1-Up, 2-Up, 4-Up, margins, borders, paper size) and download"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>
+                {isExporting && exportProgress 
+                  ? `Compiling PDF (${exportProgress.current}/${exportProgress.total})...` 
+                  : `Download PDF (${selectedCount})`}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLayoutModal(true)}
+              disabled={selectedCount === 0 || isExporting}
+              className="p-1.5 bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 text-blue-300 rounded-xl transition-all disabled:opacity-40"
+              title="PDF Page Layout Settings (N-Up, Margins, Borders)"
+            >
+              <Grid className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           {/* Send to MCQ Extractor */}
           <button
@@ -1230,12 +2003,15 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
         </div>
       )}
 
-      {/* 2. MAIN PAGE CARDS GRID */}
+      {/* 2. MAIN PAGE CARDS GRID / DUAL VIEW */}
       <main className="flex-1 p-6 max-w-[1600px] mx-auto w-full">
         {cards.length > 0 ? (
-          <div className="flex flex-col">
-            {/* Top Pagination Bar */}
-            {renderPaginationBar('top')}
+          viewMode === 'dual' ? (
+            renderDualCompareWorkspace()
+          ) : (
+            <div className="flex flex-col">
+              {/* Top Pagination Bar */}
+              {renderPaginationBar('top')}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-6">
               {paginatedCards.map((card) => {
@@ -1430,22 +2206,58 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                     </div>
                   </div>
 
-                  {/* CARD BODY: MULTI-SNIPPET STACK (Supports 1, 2, 3, 4, 5+ Pages) */}
-                  <div className="p-2.5 flex-1 flex flex-col gap-2 bg-white/[0.01]">
+                  {/* CARD BODY: MULTI-SNIPPET STACK OR GRID (Supports 1, 2, 3, 4, 5+ Pages) */}
+                  <div className={`p-2.5 flex-1 ${items.length >= 3 ? 'grid grid-cols-2 gap-2' : 'flex flex-col gap-2'} bg-white/[0.01]`}>
                     {items.map((item, itemIdx) => {
                       const isCropped = Boolean(item.croppedImage);
                       const displayImg = item.croppedImage || item.image;
 
                       return (
-                        <div key={item.id || `${card.id}-${itemIdx}`} className="flex flex-col">
+                        <div
+                          key={item.id || `${card.id}-${itemIdx}`}
+                          draggable
+                          onDragStart={(e) => {
+                            e.stopPropagation();
+                            e.dataTransfer.setData('text/item-transfer', JSON.stringify({ type: 'item', cardId: card.id, itemIndex: itemIdx }));
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          className={`flex flex-col rounded-xl border p-1.5 transition-all ${
+                            items.length >= 3
+                              ? 'bg-white/[0.03] border-white/10 hover:border-blue-400/40 hover:bg-white/[0.05]'
+                              : 'border-transparent'
+                          }`}
+                        >
                           {/* Mini header for item in card */}
-                          <div className="flex items-center justify-between pb-1 px-1 text-[10px] text-slate-400 font-semibold">
-                            <span className="flex items-center gap-1 font-bold text-slate-300">
+                          <div className="flex items-center justify-between pb-1 px-0.5 text-[10px] text-slate-400 font-semibold gap-1">
+                            <span className="flex items-center gap-1 font-bold text-slate-300 truncate" title={`Page ${item.pageNum}`}>
                               <span className="px-1 rounded bg-white/[0.08] text-[9px] text-amber-400 font-mono">#{itemIdx + 1}</span>
-                              <span>{item.label || (itemIdx === 0 ? 'Question' : `Part ${itemIdx + 1}`)} (P.{item.pageNum})</span>
+                              <span className="truncate">P.{item.pageNum}</span>
                             </span>
 
-                            <div className="flex items-center gap-0.5">
+                            {/* Inter-Card Navigation & Reordering Controls */}
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              {/* Move to Previous Card button */}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleMoveItemToAdjacentCard(card.id, itemIdx, 'prev'); }}
+                                disabled={cardIdx === 0}
+                                className="p-0.5 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 disabled:opacity-20 transition-all"
+                                title={cardIdx > 0 ? `Move this page to Card #${cardIdx}` : "First card"}
+                              >
+                                <ArrowLeft className="w-3 h-3" />
+                              </button>
+
+                              {/* Move to Next Card button */}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleMoveItemToAdjacentCard(card.id, itemIdx, 'next'); }}
+                                disabled={cardIdx === cards.length - 1}
+                                className="p-0.5 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-300 disabled:opacity-20 transition-all"
+                                title={cardIdx < cards.length - 1 ? `Move this page to Card #${cardIdx + 2}` : "Last card"}
+                              >
+                                <ArrowRight className="w-3 h-3" />
+                              </button>
+
                               {items.length > 1 && (
                                 <>
                                   <button
@@ -1469,8 +2281,8 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                                   <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); handleRemoveItemFromCard(card.id, itemIdx); }}
-                                    className="p-0.5 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 ml-1 transition-all"
-                                    title="Detach this page to a separate card"
+                                    className="p-0.5 rounded hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 ml-0.5 transition-all"
+                                    title="Detach this page into a new card"
                                   >
                                     <X className="w-3 h-3" />
                                   </button>
@@ -1480,14 +2292,14 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                           </div>
 
                           {/* Image preview box with Crop button */}
-                          <div className="relative group/preview rounded-xl border border-white/[0.08] overflow-hidden bg-white p-1 flex items-center justify-center">
+                          <div className="relative group/preview rounded-lg border border-white/[0.08] overflow-hidden bg-white p-1 flex items-center justify-center cursor-grab active:cursor-grabbing">
                             <img
                               src={displayImg}
                               alt={`Page ${item.pageNum}`}
                               loading="lazy"
                               decoding="async"
                               className={`w-full h-auto object-contain block mx-auto ${
-                                items.length > 2 ? 'max-h-32' : items.length === 2 ? 'max-h-44' : 'max-h-72'
+                                items.length >= 3 ? 'max-h-28' : items.length === 2 ? 'max-h-44' : 'max-h-72'
                               }`}
                               style={{
                                 transform: item.scale && item.scale !== 1 ? `scale(${item.scale})` : undefined,
@@ -1496,7 +2308,26 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                             />
 
                             {/* Floating Action Buttons */}
-                            <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 opacity-90 group-hover/preview:opacity-100 transition-all">
+                            <div className="absolute bottom-1 right-1 flex items-center gap-1 opacity-90 group-hover/preview:opacity-100 transition-all">
+                              {/* Expand Lightbox Button */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setLightboxZoom(1.0);
+                                  setExpandedImageModal({
+                                    src: displayImg,
+                                    title: `Card #${cardIdx + 1} • Page ${item.pageNum} (Snippet #${itemIdx + 1})`,
+                                    pageNum: item.pageNum
+                                  });
+                                }}
+                                className="px-1.5 py-0.5 rounded bg-black/85 hover:bg-cyan-600 text-white text-[9px] font-bold flex items-center gap-0.5 shadow-md transition-all"
+                                title="Expand and Zoom in High Resolution"
+                              >
+                                <Maximize2 className="w-2.5 h-2.5 text-cyan-300" />
+                                <span>Expand</span>
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1507,29 +2338,27 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                                     type: itemIdx === 0 ? 'question' : 'solution'
                                   });
                                 }}
-                                className="px-2 py-1 rounded bg-black/85 hover:bg-[#FF6B2B] text-white text-[10px] font-bold flex items-center gap-1 shadow-md transition-all"
+                                className="px-1.5 py-0.5 rounded bg-black/85 hover:bg-[#FF6B2B] text-white text-[9px] font-bold flex items-center gap-0.5 shadow-md transition-all"
                               >
-                                <Scissors className="w-3 h-3 text-amber-400" />
+                                <Scissors className="w-2.5 h-2.5 text-amber-400" />
                                 <span>{isCropped ? 'Re-Crop' : 'Crop'}</span>
                               </button>
 
                               {isCropped && (
                                 <button
                                   type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleResetCropOnCard(card.id, itemIdx); }}
-                                  className="p-1 rounded bg-black/85 hover:bg-rose-600 text-white text-[10px] transition-all"
-                                  title="Reset to full page"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleResetCropOnCard(card.id, itemIdx);
+                                  }}
+                                  className="p-1 rounded bg-black/85 hover:bg-rose-600 text-rose-300 hover:text-white text-[9px] font-bold shadow-md transition-all"
+                                  title="Reset Crop to Full Page"
                                 >
-                                  <RefreshCcw className="w-3 h-3" />
+                                  <RotateCw className="w-2.5 h-2.5" />
                                 </button>
                               )}
                             </div>
                           </div>
-
-                          {/* Divider line between snippets */}
-                          {showDividerLine && itemIdx < items.length - 1 && (
-                            <div className="w-full my-1.5 border-t border-dashed border-slate-700/80" />
-                          )}
                         </div>
                       );
                     })}
@@ -1612,6 +2441,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
             {/* Bottom Pagination Bar */}
             {renderPaginationBar('bottom')}
           </div>
+          )
         ) : (
           /* EMPTY STATE */
           <div className="py-20 flex flex-col items-center justify-center text-center max-w-md mx-auto">
@@ -2265,6 +3095,130 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                 </div>
               </form>
             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* PDF Page Layout & N-Up Modal */}
+      {showLayoutModal && (
+        <PdfLayoutModal
+          isOpen={showLayoutModal}
+          onClose={() => setShowLayoutModal(false)}
+          totalItemsCount={selectedCount}
+          initialFileName={fileName || 'Merged_QA'}
+          onExport={handleExportWithLayout}
+          onQuickDownload={handleQuickDownload}
+          onApplyToCards={(n) => handleBatchGroupByN(n)}
+          isExporting={isExporting}
+          exportProgress={exportProgress}
+        />
+      )}
+
+      {/* 8. HIGH-RESOLUTION PAGE EXPANSION LIGHTBOX */}
+      <AnimatePresence>
+        {expandedImageModal && (
+          <div 
+            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col animate-in fade-in duration-150"
+            onClick={() => setExpandedImageModal(null)}
+          >
+            {/* Lightbox Header */}
+            <div 
+              className="flex items-center justify-between px-6 py-3 border-b border-white/10 bg-black/70 backdrop-blur-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3">
+                <span className="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-bold flex items-center gap-1.5">
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>High-Res Lightbox</span>
+                </span>
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  {expandedImageModal.title}
+                </h3>
+              </div>
+
+              {/* Lightbox Zoom Controls */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 bg-white/10 px-2.5 py-1 rounded-xl border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setLightboxZoom(z => Math.max(0.4, Number((z - 0.2).toFixed(1))))}
+                    className="p-1 rounded hover:bg-white/10 text-slate-300 hover:text-white"
+                    title="Zoom Out"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  <span className="text-xs font-mono font-bold text-white px-2 min-w-[50px] text-center">
+                    {Math.round(lightboxZoom * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxZoom(z => Math.min(3.5, Number((z + 0.2).toFixed(1))))}
+                    className="p-1 rounded hover:bg-white/10 text-slate-300 hover:text-white"
+                    title="Zoom In"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxZoom(1.0)}
+                    className="text-[11px] font-bold text-slate-400 hover:text-white px-2 border-l border-white/20"
+                  >
+                    Reset (100%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLightboxZoom(1.5)}
+                    className="text-[11px] font-bold text-cyan-300 hover:text-white px-1"
+                  >
+                    150%
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setExpandedImageModal(null)}
+                  className="p-1.5 rounded-xl bg-white/10 hover:bg-rose-500 text-white transition-all ml-2"
+                  title="Close Lightbox (Esc)"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Lightbox Image Stage (scrollable & pannable) */}
+            <div 
+              className="flex-1 overflow-auto p-6 flex items-center justify-center select-none"
+              onClick={() => setExpandedImageModal(null)}
+            >
+              <div 
+                className="transition-transform duration-100 flex items-center justify-center max-w-full"
+                style={{
+                  transform: `scale(${lightboxZoom})`,
+                  transformOrigin: 'center center'
+                }}
+              >
+                <img
+                  src={expandedImageModal.src}
+                  alt={expandedImageModal.title}
+                  className="max-h-[85vh] max-w-[90vw] object-contain rounded-xl shadow-2xl border border-white/20 bg-white"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+            </div>
+            
+            <div 
+              className="py-2.5 px-6 bg-black/80 border-t border-white/10 flex items-center justify-between text-xs text-slate-400"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span>Use <strong>Zoom In / Out</strong> to inspect small formulas, text, questions and solutions in high clarity.</span>
+              <button
+                type="button"
+                onClick={() => setExpandedImageModal(null)}
+                className="text-slate-300 hover:text-white font-bold underline"
+              >
+                Close (Esc)
+              </button>
+            </div>
           </div>
         )}
       </AnimatePresence>

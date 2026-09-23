@@ -633,7 +633,7 @@ export const renderMergedCardToA4 = async (
     return result;
   }
 
-  // Case 2: Multi-Item Merged Set (2, 3, 4+ snippets stacked cleanly)
+  // Case 2: Multi-Item Merged Set
   const loaded = await Promise.all(
     items.map(async (item) => {
       const src = item.croppedImage || item.image;
@@ -647,53 +647,126 @@ export const renderMergedCardToA4 = async (
       const sh = !item.croppedImage && item.crop ? Math.min(naturalH - sy, Math.max(1, Math.round((item.crop.height / 100) * naturalH))) : naturalH;
 
       const scaleMult = item.scale || 1.0;
-      const maxW = targetWidth - 20;
       const safeSw = Math.max(1, sw);
       const safeSh = Math.max(1, sh);
-      let drawW = Math.min(maxW, Math.round(availableWidth * scaleMult));
-      let drawH = Math.round(safeSh * (drawW / safeSw));
 
-      return { img, sx, sy, sw: safeSw, sh: safeSh, drawW, drawH };
+      return { img, sx, sy, sw: safeSw, sh: safeSh, scaleMult };
     })
   );
 
-  const gap = Math.round(24 * (targetHeight / CANVAS_A4_HEIGHT));
-  const dividerHeight = card.showDivider !== false ? Math.round(18 * (targetHeight / CANVAS_A4_HEIGHT)) : gap;
-  const numDividers = items.length - 1;
-  const totalDividersHeight = numDividers * dividerHeight + numDividers * gap;
+  // Subcase 2A: 2 Items (Clean vertical Question + Solution stack with optional divider)
+  if (items.length === 2) {
+    const gap = Math.round(24 * (targetHeight / CANVAS_A4_HEIGHT));
+    const dividerHeight = card.showDivider !== false ? Math.round(18 * (targetHeight / CANVAS_A4_HEIGHT)) : gap;
+    const totalDividersHeight = dividerHeight + gap;
 
-  let totalItemsHeight = loaded.reduce((sum, it) => sum + it.drawH, 0);
-  const totalNeededHeight = totalItemsHeight + totalDividersHeight;
+    const itemsCalculated = loaded.map(it => {
+      const drawW = Math.min(targetWidth - 20, Math.round(availableWidth * it.scaleMult));
+      const drawH = Math.round(it.sh * (drawW / it.sw));
+      return { ...it, drawW, drawH };
+    });
 
-  let shrinkFactor = 1.0;
-  if (totalNeededHeight > availableHeight) {
-    const spaceForItems = Math.max(100, availableHeight - totalDividersHeight);
-    shrinkFactor = spaceForItems / Math.max(1, totalItemsHeight);
+    let totalItemsHeight = itemsCalculated.reduce((sum, it) => sum + it.drawH, 0);
+    const totalNeededHeight = totalItemsHeight + totalDividersHeight;
+
+    let shrinkFactor = 1.0;
+    if (totalNeededHeight > availableHeight) {
+      const spaceForItems = Math.max(100, availableHeight - totalDividersHeight);
+      shrinkFactor = spaceForItems / Math.max(1, totalItemsHeight);
+    }
+
+    let currentY = marginY;
+    for (let i = 0; i < itemsCalculated.length; i++) {
+      const it = itemsCalculated[i];
+      const finalDrawH = Math.max(1, Math.round(it.drawH * shrinkFactor));
+      const finalDrawW = Math.max(1, Math.round(it.sw * (finalDrawH / it.sh)));
+      const drawX = Math.max(0, marginX + (availableWidth - finalDrawW) / 2);
+
+      ctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, drawX, currentY, finalDrawW, finalDrawH);
+      currentY += finalDrawH + gap;
+
+      if (i === 0 && card.showDivider !== false) {
+        ctx.save();
+        const lineY = currentY + dividerHeight / 2;
+        ctx.strokeStyle = '#CBD5E1';
+        ctx.lineWidth = Math.max(1.5, Math.round(1.5 * (targetWidth / CANVAS_A4_WIDTH)));
+        ctx.beginPath();
+        ctx.moveTo(marginX + 20, lineY);
+        ctx.lineTo(marginX + availableWidth - 20, lineY);
+        ctx.stroke();
+        ctx.restore();
+        currentY += dividerHeight;
+      }
+    }
+
+    const result = canvas.toDataURL('image/jpeg', 0.94);
+    canvas.width = 0;
+    canvas.height = 0;
+    return result;
   }
 
-  let currentY = marginY;
+  // Subcase 2B: 3 or more items (Smart N-Up Grid: 3, 4, 5, 6, 8, etc. pages per sheet)
+  const count = loaded.length;
+  let rows = 2;
+  let cols = 2;
+  if (count <= 4) {
+    rows = 2; cols = 2;
+  } else if (count <= 6) {
+    rows = 2; cols = 3;
+  } else if (count <= 8) {
+    rows = 2; cols = 4;
+  } else if (count <= 9) {
+    rows = 3; cols = 3;
+  } else if (count <= 12) {
+    rows = 3; cols = 4;
+  } else {
+    rows = 4; cols = 4;
+  }
 
-  for (let i = 0; i < loaded.length; i++) {
-    const it = loaded[i];
-    const finalDrawH = Math.max(1, Math.round(it.drawH * shrinkFactor));
-    const finalDrawW = Math.max(1, Math.round(it.sw * (finalDrawH / it.sh)));
-    const drawX = Math.max(0, marginX + (availableWidth - finalDrawW) / 2);
+  const gapX = Math.round(18 * (targetWidth / CANVAS_A4_WIDTH));
+  const gapY = Math.round(18 * (targetHeight / CANVAS_A4_HEIGHT));
 
-    ctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, drawX, currentY, finalDrawW, finalDrawH);
-    currentY += finalDrawH + gap;
+  const slotW = (availableWidth - (cols - 1) * gapX) / cols;
+  const slotH = (availableHeight - (rows - 1) * gapY) / rows;
 
-    // Divider Line between items
-    if (i < loaded.length - 1 && card.showDivider !== false) {
+  for (let idx = 0; idx < count; idx++) {
+    const it = loaded[idx];
+    const r = Math.floor(idx / cols);
+    const c = idx % cols;
+
+    // Center items on the last row if row is not completely filled (e.g. 3 items or 5 items)
+    const itemsInThisRow = (r === rows - 1 && count % cols !== 0) ? (count % cols) : Math.min(cols, count - r * cols);
+    const rowOffsetStartX = marginX + ((cols - itemsInThisRow) * (slotW + gapX)) / 2;
+
+    const cellX = rowOffsetStartX + (idx % cols) * (slotW + gapX);
+    const cellY = marginY + r * (slotH + gapY);
+
+    const itAspect = it.sw / it.sh;
+    const slotAspect = slotW / slotH;
+
+    let drawW = slotW;
+    let drawH = slotH;
+
+    if (itAspect > slotAspect) {
+      drawW = slotW;
+      drawH = slotW / itAspect;
+    } else {
+      drawH = slotH;
+      drawW = slotH * itAspect;
+    }
+
+    const drawX = cellX + (slotW - drawW) / 2;
+    const drawY = cellY + (slotH - drawH) / 2;
+
+    ctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, drawX, drawY, drawW, drawH);
+
+    // Subtle border around each page snippet
+    if (card.showDivider !== false) {
       ctx.save();
-      const lineY = currentY + dividerHeight / 2;
       ctx.strokeStyle = '#CBD5E1';
-      ctx.lineWidth = Math.max(1.5, Math.round(1.5 * (targetWidth / CANVAS_A4_WIDTH)));
-      ctx.beginPath();
-      ctx.moveTo(marginX + 20, lineY);
-      ctx.lineTo(marginX + availableWidth - 20, lineY);
-      ctx.stroke();
+      ctx.lineWidth = Math.max(1, Math.round(1 * (targetWidth / CANVAS_A4_WIDTH)));
+      ctx.strokeRect(drawX, drawY, drawW, drawH);
       ctx.restore();
-      currentY += dividerHeight;
     }
   }
 

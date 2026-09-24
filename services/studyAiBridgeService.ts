@@ -1,8 +1,8 @@
 /**
  * Study AI Bridge Service
- * Connects the web application to the 'Study AI Bridge (TestFactory)' Chrome Extension (v1.2.2).
- * Enables 100% free, unlimited text & MCQ extraction directly through the user's
- * active browser session (Gemini, DeepSeek, ChatGPT, Claude) with ZERO API keys or tokens.
+ * Connects the web application to TextExtract Pro Bridge (protocol v2).
+ * Runs queued extraction through the user's browser session with acknowledged
+ * handshakes, cancellation and durable-result recovery.
  */
 
 import { ExtractedElement, NumberingStyle } from '../types';
@@ -24,6 +24,8 @@ export interface BridgeSessionInfo {
 
 export interface BridgeStatus {
   connected: boolean;
+  protocolVersion?: number;
+  error?: string;
   version?: string;
   session?: BridgeSessionInfo | null;
   provider?: AiProvider;
@@ -36,6 +38,7 @@ export interface ExtractWithBridgeOptions {
   fileName?: string;
   mimeType?: string;
   prompt: string;
+  responseFormat?: 'json' | 'text';
   provider?: AiProvider;
   continueChat?: boolean;
   skipPdf?: boolean;
@@ -49,183 +52,114 @@ export interface ExtractWithBridgeOptions {
   onProgress?: (step: string, detail?: string, chatUrl?: string) => void;
 }
 
-let cachedStatus: BridgeStatus = {
-  connected: false,
-  version: undefined,
-  session: null,
-  provider: (typeof window !== 'undefined' ? (localStorage.getItem('study_ai_provider') as AiProvider) : null) || 'gemini',
-  openProviders: [],
-};
-
+const providers: AiProvider[] = ['gemini', 'deepseek', 'chatgpt', 'claude'];
+let cachedStatus: BridgeStatus = { connected: false, provider: getStoredAiProvider(), openProviders: [] };
 const statusListeners = new Set<(status: BridgeStatus) => void>();
-
-// Global listener for extension messages
-if (typeof window !== 'undefined') {
-  window.addEventListener('message', (event) => {
-    if (event.source !== window || !event.data) return;
-    const data = event.data;
-    if (data.source !== EXT_SOURCE) return;
-
-    if (data.type === 'PONG') {
-      const userSelected = getStoredAiProvider();
-      // If extension session has a different provider, auto-sync it with user preference
-      if (data.ok && data.session && data.session.provider !== userSelected) {
-        window.postMessage({
-          source: PAGE_SOURCE,
-          type: 'SET_PROVIDER',
-          provider: userSelected
-        }, '*');
-      }
-
-      cachedStatus = {
-        connected: !!data.ok,
-        version: data.version || '2.4.2',
-        session: data.session || null,
-        provider: userSelected || (data.session?.provider as AiProvider) || 'gemini',
-        openProviders: (data.openProviders as AiProvider[]) || [],
-        lastPingTime: Date.now(),
-      };
-      statusListeners.forEach((fn) => {
-        try { fn(cachedStatus); } catch {}
-      });
-    }
-  });
-
-  // Automatically attempt ping on boot
-  setTimeout(() => {
-    pingStudyAiExtension().catch(() => {});
-  }, 300);
+let pendingPing: Promise<BridgeStatus> | null = null;
+const post = (payload: Record<string, unknown>) => window.postMessage({ ...payload, source: PAGE_SOURCE }, window.location.origin);
+const requestIdFor = (prefix: string) => prefix + '_' + crypto.randomUUID();
+function publishStatus(status: BridgeStatus) {
+  cachedStatus = status;
+  statusListeners.forEach(fn => { try { fn(status); } catch {} });
 }
-
-/**
- * Get preferred AI provider (gemini, deepseek, chatgpt, claude)
- */
+function fromExtension(event: MessageEvent) {
+  return event.source === window && event.origin === window.location.origin && event.data?.source === EXT_SOURCE;
+}
 export function getStoredAiProvider(): AiProvider {
-  if (typeof window === 'undefined') return 'gemini';
-  return (localStorage.getItem('study_ai_provider') as AiProvider) || 'gemini';
+  try {
+    const stored = localStorage.getItem('study_ai_provider') as AiProvider;
+    return ['gemini', 'deepseek', 'chatgpt', 'claude'].includes(stored) ? stored : 'gemini';
+  } catch { return 'gemini'; }
+}
+/**
+ * Pages per AI chat before the bridge starts a fresh one. A long chat grows the provider's DOM
+ * until uploads and the composer become unreliable, which is why long runs fail part-way.
+ * 0 disables rotation and keeps every page in one chat.
+ */
+export const CHAT_ROTATION_KEY = 'study_ai_chat_rotation';
+export const DEFAULT_CHAT_ROTATION = 5;
+
+export function getChatRotationInterval(): number {
+  try {
+    const stored = Number(localStorage.getItem(CHAT_ROTATION_KEY));
+    if (!Number.isFinite(stored) || stored < 0) return DEFAULT_CHAT_ROTATION;
+    return Math.min(Math.floor(stored), 50);
+  } catch { return DEFAULT_CHAT_ROTATION; }
 }
 
-/**
- * Set preferred AI provider and synchronize with extension
- */
+export function setChatRotationInterval(pages: number): void {
+  try {
+    const safe = Number.isFinite(pages) && pages > 0 ? Math.min(Math.floor(pages), 50) : 0;
+    localStorage.setItem(CHAT_ROTATION_KEY, String(safe));
+  } catch {}
+}
+
+/** True when this page index should open a new chat instead of continuing the current one. */
+export function shouldStartNewChat(pageIndex: number, interval = getChatRotationInterval()): boolean {
+  if (pageIndex <= 0) return true;
+  return interval > 0 && pageIndex % interval === 0;
+}
+
 export function setStoredAiProvider(provider: AiProvider): void {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || !providers.includes(provider)) return;
   localStorage.setItem('study_ai_provider', provider);
-  cachedStatus.provider = provider;
-  statusListeners.forEach((fn) => {
-    try { fn(cachedStatus); } catch {}
-  });
-
-  // Send message to extension background worker to switch provider & reset session
-  window.postMessage({
-    source: PAGE_SOURCE,
-    type: 'SET_PROVIDER',
-    provider
-  }, '*');
+  publishStatus({ ...cachedStatus, provider, session: null });
+  // Each request supplies its provider. Changing a preference never resets an active job.
+  void pingStudyAiExtension();
 }
-
-/**
- * Subscribe to status updates from the extension
- */
 export function subscribeToExtensionStatus(callback: (status: BridgeStatus) => void): () => void {
   statusListeners.add(callback);
   callback(cachedStatus);
-  return () => {
-    statusListeners.delete(callback);
-  };
+  return () => { statusListeners.delete(callback); };
 }
-
-/**
- * Pings the Study AI Bridge Extension to verify if it is running
- */
-export function pingStudyAiExtension(timeoutMs = 1500): Promise<BridgeStatus> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') {
-      return resolve({ connected: false });
-    }
-
-    let resolved = false;
-
-    const cleanup = () => {
-      window.removeEventListener('message', handler);
+export function pingStudyAiExtension(timeoutMs = 2500): Promise<BridgeStatus> {
+  if (typeof window === 'undefined') return Promise.resolve({ connected: false });
+  if (pendingPing) return pendingPing;
+  pendingPing = new Promise<BridgeStatus>(resolve => {
+    const requestId = requestIdFor('ping');
+    const provider = getStoredAiProvider();
+    const finish = (status: BridgeStatus) => {
       clearTimeout(timer);
+      clearInterval(retry);
+      window.removeEventListener('message', handler);
+      publishStatus(status);
+      resolve(status);
     };
-
     const handler = (event: MessageEvent) => {
-      if (event.source !== window || !event.data) return;
+      if (!fromExtension(event) || event.data.type !== 'PONG' || event.data.requestId !== requestId) return;
       const data = event.data;
-      if (data.source === EXT_SOURCE && data.type === 'PONG') {
-        if (!resolved) {
-          resolved = true;
-          cleanup();
-          cachedStatus = {
-            connected: !!data.ok,
-            version: data.version || '2.4.2',
-            session: data.session || null,
-            provider: (data.session?.provider as AiProvider) || cachedStatus.provider || 'gemini',
-            openProviders: (data.openProviders as AiProvider[]) || [],
-            lastPingTime: Date.now(),
-          };
-          resolve(cachedStatus);
-        }
-      }
+      finish({ connected: !!data.ok, version: data.version, protocolVersion: data.protocolVersion,
+        error: data.error, session: data.session || null, provider: getStoredAiProvider(),
+        openProviders: (data.openProviders || []).filter((p: AiProvider) => providers.includes(p)), lastPingTime: Date.now() });
     };
-
+    const send = () => post({ type: 'PING', requestId, provider });
+    const timer = setTimeout(() => finish({ ...cachedStatus, connected: false, session: null,
+      error: 'Extension did not respond. Reload the extension and refresh this page.' }), timeoutMs);
+    const retry = setInterval(send, Math.max(300, Math.floor(timeoutMs / 3)));
     window.addEventListener('message', handler);
-
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        cleanup();
-        console.warn(
-          '[TextExtract Bridge] No PONG received within', timeoutMs, 'ms. Either the extension is not installed/enabled, ' +
-          'or it needs a reload (chrome://extensions) + a hard refresh of this tab. Open DevTools console for "[TextExtract Bridge]" logs from the extension itself.'
-        );
-        resolve({ ...cachedStatus, connected: false });
-      }
-    }, timeoutMs);
-
-    // Send PING
-    window.postMessage({
-      source: PAGE_SOURCE,
-      type: 'PING'
-    }, '*');
+    send();
+  }).finally(() => { pendingPing = null; });
+  return pendingPing;
+}
+export function resetStudyAiSession(): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false);
+  return new Promise(resolve => {
+    const requestId = requestIdFor('reset');
+    const finish = (ok: boolean) => { clearTimeout(timer); window.removeEventListener('message', handler); resolve(ok); };
+    const handler = (event: MessageEvent) => {
+      if (fromExtension(event) && event.data.type === 'SESSION_RESET' && event.data.requestId === requestId) finish(!!event.data.ok);
+    };
+    const timer = setTimeout(() => finish(false), 2500);
+    window.addEventListener('message', handler);
+    post({ type: 'RESET_SESSION', requestId });
   });
 }
-
-/**
- * Resets the active session in the extension
- */
-export function resetStudyAiSession(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') return resolve(false);
-
-    let resolved = false;
-    const handler = (event: MessageEvent) => {
-      if (event.source !== window || !event.data) return;
-      if (event.data.source === EXT_SOURCE && event.data.type === 'SESSION_RESET') {
-        if (!resolved) {
-          resolved = true;
-          window.removeEventListener('message', handler);
-          resolve(true);
-        }
-      }
-    };
-
-    window.addEventListener('message', handler);
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        window.removeEventListener('message', handler);
-        resolve(true);
-      }
-    }, 1200);
-
-    window.postMessage({
-      source: PAGE_SOURCE,
-      type: 'RESET_SESSION'
-    }, '*');
+if (typeof window !== 'undefined') {
+  window.addEventListener('message', event => {
+    if (fromExtension(event) && event.data.type === 'BRIDGE_READY') void pingStudyAiExtension();
   });
+  window.addEventListener('focus', () => { void pingStudyAiExtension(); });
+  setTimeout(() => { void pingStudyAiExtension(); }, 300);
 }
 
 /**
@@ -332,19 +266,22 @@ At the very end after the JSON code block, on a new line, output:
  */
 export async function extractWithStudyAiBridge(
   options: ExtractWithBridgeOptions
-): Promise<{ rawText: string; elements: ExtractedElement[] }> {
-  const isAvailable = await pingStudyAiExtension(2000);
+): Promise<{ rawText: string; elements: ExtractedElement[]; expectedMarker: string; chatUrl?: string }> {
+  if (options.signal?.aborted) throw new DOMException('Extraction stopped by user.', 'AbortError');
+  const isAvailable = await pingStudyAiExtension(3000);
   if (!isAvailable.connected) {
     throw new Error(
       'TextExtract Pro Bridge Extension se connect nahi ho pa raha hai. Kripya is page ko ek baar Refresh (F5) karein aur chrome://extensions par extension check karein.'
     );
-  }  const pNum = options.pageNumber;
-  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  }
+  if (isAvailable.protocolVersion !== 2) throw new Error('Reload TextExtract Pro Bridge 2.5 in chrome://extensions, then refresh this page.');
+  const pNum = options.pageNumber;
+  const requestId = requestIdFor('req');
   const expectedMarker = options.expectedMarker || (pNum 
     ? `---STUDY_AI_COMPLETE_P${pNum}_${requestId}---` 
     : `---STUDY_AI_COMPLETE_${requestId}---`);
   const provider = options.provider || getStoredAiProvider();
-  const timeoutMs = options.timeoutMs || 300000; // 5 min timeout for slow AI chats
+  const timeoutMs = Math.min(Math.max(options.timeoutMs || 300000, 1000), 900000); // 5 min timeout for slow AI chats
 
   // Inject unique request-scoped completion marker to eliminate cross-page turn collisions
   let promptWithMarker = options.prompt || '';
@@ -354,16 +291,19 @@ export async function extractWithStudyAiBridge(
   if (promptWithMarker.includes('---STUDY_AI_COMPLETE---')) {
     promptWithMarker = promptWithMarker.replace(/---STUDY_AI_COMPLETE---/g, expectedMarker);
   } else if (!promptWithMarker.includes(expectedMarker)) {
-    promptWithMarker = `${promptWithMarker}\n\nAt the very end after the JSON code block, on a new line, output:\n${expectedMarker}`;
+    promptWithMarker = `${promptWithMarker}\n\nAt the very end of your response, on a new line, output:\n${expectedMarker}`;
   }
 
   return new Promise((resolve, reject) => {
     let timer: NodeJS.Timeout | null = null;
     let completed = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    let connectionMisses = 0;
 
     const cleanup = () => {
       window.removeEventListener('message', messageHandler);
       if (timer) clearTimeout(timer);
+      if (poll) clearInterval(poll);
       if (options.signal) {
         options.signal.removeEventListener('abort', onAbort);
       }
@@ -391,13 +331,21 @@ export async function extractWithStudyAiBridge(
     }
 
     const messageHandler = (event: MessageEvent) => {
-      if (event.source !== window || !event.data) return;
+      if (!fromExtension(event)) return;
       const data = event.data;
       if (data.source !== EXT_SOURCE) return;
 
-      if (data.type === 'STUDY_AI_PROGRESS' && data.requestId === requestId) {
+      if (data.type === 'STUDY_AI_STATUS' && data.requestId === requestId && !data.ok) {
+        if (data.transportError && ++connectionMisses < 3) return;
+        completed = true; cleanup();
+        post({ type: 'CANCEL_REQUEST', requestId });
+        reject(new Error(data.error || 'Extension lost this request. Retry this page.'));
+        return;
+      }
+      if (['STUDY_AI_PROGRESS', 'STUDY_AI_STATUS'].includes(data.type) && data.requestId === requestId) {
+        connectionMisses = 0;
         if (options.onProgress) {
-          options.onProgress(data.step || 'working', data.detail || '', data.chatUrl);
+          try { options.onProgress(data.step || 'working', data.detail || '', data.chatUrl); } catch {}
         }
       }
 
@@ -406,13 +354,14 @@ export async function extractWithStudyAiBridge(
         completed = true;
         cleanup();
 
+        post({ type: 'RESULT_ACK', requestId });
         if (!data.ok) {
           return reject(new Error(data.error || 'Extension extraction failed.'));
         }
 
         const rawText = data.text || '';
         const elements = parseExtensionOutputToElements(rawText);
-        resolve({ rawText, elements, expectedMarker, chatUrl: data.chatUrl } as any);
+        resolve({ rawText, elements, expectedMarker, chatUrl: data.chatUrl });
       }
     };
 
@@ -422,6 +371,7 @@ export async function extractWithStudyAiBridge(
       if (!completed) {
         completed = true;
         cleanup();
+        post({ type: 'CANCEL_REQUEST', requestId });
         reject(
           new Error('Extraction timed out waiting for AI chat reply. Check the open AI tab in Chrome.')
         );
@@ -442,6 +392,8 @@ export async function extractWithStudyAiBridge(
       pageNumber: pNum || null,
       totalPages: options.totalPages || null,
       prompt: promptWithMarker,
+      responseFormat: options.responseFormat || 'json',
+      timeoutMs,
       fileName: options.fileName || 'page.png',
       fileBase64: cleanBase64,
       mimeType: options.mimeType || 'image/png',
@@ -453,10 +405,11 @@ export async function extractWithStudyAiBridge(
     };
 
     if (options.onProgress) {
-      options.onProgress('start', `Opening ${provider.toUpperCase()} in Chrome tab...`);
+      try { options.onProgress('start', `Opening ${provider.toUpperCase()} in Chrome tab...`); } catch {}
     }
 
-    window.postMessage(payload, '*');
+    post(payload);
+    poll = setInterval(() => post({ type: 'REQUEST_STATUS', requestId }), 10000);
   });
 }
 
@@ -464,15 +417,7 @@ export async function extractWithStudyAiBridge(
  * Resets the active bridge session so the next extraction starts a fresh new chat (for a new document).
  */
 export async function resetStudyAiBridgeSession(): Promise<void> {
-  if (typeof window === 'undefined') return;
-  window.postMessage({
-    source: PAGE_SOURCE,
-    type: 'RESET_SESSION',
-  }, '*');
-  if (cachedStatus.session) {
-    cachedStatus.session.chatUrl = null;
-    cachedStatus.session.batch = 0;
-  }
+  if (await resetStudyAiSession()) publishStatus({ ...cachedStatus, session: null });
 }
 
 export interface CaptureBridgeOptions {
@@ -496,7 +441,8 @@ export async function captureFromStudyAiBridge(
     throw new Error('TextExtract Pro Bridge Extension se connect nahi ho pa raha hai. Kripya is page ko F5 (Refresh) karein.');
   }
 
-  const requestId = `cap_${Date.now()}`;
+  if (isAvailable.protocolVersion !== 2) throw new Error('Reload TextExtract Pro Bridge 2.5, then refresh this page.');
+  const requestId = requestIdFor('cap');
   let activeProvider: AiProvider = getStoredAiProvider();
   let fullChat = fullChatArg;
   let chatUrl: string | null = null;
@@ -521,6 +467,7 @@ export async function captureFromStudyAiBridge(
     const cleanup = () => {
       window.removeEventListener('message', handler);
       clearTimeout(timer);
+      clearInterval(poll);
     };
 
     const handler = (event: MessageEvent) => {
@@ -528,6 +475,9 @@ export async function captureFromStudyAiBridge(
       const data = event.data;
       if (data.source !== EXT_SOURCE) return;
 
+      if (data.type === 'STUDY_AI_STATUS' && data.requestId === requestId && !data.ok) {
+        completed = true; cleanup(); reject(new Error(data.error || 'Capture request was lost.')); return;
+      }
       if (data.type === 'STUDY_AI_RESULT' && data.requestId === requestId) {
         if (completed) return;
         completed = true;
@@ -536,6 +486,7 @@ export async function captureFromStudyAiBridge(
         if (!data.ok) {
           return reject(new Error(data.error || 'Capture failed.'));
         }
+        post({ type: 'RESULT_ACK', requestId });
         resolve(data.text || '');
       }
     };
@@ -546,13 +497,16 @@ export async function captureFromStudyAiBridge(
       if (!completed) {
         completed = true;
         cleanup();
+        post({ type: 'CANCEL_REQUEST', requestId });
         reject(new Error('Capture timed out waiting for AI tab reply.'));
       }
-    }, 12000);
+    }, 90000);
+    const poll = setInterval(() => post({ type: 'REQUEST_STATUS', requestId }), 10000);
 
     window.postMessage({
       source: PAGE_SOURCE,
       type: 'CAPTURE_REQUEST',
+      timeoutMs: 90000,
       requestId,
       fullChat,
       chatUrl,
@@ -570,7 +524,8 @@ export async function captureFromStudyAiBridge(
 export function parseExtensionOutputToElements(raw: string): ExtractedElement[] {
   if (!raw) return [];
 
-  const text = raw.trim();
+  const text = raw.replace(/(?:^|\r?\n)[ \t]*---STUDY_AI_COMPLETE[^\r\n]*---[ \t]*(?=\r?\n|$)/g, '').trim();
+  if (/^(?:```json\s*)?\[\s*\](?:\s*```)?$/.test(text)) return [];
   const chunksToScan: string[] = [];
 
   // Extract from all markdown code fences
@@ -629,6 +584,7 @@ export function parseExtensionOutputToElements(raw: string): ExtractedElement[] 
           type: item.type || 'text',
           content: item.content,
           bbox: item.bbox,
+          continues_previous: item.continues_previous === true,
         };
       }
 

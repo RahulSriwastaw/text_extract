@@ -4,11 +4,13 @@
  */
 
 (function () {
-  const EXT_VER = "2.4.2";
+  const EXT_VER = "2.5.1";
+  if (window.__tfStudyAiGenericVer === EXT_VER) return;
+  const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGenericVer = EXT_VER;
   const LOG = (...a) => console.log("[TextExtract Bridge Gen]", ...a);
   const COMPLETE_MARKER = "---STUDY_AI_COMPLETE---";
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = ms => runtime.sleep(ms);
 
   let port = null;
   function connectKeepalive() {
@@ -36,19 +38,11 @@
 
   const genericMsgListener = (msg, _s, sendResponse) => {
     if (!msg?.type) return;
-    if (msg.type === "STUDY_AI_RUN") {
-      sendResponse({ ok: true, started: true });
-      runExtract(msg).catch((e) => {
-        LOG("runExtract failed", e);
-        report(msg.requestId, false, null, e?.message || String(e), msg.adminTabId);
-      });
-      return false;
-    }
-    if (msg.type === "STUDY_AI_CAPTURE") {
-      sendResponse({ ok: true, started: true });
-      runCaptureOnly(msg)
-        .then((text) => reportSafe(msg.requestId, text, msg.adminTabId))
-        .catch((e) => report(msg.requestId, false, null, e?.message || String(e), msg.adminTabId));
+    if (msg.type === "STUDY_AI_RUN" || msg.type === "STUDY_AI_CAPTURE") {
+      runtime.run(msg, sendResponse, async () => {
+        if (msg.type === "STUDY_AI_RUN") await runExtract(msg);
+        else report(msg.requestId, true, await runCaptureOnly(msg), null, msg.adminTabId);
+      }, report);
       return false;
     }
   };
@@ -73,6 +67,7 @@
   }
 
   function report(requestId, ok, text, error, adminTabId) {
+    if (!runtime.remember([requestId, ok, text, error, adminTabId])) return;
     const payload = {
       type: "STUDY_AI_RESULT",
       requestId,
@@ -349,8 +344,7 @@
   function hasCompletionMarker(text, expectedMarker) {
     if (!text || isOurPromptText(text)) return false;
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
-      if (text.includes(expectedMarker)) return true;
-      if (text.includes("---STUDY_AI_COMPLETE---")) return true;
+      return String(text).split(/\r?\n/).some(line => line.trim() === expectedMarker);
     }
     const u = String(text).toUpperCase();
     return u.includes(COMPLETE_MARKER) || 
@@ -636,7 +630,7 @@
     const turns = getAssistantTurnNodes();
     if (!turns.length) return "0:";
     const last = turns[turns.length - 1];
-    const text = (last.innerText || last.textContent || "").trim();
+    const text = runtime.readReply(last);
     return `${turns.length}:${text.length}:${text.slice(-120)}`;
   }
 
@@ -678,17 +672,18 @@
     // --- PRIORITY 1: Direct match in Assistant Output (marker or page signature) ---
     if (expMarker) {
       for (let i = assistantTurns.length - 1; i >= 0; i--) {
-        const text = (assistantTurns[i].innerText || assistantTurns[i].textContent || "").trim();
-        if (text.includes(expMarker)) {
+        const text = runtime.readReply(assistantTurns[i]);
+        if (hasCompletionMarker(text, expMarker)) {
           LOG(`[TurnPairing] Priority 1: Found direct marker match on assistant turn #${i}`);
           return text;
         }
       }
     }
+    if (expMarker) throw new Error("No reply matches this extraction request yet. Wait for completion or retry this page.");
     if (pNum) {
       const pageTag = `_P${pNum}_`;
       for (let i = assistantTurns.length - 1; i >= 0; i--) {
-        const text = (assistantTurns[i].innerText || assistantTurns[i].textContent || "").trim();
+        const text = runtime.readReply(assistantTurns[i]);
         if (text.includes(pageTag)) {
           LOG(`[TurnPairing] Priority 1b: Found direct page tag (${pageTag}) in assistant turn #${i}`);
           return text;
@@ -791,7 +786,7 @@
     if (assistantTurns.length > 0) {
       for (let i = assistantTurns.length - 1; i >= 0; i--) {
         const last = assistantTurns[i];
-        const t = (last.innerText || last.textContent || "").trim();
+        const t = runtime.readReply(last);
         if (t.length > 20 && !isOurPromptText(t)) {
           const qs = extractQuestionsFromText(t);
           if (qs.length) return t;
@@ -810,14 +805,14 @@
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
       const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : [];
       for (let i = candidates.length - 1; i >= 0; i--) {
-        const text = (candidates[i].innerText || candidates[i].textContent || "").trim();
+        const text = runtime.readReply(candidates[i]);
         if (hasCompletionMarker(text, expectedMarker)) {
           return text;
         }
       }
       if (turns.length > minIndex) {
         const last = turns[turns.length - 1];
-        return (last.innerText || last.textContent || "").trim();
+        return runtime.readReply(last);
       }
       return "";
     }
@@ -825,7 +820,7 @@
     if (turns.length > minIndex) {
       const newTurns = turns.slice(minIndex);
       for (let i = newTurns.length - 1; i >= 0; i--) {
-        const text = (newTurns[i].innerText || newTurns[i].textContent || "").trim();
+        const text = runtime.readReply(newTurns[i]);
         if (text.length > 10) {
           const qs = extractQuestionsFromText(text);
           if (qs.length) return "```json\n" + JSON.stringify(qs) + "\n```";
@@ -834,12 +829,12 @@
         }
       }
       const last = newTurns[newTurns.length - 1];
-      return (last.innerText || last.textContent || "").trim();
+      return runtime.readReply(last);
     }
     // If turns.length <= minIndex (e.g. virtual scrolling unmounted previous turns in DeepSeek), check latest turn
     if (turns.length > 0) {
       const last = turns[turns.length - 1];
-      const lastText = (last.innerText || last.textContent || "").trim();
+      const lastText = runtime.readReply(last);
       if (lastText.length > 20 && !isOurPromptText(lastText)) {
         return lastText;
       }
@@ -918,14 +913,14 @@
     if (expectedMarker && typeof expectedMarker === "string" && expectedMarker.length > 5) {
       const candidates = (turns.length > minIndex) ? turns.slice(minIndex) : [];
       for (let i = candidates.length - 1; i >= 0; i--) {
-        const t = (candidates[i].innerText || candidates[i].textContent || "").trim();
+        const t = runtime.readReply(candidates[i]);
         if (hasCompletionMarker(t, expectedMarker)) {
           return t;
         }
       }
       if (turns.length > minIndex) {
         const last = turns[turns.length - 1];
-        return (last.innerText || last.textContent || "").trim();
+        return runtime.readReply(last);
       }
       return "";
     }
@@ -933,11 +928,11 @@
     if (turns.length > minIndex) {
       const newTurns = turns.slice(minIndex);
       for (let i = newTurns.length - 1; i >= 0; i--) {
-        const t = (newTurns[i].innerText || newTurns[i].textContent || "").trim();
+        const t = runtime.readReply(newTurns[i]);
         if (extractJsonCandidate(t) || hasStandaloneCompletion(t)) return t;
       }
       const last = newTurns[newTurns.length - 1];
-      return (last.innerText || last.textContent || "").trim();
+      return runtime.readReply(last);
     }
     if (minIndex > 0) return "";
 
@@ -979,7 +974,7 @@
   }
 
   async function reportSafe(requestId, text, adminTabId) {
-    const packed = packQuestionsForReport(text);
+    const packed = text; // Already validated; preserve text elements and completion marker.
     // Large payloads often fail chrome.runtime messaging — clipboard fallback
     if (packed && packed.length > 700000) {
       try {
@@ -1067,151 +1062,99 @@
     return seenOpen && squareDepth === 0 && curlyDepth === 0;
   }
 
-  function waitForJsonReplyLive(timeoutMs, requestId, baseline, adminTabId, initialReplyCount = 0, expectedMarker = null) {
-    return new Promise((resolve, reject) => {
-      let lastBlobText = "";
-      let lastChangeTime = Date.now();
-      const started = Date.now();
-      let lastProgressAt = 0;
-      let sentRetryClick = false;
-
-      let interval = null;
-      function cleanup() {
-        if (interval) clearInterval(interval);
-        try { obs.disconnect(); } catch {}
+  async function waitForJsonReplyLive(timeoutMs, requestId, baseline, adminTabId, initialReplyCount = 0, expectedMarker = null, responseFormat = "json") {
+    const deadline = Date.now() + timeoutMs;
+    let lastText = "";
+    let changedAt = Date.now();
+    let progressAt = 0;
+    while (Date.now() < deadline) {
+      await sleep(500);
+      const nodes = getAssistantTurnNodes();
+      // Only new assistant turns may satisfy a new page request.
+      const markedNode = expectedMarker ? nodes.find(node => hasCompletionMarker(node.innerText || node.textContent || "", expectedMarker)) : null;
+      if (nodes.length <= initialReplyCount && !markedNode) continue;
+      const blob = markedNode ? runtime.readReply(markedNode) : scrapeBestReply(initialReplyCount, expectedMarker);
+      if (!blob || isOurPromptText(blob)) continue;
+      if (expectedMarker && /---STUDY_AI_COMPLETE[^\r\n]*---/.test(blob) && !hasCompletionMarker(blob, expectedMarker)) continue;
+      if (blob !== lastText) { lastText = blob; changedAt = Date.now(); }
+      const stableFor = Date.now() - changedAt;
+      if (Date.now() - progressAt > 3000) {
+        progressAt = Date.now();
+        progress(requestId, "stream", "Reading response (" + blob.length + " chars)...", adminTabId);
       }
-
-      const tick = () => {
-        if (Date.now() - started > timeoutMs) {
-          cleanup();
-          const blob = scrapeBestReply(initialReplyCount, expectedMarker);
-          const j = extractJsonCandidate(blob);
-          if (j && j !== "[]") return resolve(j);
-          if (j === "[]" && hasStandaloneCompletion(blob)) {
-            return resolve("```json\n[]\n```\n" + (expectedMarker || COMPLETE_MARKER));
-          }
-          if (j) return resolve(j);
-          if (blob && blob.length > 80 && !isOurPromptText(blob)) return resolve(blob);
-          return reject(
-            new Error("Timed out waiting for JSON on this page. Check AI chat tab."),
-          );
+      if (isGenerating()) continue;
+      if (responseFormat === "text" && stableFor >= 5000) return blob;
+      const json = runtime.completeJson(blob);
+      const marked = hasCompletionMarker(blob, expectedMarker);
+      if (json !== null && stableFor >= (marked ? 1500 : 5000)) {
+        // Preserve real completion evidence, never manufacture the marker.
+        return json + (marked ? "\n" + (expectedMarker || COMPLETE_MARKER) : "");
+      }
+      // Marker + stopped generation + stable text means the reply is finished, so the
+      // lenient reader can recover pages the strict parser rejects (split-question tails,
+      // stray prose) without ever accepting a still-streaming array.
+      if (json === null && marked && stableFor >= 3000) {
+        const recovered = extractQuestionsFromText(blob);
+        if (recovered.length) {
+          return "```json\n" + JSON.stringify(recovered, null, 2) + "\n```\n" + (expectedMarker || COMPLETE_MARKER);
         }
+      }
+      if (stableFor >= 15000 && json === null) {
+        throw new Error("AI reply was found but its JSON format could not be read yet. After generation finishes, use Recapture or paste the code block with Paste CSV / JSON.");
+      }
+    }
+    throw new Error("Timed out waiting for a complete AI reply. Partial output was not accepted; check the AI tab.");
+  }
 
-        const generating = isGenerating();
-        const turns = getAssistantTurnNodes();
-        let hasNewTurn = turns.length > initialReplyCount;
-        const currentFingerprint = snapshotReplyFingerprint();
-        if (currentFingerprint !== baseline || generating) {
-          hasNewTurn = true;
-        }
-        const markerCheck = (expectedMarker && hasNewTurn) ? scrapeBestReply(initialReplyCount, expectedMarker) : "";
-        if (expectedMarker && markerCheck && hasCompletionMarker(markerCheck, expectedMarker)) {
-          hasNewTurn = true;
-        }
+  const ATTACHMENT_CHIP_SELECTOR = '[data-testid*="file-preview"], [data-testid*="attachment"], [class*="attachment-preview"], ' +
+    '[class*="file-preview"], [class*="uploaded-file"], [class*="file-chip"]';
 
-        // Only retry send if prompt is still in composer (>30 chars), send button is enabled, and 20s elapsed without generating
-        if (!hasNewTurn && !generating && Date.now() - started > 20000 && !sentRetryClick) {
-          const composer = findComposer();
-          const compText = composer ? (composer.innerText || composer.value || "").trim() : "";
-          const sendBtn = findSendButton();
-          const sendDisabled = sendBtn?.disabled || sendBtn?.getAttribute("aria-disabled") === "true";
-          if (compText.length > 30 && sendBtn && !sendDisabled) {
-            sentRetryClick = true;
-            clickSendOrEnter(composer);
-          }
-        }
-
-        if (!hasNewTurn) {
-          if (Date.now() - lastProgressAt > 2500) {
-            lastProgressAt = Date.now();
-            progress(requestId, "wait", "Waiting for model to start reply…", adminTabId);
-          }
-          return;
-        }
-
-        const blob = scrapeBestReply(initialReplyCount, expectedMarker);
-        if (!blob) return;
-
-        // Track text changes and stillness
-        if (blob !== lastBlobText) {
-          lastBlobText = blob;
-          lastChangeTime = Date.now();
-        }
-
-        const stillDurationMs = Date.now() - lastChangeTime;
-
-        // STRICT: If model is generating, NEVER resolve!
-        if (generating) {
-          if (Date.now() - lastProgressAt > 2000) {
-            lastProgressAt = Date.now();
-            progress(requestId, "stream", `Generating response… (${blob.length} chars)`, adminTabId);
-          }
-          return;
-        }
-
-        // Criterion 1: Real completion marker + not generating + at least 0.4s stillness
-        if (hasCompletionMarker(blob, expectedMarker) && stillDurationMs >= 400) {
-          const qs = extractQuestionsFromText(blob);
-          const finalJson = qs.length ? JSON.stringify(qs, null, 2) : (extractJsonCandidate(blob) || "[]");
-          cleanup();
-          progress(requestId, "done", `Completion marker verified — all ${qs.length} MCQs captured (${blob.length} chars)`, adminTabId);
-          return resolve(finalJson + "\n" + (expectedMarker || COMPLETE_MARKER));
-        }
-
-        // Criterion 2: Fast resolve when AI is NOT generating and has 0.6s stillness with valid questions/JSON
-        if (!generating && stillDurationMs >= 600) {
-          const qs = extractQuestionsFromText(blob);
-          if (qs.length > 0) {
-            cleanup();
-            progress(requestId, "done", `Captured ${qs.length} question(s) instantly (${blob.length} chars)`, adminTabId);
-            return resolve(JSON.stringify(qs, null, 2) + (expectedMarker ? "\n" + expectedMarker : ""));
-          }
-          const isBalanced = isJsonCompleteAndBalanced(blob);
-          const json = extractJsonCandidate(blob);
-          if (isBalanced && json && json !== "[]") {
-            cleanup();
-            progress(requestId, "done", `Captured complete balanced JSON (${json.length} chars)`, adminTabId);
-            return resolve(json + (expectedMarker ? "\n" + expectedMarker : ""));
-          }
-        }
-
-        // While text changed recently (< 1.2s), keep waiting
-        if (stillDurationMs < 1200) {
-          return;
-        }
-
-        // Criterion 3 (Fallback): Fast 4.0s stillness fallback without generating
-        if (stillDurationMs >= 4000 && blob.length > 30) {
-          cleanup();
-          const qs = extractQuestionsFromText(blob);
-          if (qs.length) {
-            progress(requestId, "done", `Captured all ${qs.length} MCQs (${blob.length} chars)`, adminTabId);
-            return resolve(JSON.stringify(qs, null, 2));
-          }
-          const json = extractJsonCandidate(blob);
-          if (json && json !== "[]") {
-            progress(requestId, "done", `Captured ${json.length} chars JSON`, adminTabId);
-            return resolve(json);
-          }
-          const fallbackObjs = extractBalancedObjects(blob);
-          if (fallbackObjs.length > 0) {
-            progress(requestId, "done", `Captured ${fallbackObjs.length} objects`, adminTabId);
-            return resolve(`[\n${fallbackObjs.join(",\n")}\n]`);
-          }
-          if (!isOurPromptText(blob)) {
-            progress(requestId, "done", `Captured text (${blob.length} chars)`, adminTabId);
-            return resolve(blob);
-          }
-        }
-      };
-
-      const obs = new MutationObserver(() => tick());
+  // Count real attachment chips only. Treating any nearby "remove/close" control as proof of an
+  // upload let pages be sent with no image at all.
+  function attachmentChips() {
+    const composer = findComposer();
+    const container = composer?.closest('form, [class*="composer"], main') || document;
+    const visible = el => {
       try {
-        obs.observe(document.body, { childList: true, subtree: true, characterData: true });
-      } catch {}
-      interval = setInterval(tick, 500);
-      setTimeout(tick, 1000);
-    });
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      } catch { return false; }
+    };
+    const chips = deepQueryAll(ATTACHMENT_CHIP_SELECTOR, container).filter(visible);
+    const outer = chips.filter((chip, _i, arr) => !arr.some(other => other !== chip && other.contains(chip)));
+    if (outer.length) return outer;
+    return deepQueryAll('button[aria-label*="remove file" i], button[aria-label*="remove attachment" i], button[data-testid*="remove-file"]', container).filter(visible);
+  }
+
+  function countAttachments() {
+    return attachmentChips().length;
+  }
+
+  async function clearComposerAttachments(timeoutMs = 4000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const chips = attachmentChips();
+      if (!chips.length) return true;
+      for (const chip of chips) {
+        const remove = chip.matches?.("button") ? chip
+          : chip.querySelector?.('button[aria-label*="remove" i], button[aria-label*="delete" i], button[data-testid*="remove"]');
+        try { remove?.click(); } catch {}
+      }
+      await sleep(350);
+    }
+    return countAttachments() === 0;
+  }
+
+  async function waitForNewAttachment(baseline, timeoutMs = 10000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (countAttachments() > baseline) {
+        await sleep(600);
+        if (countAttachments() > baseline) return true;
+      }
+      await sleep(300);
+    }
+    return false;
   }
 
   async function pastePdf(job) {
@@ -1248,17 +1191,7 @@
         type: detectedMime,
       });
 
-      // Clear existing composer attachments if any
-      try {
-        const composer = findComposer();
-        const container = composer?.closest('form, [class*="composer"], main') || document;
-        const removeBtns = deepQueryAll(
-          'button[aria-label*="remove" i], button[aria-label*="delete" i], button[aria-label*="close" i], button[data-testid*="remove"]',
-          container
-        );
-        for (const btn of removeBtns) btn.click();
-        if (removeBtns.length > 0) await sleep(400);
-      } catch {}
+      await clearComposerAttachments();
 
       // 1. Try file input assign first (cleanest React file upload)
       let inputs = deepQueryAll('input[type="file"]');
@@ -1282,6 +1215,10 @@
         inputs = deepQueryAll('input[type="file"]');
       }
 
+      const el = findComposer();
+      // Each method must prove a NEW chip appeared. Reporting success on an unchanged composer
+      // sent pages with no image, which is why runs died a few pages in.
+      const baseline = countAttachments();
       if (inputs.length) {
         const input = inputs[inputs.length - 1];
         const dt = new DataTransfer();
@@ -1290,11 +1227,10 @@
         input.dispatchEvent(new Event("change", { bubbles: true }));
         input.dispatchEvent(new Event("input", { bubbles: true }));
         LOG("Attached via input[type=file]:", finalName);
-        return true;
+        if (await waitForNewAttachment(baseline, 12000)) return true;
       }
 
       // 2. Fallback: Try HTML5 native Drag & Drop directly on composer
-      const el = findComposer();
       if (el) {
         try {
           const dt = new DataTransfer();
@@ -1304,7 +1240,7 @@
           el.dispatchEvent(new DragEvent("dragover", evInit));
           el.dispatchEvent(new DragEvent("drop", evInit));
           LOG("Attached via HTML5 drop:", finalName);
-          return true;
+          if (await waitForNewAttachment(baseline, 8000)) return true;
         } catch {}
       }
 
@@ -1316,11 +1252,11 @@
           el.focus();
           document.execCommand("paste");
           LOG("Attached via clipboard paste:", finalName);
-          return true;
+          if (await waitForNewAttachment(baseline, 8000)) return true;
         }
       } catch {}
 
-      return true;
+      return false;
     } catch (e) {
       LOG("pdf paste failed", e);
       return false;
@@ -1362,6 +1298,8 @@
         await sleep(1000);
         waitGenSec++;
       }
+      runtime.check();
+      if (isGenerating()) throw new Error("AI chat is still generating. Wait for it to finish, then retry.");
 
       if (!job.continueChat) {
         try {
@@ -1389,18 +1327,34 @@
       const skipPdf = !!job.skipPdf && !job.fileBase64;
       const initialReplyCount = getAssistantTurnNodes().length;
       const baseline = snapshotReplyFingerprint();
-      if (!skipPdf && job.fileBase64) {
-        progress(requestId, "pdf", `Attaching image for page (${job.fileName || 'page'})…`, adminTabId);
-        const attached = await pastePdf(job);
-        if (attached) {
-          progress(requestId, "pdf", "Waiting for image upload to complete…", adminTabId);
-          await waitForAttachmentReady(30000);
+      const needsImage = !skipPdf && !!job.fileBase64;
+      if (needsImage) {
+        // A single upload can silently drop mid-run; retrying on a cleaned composer is cheaper
+        // than failing the page.
+        let attached = false;
+        for (let attempt = 1; attempt <= 3 && !attached; attempt++) {
+          runtime.check();
+          progress(requestId, "pdf", `Attaching image for page (${job.fileName || 'page'})${attempt > 1 ? ` — retry ${attempt - 1}` : ''}…`, adminTabId);
+          attached = await pastePdf(job);
+          if (!attached) {
+            await clearComposerAttachments();
+            await sleep(800);
+          }
         }
+        if (!attached) throw new Error("Could not attach the page image after 3 attempts. Check upload support in the selected AI chat, remove any stuck attachment, then retry.");
+        progress(requestId, "pdf", "Waiting for image upload to complete…", adminTabId);
+        if (!await waitForAttachmentReady(30000)) throw new Error("Image upload not confirmed. Retry this page after checking the AI tab.");
         await sleep(800);
       }
+      runtime.check();
       progress(requestId, "prompt", "Injecting prompt…", adminTabId);
-      await injectPrompt(el, job.prompt);
+      await injectPrompt(findComposer() || el, job.prompt);
       await sleep(600);
+      runtime.check();
+      // An image-less send wastes the turn and answers about the previous page's image.
+      if (needsImage && countAttachments() < 1) {
+        throw new Error("Image attachment disappeared before sending. Retry this page.");
+      }
       progress(requestId, "send", "Sending…", adminTabId);
       await clickSendOrEnter(findComposer() || el);
 
@@ -1425,7 +1379,7 @@
 
       progress(requestId, "wait", "Waiting for AI reply…", adminTabId);
       const expectedMarker = job.expectedMarker || msg.expectedMarker || null;
-      const text = await waitForJsonReplyLive(180000, requestId, baseline, adminTabId, initialReplyCount, expectedMarker);
+      const text = await waitForJsonReplyLive(180000, requestId, baseline, adminTabId, initialReplyCount, expectedMarker, job.responseFormat);
       progress(requestId, "done", `Captured ${text.length} chars`, adminTabId);
       await reportSafe(requestId, text, adminTabId);
     } finally {
@@ -1458,6 +1412,7 @@
         await sleep(100);
       }
 
+      if (!fullChat && isGenerating()) throw new Error("AI is still generating. Wait for completion, then capture again.");
       const targetPageNumber = msg.pageNumber || job.pageNumber || null;
       const totalPages = msg.totalPages || job.totalPages || null;
       const expectedMarker = msg.expectedMarker || job.expectedMarker || null;
@@ -1475,6 +1430,18 @@
         replyText = scrapeBestReply();
       }
 
+      const validated = runtime.completeJson(replyText);
+      if (validated !== null) return validated;
+      if (expectedMarker) {
+        // The marker proves this reply finished, so the lenient reader cannot pick up a partial stream.
+        const marked = extractQuestionsFromText(replyText);
+        if (marked.length) {
+          progress(msg.requestId, "done", `Captured ${marked.length} question(s) for Page ${targetPageNumber || ""}`, adminTabId);
+          return "```json\n" + JSON.stringify(marked, null, 2) + "\n```\n" + expectedMarker;
+        }
+        if (hasStandaloneCompletion(replyText)) return "```json\n[]\n```\n" + expectedMarker;
+        throw new Error("The matching page reply was found, but its JSON format could not be read. Copy its code block and use Paste CSV / JSON to recover it.");
+      }
       if (!replyText || replyText.length < 20) throw new Error("No reply to capture yet.");
       if (isOurPromptText(replyText) && !extractJsonCandidate(replyText)) {
         throw new Error("Only prompt text found — wait for AI reply, then Capture again.");

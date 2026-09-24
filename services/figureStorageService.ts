@@ -119,6 +119,14 @@ export function getStoredImgbbApiKey(): string {
       return customKey.trim();
     }
   } catch (_) {}
+
+  try {
+    const envKey = (import.meta as any)?.env?.VITE_IMGBB_API_KEY || (typeof process !== 'undefined' && process?.env?.IMGBB_API_KEY);
+    if (envKey && String(envKey).trim().length > 10) {
+      return String(envKey).trim();
+    }
+  } catch (_) {}
+
   return DEFAULT_IMGBB_API_KEY;
 }
 

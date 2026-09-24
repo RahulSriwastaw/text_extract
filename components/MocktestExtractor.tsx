@@ -81,6 +81,9 @@ import {
   subscribeToExtensionStatus,
   getStoredAiProvider,
   setStoredAiProvider,
+  getChatRotationInterval,
+  setChatRotationInterval,
+  shouldStartNewChat,
   BridgeStatus,
   AiProvider
 } from '../services/studyAiBridgeService';
@@ -102,6 +105,8 @@ interface PageQueueItem {
   sourceType?: 'pdf' | 'image' | 'docx' | 'text';
   fileName?: string;
   expectedMarker?: string;
+  /** Chat this page was extracted in. Recapture needs it once a run rotates to a fresh chat. */
+  chatUrl?: string;
 }
 
 export function splitTextIntoDocumentPages(text: string, maxQuestionsPerPage = 10): string[] {
@@ -176,8 +181,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [batchSize, setBatchSize] = useState<number>(3);
   const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
   // Active document session for AI Bridge (1 document = 1 continuous chat thread)
-  const [documentChatUrl, setDocumentChatUrl] = useState<string | null>(null);
+  const [documentChatUrl, setDocumentChatUrlState] = useState<string | null>(null);
+  const documentChatUrlRef = useRef<string | null>(null);
+  const setDocumentChatUrl = (url: string | null) => {
+    documentChatUrlRef.current = url;
+    setDocumentChatUrlState(url);
+  };
   const [documentSessionId, setDocumentSessionId] = useState<string>(() => `doc_${Date.now()}`);
+  // Pages per AI chat before the bridge opens a fresh one (0 = one chat for the whole document).
+  const [chatRotation, setChatRotationState] = useState<number>(() => getChatRotationInterval());
+  const setChatRotation = (pages: number) => {
+    setChatRotationInterval(pages);
+    setChatRotationState(getChatRotationInterval());
+  };
 
   // Direct Text Input state
   const [inputMode, setInputMode] = useState<'upload' | 'direct_text'>('upload');
@@ -751,7 +767,8 @@ Rules:
     pageIndex: number,
     totalPages: number,
     isLastPage: boolean,
-    mode?: 'exact' | 'similar'
+    mode?: 'exact' | 'similar',
+    engine: 'bridge' | 'api' = aiEngine
   ): Promise<{ completeItems: MockTestMcqItem[]; nextPendingContext: PendingMcqContext | null }> => {
     const activeMode = mode || extractionMode;
     const isSimilar = activeMode === 'similar';
@@ -771,7 +788,7 @@ Rules:
         : `[Sequential ${pageIndex + 1}/${totalPages}] Page ${page.pageNumber}: Starting AI extraction...${carryNotice}`
     );
 
-    const isUsingBridge = aiEngine === 'bridge' && bridgeStatus.connected;
+    const isUsingBridge = engine === 'bridge';
 
     try {
       let rawExtractedItems: MockTestMcqItem[] = [];
@@ -792,7 +809,15 @@ Rules:
           ? `mocktest_page_${page.pageNumber}.${imgExt}`
           : `mocktest_page_${page.pageNumber}.txt`;
 
-        const initialMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${page.id || Date.now()}---`;
+        // A chat that keeps growing makes uploads and the composer unreliable, so start a fresh
+        // one every few pages. Split-question context still carries over: it travels in the prompt.
+        const startNewChat = shouldStartNewChat(pageIndex, chatRotation);
+        if (startNewChat && pageIndex > 0) {
+          setDocumentChatUrl(null);
+          setLiveStatusText(`[Page ${page.pageNumber}] Starting a fresh AI chat (every ${chatRotation} pages)...`);
+        }
+
+        const initialMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${crypto.randomUUID()}---`;
         page.expectedMarker = initialMarker;
         setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: initialMarker } : p));
 
@@ -803,8 +828,8 @@ Rules:
           skipPdf: !page.imageUrl,
           prompt,
           provider: selectedProvider || getStoredAiProvider() || 'gemini',
-          continueChat: pageIndex > 0,
-          chatUrl: documentChatUrl || undefined,
+          continueChat: !startNewChat,
+          chatUrl: startNewChat ? undefined : (documentChatUrlRef.current || undefined),
           pageNumber: page.pageNumber,
           totalPages: pages.length,
           expectedMarker: initialMarker,
@@ -820,12 +845,15 @@ Rules:
           }
         });
 
-        if ((bridgeRes as any).chatUrl) {
-          setDocumentChatUrl((bridgeRes as any).chatUrl);
+        if (bridgeRes.chatUrl) {
+          setDocumentChatUrl(bridgeRes.chatUrl);
+          // Remember the page's own chat so Recapture still works after a rotation.
+          page.chatUrl = bridgeRes.chatUrl;
+          setPages(prev => prev.map(p => p.id === page.id ? { ...p, chatUrl: bridgeRes.chatUrl } : p));
         }
-        if ((bridgeRes as any).expectedMarker) {
-          page.expectedMarker = (bridgeRes as any).expectedMarker;
-          setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: (bridgeRes as any).expectedMarker } : p));
+        if (bridgeRes.expectedMarker) {
+          page.expectedMarker = bridgeRes.expectedMarker;
+          setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: bridgeRes.expectedMarker } : p));
         }
         const { rawText, elements } = bridgeRes;
 
@@ -1072,7 +1100,8 @@ Rules:
       setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
     }
 
-    if (aiEngine === 'bridge' && !bridgeStatus.connected) {
+    let activeEngine = aiEngine;
+    if (activeEngine === 'bridge') {
       const ping = await pingStudyAiExtension(1500);
       if (!ping.connected) {
         const useApiInstead = confirm(
@@ -1082,6 +1111,7 @@ Rules:
           '• [Cancel] dabayein: Extension connection modal kholein.'
         );
         if (useApiInstead) {
+          activeEngine = 'api';
           setAiEngine('api');
         } else {
           setShowConnectModal(true);
@@ -1091,18 +1121,31 @@ Rules:
     }
 
     setIsProcessingAll(true);
+    pauseRef.current = false;
     setIsPaused(false);
 
     try {
       let carriedPendingContext: PendingMcqContext | null = null;
+      const firstIndex = pages.findIndex(p => p.id === selectedPages[0].id);
+      const previousPage = firstIndex > 0 ? pages[firstIndex - 1] : null;
+      if (previousPage?.items?.length && previousPage.pageNumber + 1 === selectedPages[0].pageNumber) {
+        const incomplete = previousPage.items.filter(item => {
+          const issues = detectItemFieldIssues(item);
+          return issues.hasMissingOptions || issues.hasEmptyQuestion;
+        });
+        if (incomplete.length) carriedPendingContext = {
+          sourcePageNumber: previousPage.pageNumber, sourcePageId: previousPage.id, pendingItems: incomplete,
+        };
+      }
 
       for (let i = 0; i < selectedPages.length; i++) {
         if (pauseRef.current) {
           setLiveStatusText('Processing paused by user.');
-          break;
+          return;
         }
 
         const page = selectedPages[i];
+        if (carriedPendingContext && carriedPendingContext.sourcePageNumber + 1 !== page.pageNumber) carriedPendingContext = null;
         const isLast = (i === selectedPages.length - 1);
 
         const carryInfo = carriedPendingContext && carriedPendingContext.pendingItems.length > 0
@@ -1121,16 +1164,19 @@ Rules:
             i,
             selectedPages.length,
             isLast,
-            mode
+            mode,
+            activeEngine
           );
           carriedPendingContext = nextPendingContext;
         } catch (pageErr: any) {
           const isAborted = pageErr?.name === 'AbortError' || pageErr?.message?.includes('stopped by user') || pageErr?.message?.includes('aborted');
           if (isAborted) {
             console.log(`Page ${page.pageNumber} extraction stopped.`);
-            if (pauseRef.current) break;
+            setLiveStatusText("Extraction stopped. Completed pages are saved; resume remaining pages when ready.");
+            return;
           } else {
             console.error(`Error processing page ${page.pageNumber}:`, pageErr);
+            throw new Error(`Page ${page.pageNumber} failed: ${pageErr.message || pageErr}. Completed pages are saved. Retry this page before continuing.`);
           }
         }
 
@@ -1495,7 +1541,7 @@ Rules:
       const rawText = await captureFromStudyAiBridge({
         provider,
         fullChat: false,
-        chatUrl: documentChatUrl || undefined,
+        chatUrl: page.chatUrl || documentChatUrl || undefined,
         pageNumber: page.pageNumber,
         totalPages: pages.length,
         expectedMarker: page.expectedMarker || undefined
@@ -2555,6 +2601,36 @@ Rules:
             </div>
 
             <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
+
+            {/* New chat every N pages — a long chat makes image upload unreliable */}
+            {aiEngine === 'bridge' && (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">New Chat:</span>
+                  <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+                    {[3, 5, 10, 0].map((count) => (
+                      <button
+                        key={count}
+                        type="button"
+                        onClick={() => setChatRotation(count)}
+                        className={`px-2 py-0.5 text-xs font-bold rounded transition-all ${
+                          chatRotation === count
+                            ? 'bg-emerald-500 text-black shadow-sm'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                        title={count === 0
+                          ? 'Poore document ke liye ek hi chat (lambe run me upload fail ho sakta hai)'
+                          : `Har ${count} page ke baad fresh AI chat — upload aur composer reliable rehte hain`}
+                      >
+                        {count === 0 ? 'Off' : `${count}P`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
+              </>
+            )}
 
             {/* One-Shot Auto-Fill Toggle */}
             <label className="flex items-center gap-2 cursor-pointer select-none group" title="Image bhejte hi Question, Options, Answer, Subject, aur Solutions ek sath fill honge">

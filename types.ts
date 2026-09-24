@@ -20,6 +20,7 @@ export interface BoundingBox {
 
 export interface ExtractedElement {
   type: 'text' | 'image' | 'table';
+  continues_previous?: boolean;
   content?: string;
   imageB64?: string;
   bbox?: BoundingBox;

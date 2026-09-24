@@ -29,6 +29,7 @@ import {
   BridgeStatus, 
   getStoredAiProvider,
   setStoredAiProvider,
+  shouldStartNewChat,
   AiProvider
 } from '../services/studyAiBridgeService';
 
@@ -100,9 +101,6 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     checkAuth();
     const unsub = subscribeToExtensionStatus((status) => {
       setBridgeStatus(status);
-      if (status.connected) {
-        setAiEngine('extension');
-      }
     });
     pingStudyAiExtension().catch(() => {});
     fetch('/api/config')
@@ -414,11 +412,20 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     setBridgeProgressMsg(null);
     
     // Check if using Study AI Bridge extension (Zero Token Mode)
-    const useBridge = aiEngine === 'extension' && bridgeStatus.connected;
+    const useBridge = aiEngine === 'extension';
+    if (useBridge) {
+      const status = await pingStudyAiExtension(3000);
+      if (!status.connected || status.protocolVersion !== 2) {
+        setErrorMsg(status.error || 'Reload TextExtract Pro Bridge 2.5 and refresh this page to reconnect.');
+        setShowGeminiConnect(true);
+        setAppState(AppState.ERROR);
+        return;
+      }
+    }
 
     // 1. Visually mark ALL selected pages as 'processing' immediately.
     setPages(prev => prev.map(p => 
-      (p.isSelected && p.status !== 'done') 
+      (!useBridge && p.isSelected && p.status !== 'done')
         ? { ...p, status: 'processing', elements: undefined, extractedText: undefined } 
         : p
     ));
@@ -430,6 +437,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     if (useBridge) {
       // Process sequentially through the browser AI chat tab
       const extractedPageTexts: { [pageId: string]: string } = {};
+      let activeChatUrl: string | undefined;
 
       for (let i = 0; i < pagesToProcess.length; i++) {
         if (criticalErrorOccurred) break;
@@ -446,13 +454,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
         // Get trailing chunk from previous page to handle questions split across page boundaries
         let prevTailChunk = '';
-        if (i > 0) {
-          const prevPage = pagesToProcess[i - 1];
-          const prevText = extractedPageTexts[prevPage.id] || prevPage.extractedText || '';
-          if (prevText) {
-            const lines = prevText.trim().split('\n').filter(Boolean);
-            prevTailChunk = lines.slice(-5).join('\n');
-          }
+        const previousPage = pages.find(p => p.pageNumber === page.pageNumber - 1);
+        if (previousPage && (extractedPageTexts[previousPage.id] || previousPage.status === 'done')) {
+          const lastElement = previousPage.elements?.at(-1)?.content;
+          prevTailChunk = (extractedPageTexts[previousPage.id] || lastElement || previousPage.extractedText || '').slice(-6000);
         }
 
         try {
@@ -470,10 +475,15 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             mimeType: 'image/png',
             prompt,
             provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
-            continueChat: i > 0,
-            chatUrl: pdfChatUrl || undefined,
+            // Rotate to a fresh chat every few pages: a long chat makes upload and the composer
+            // unreliable. Continuation context travels in the prompt, not the chat history.
+            continueChat: !shouldStartNewChat(i),
+            chatUrl: shouldStartNewChat(i) ? undefined : activeChatUrl,
+            pageNumber: page.pageNumber,
+            totalPages: pages.length,
             silent: true,
-            onProgress: (step, detail) => {
+            onProgress: (step, detail, chatUrl) => {
+              if (chatUrl) { activeChatUrl = chatUrl; setPdfChatUrl(chatUrl); }
               const msg = detail || `${step.toUpperCase()}...`;
               setBridgeProgressMsg(`Page ${i + 1}/${pagesToProcess.length}: ${msg}`);
               setPages(prev => prev.map(p => p.id === page.id ? {
@@ -483,23 +493,24 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             }
           });
 
-          if ((bridgeRes as any).chatUrl && !pdfChatUrl) {
-            setPdfChatUrl((bridgeRes as any).chatUrl);
+          if (bridgeRes.chatUrl) {
+            activeChatUrl = bridgeRes.chatUrl;
+            setPdfChatUrl(bridgeRes.chatUrl);
           }
 
           const { rawText, elements } = bridgeRes;
 
           // Calculate words and points
           const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
-          extractedPageTexts[page.id] = pageText;
+          extractedPageTexts[page.id] = elements.at(-1)?.content || '';
           const pageWords = countWords(pageText);
           setWordsConsumed(prev => prev + pageWords);
           setPointsConsumed(prev => prev + 1);
 
           // If the first element completed a split question from the previous page, update previous page
           const firstElem = elements[0];
-          if (firstElem && (firstElem as any).continues_previous && i > 0) {
-            const prevPage = pagesToProcess[i - 1];
+          if (firstElem?.continues_previous && previousPage && prevTailChunk) {
+            const prevPage = previousPage;
             setPages(prev => prev.map(p => {
               if (p.id === prevPage.id && p.elements && p.elements.length > 0) {
                 // If previous page had the partial question cut off, remove the trailing fragment
@@ -531,6 +542,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           console.error(`Error processing page ${page.pageNumber} via TextExtract Bridge:`, e);
           const errorStr = e?.message || String(e);
           setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: errorStr } : p));
+          setErrorMsg(`Page ${page.pageNumber}: ${errorStr}. Completed pages are saved; retry this page before continuing.`);
+          criticalErrorOccurred = true;
         }
       }
 
@@ -634,7 +647,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined, errorMessage: undefined } : p));
 
     // If using Study AI Bridge
-    if (aiEngine === 'extension' && bridgeStatus.connected) {
+    if (aiEngine === 'extension') {
       try {
         const pageIdx = pages.findIndex(p => p.id === id);
         let prevTailChunk = '';
@@ -660,6 +673,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           prompt,
           provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
           continueChat: false,
+          pageNumber: page.pageNumber,
+          totalPages: pages.length,
           onProgress: (_step, detail) => {
             setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: detail || undefined } : p));
           }

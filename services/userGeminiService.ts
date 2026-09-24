@@ -208,6 +208,7 @@ export async function generateWithUserGemini(
   if ((auth.authType as string) === 'extension') {
     const res = await extractWithStudyAiBridge({
       prompt,
+      responseFormat: 'text',
       skipPdf: true,
       continueChat: true,
       provider: getStoredAiProvider(),

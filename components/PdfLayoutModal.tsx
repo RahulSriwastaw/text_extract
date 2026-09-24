@@ -355,7 +355,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                 className={`w-28 p-2 rounded-xl border bg-black/40 shadow-inner flex flex-col items-center justify-center transition-all ${
                   isLandscape ? 'h-20' : 'h-28'
                 } ${config.withBorder ? 'border-blue-500/40 shadow-blue-500/5' : 'border-white/10'}`}
-                title={`Layout Preview: ${rows} rows × ${cols} cols (${isLandscape ? 'Landscape' : 'Portrait'})`}
+                title={`Reading order preview: ${rows} rows × ${cols} cols (${isLandscape ? 'Landscape' : 'Portrait'}). Final placement auto-fits each page to fill the sheet.`}
               >
                 <div
                   className="w-full h-full grid gap-1 p-1 rounded-lg bg-zinc-900/80"
@@ -457,7 +457,9 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
             <div className="md:col-span-3 flex justify-end">
               <div className="flex items-center gap-2 p-2 bg-black/30 border border-white/10 rounded-xl text-xs text-slate-300">
                 <span className="text-[11px] font-semibold text-slate-400">
-                  {config.pageSize} ({isLandscape ? 'Landscape' : 'Portrait'})
+                  {config.pageSize} ({config.orientation === 'auto'
+                    ? 'Auto-fit'
+                    : isLandscape ? 'Landscape' : 'Portrait'})
                 </span>
                 <span className="text-[10px] text-slate-500">
                   {Math.round(sheetW)} × {Math.round(sheetH)} pt

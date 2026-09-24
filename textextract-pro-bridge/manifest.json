@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TextExtract Pro Bridge — AI Document Digitizer",
-  "version": "2.4.2",
-  "description": "High-performance multi-AI document & MCQ digitizer bridge for TextExtract (Gemini, ChatGPT, DeepSeek, Claude). 100% Free & Zero-Token.",
+  "version": "2.5.3",
+  "description": "Reliable MCQ and text extraction with queued requests, cancellation and result recovery for Gemini, ChatGPT, DeepSeek and Claude.",
   "author": "TextExtract",
   "permissions": ["tabs", "scripting", "clipboardRead", "clipboardWrite", "storage"],
   "host_permissions": [
@@ -37,7 +37,7 @@
     },
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["content-gemini.js"],
+      "js": ["bridge-runtime.js", "content-gemini.js"],
       "run_at": "document_idle"
     },
     {
@@ -47,7 +47,7 @@
         "https://chat.openai.com/*",
         "https://claude.ai/*"
       ],
-      "js": ["content-bridge-generic.js"],
+      "js": ["bridge-runtime.js", "content-bridge-generic.js"],
       "run_at": "document_idle"
     }
   ],

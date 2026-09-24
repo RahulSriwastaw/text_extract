@@ -563,33 +563,264 @@ export const cropImageByPercentage = async (
   return canvas.toDataURL('image/jpeg', 0.95);
 };
 
+// Text-visibility boost applied to every drawn snippet: gentle contrast + brightness lift
+// (helps faint scans / low-contrast phone photos read clearly after shrinking into a grid)
+const IMAGE_ENHANCE_FILTER = 'contrast(1.14) brightness(1.03) saturate(1.05)';
+
+// A rendered card's page is allowed to grow taller than a plain A4 sheet (become "vertical")
+// so that many merged snippets never have to be squeezed smaller than this floor.
+const MAX_PAGE_HEIGHT_MULTIPLIER = 3.2;
+
+export interface JustifiedRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  row: number;
+}
+
+export interface JustifiedLayoutResult {
+  rects: JustifiedRect[];
+  rowCounts: number[];
+  contentHeight: number;
+  coverage: number; // 0 - 1, fraction of the available area actually covered by content
+}
+
 /**
- * Renders a single PageCard (with 1, 2, 3, or more pages/snippets) onto a high-DPI A4 canvas
+ * Enumerates candidate "how many items per row" splits. Rows are kept near-uniform
+ * (counts differ by at most 1) so the result still reads like a clean grid, but which
+ * rows carry the extra item is free — that freedom is what lets the stack of rows land
+ * on the sheet height instead of stopping half way down.
+ */
+function buildRowCountCandidates(n: number, maxPerRow: number): number[][] {
+  const candidates: number[][] = [];
+
+  const pickRows = (total: number, take: number, limit: number): number[][] => {
+    const out: number[][] = [];
+    const current: number[] = [];
+    const walk = (start: number) => {
+      if (out.length >= limit) return;
+      if (current.length === take) {
+        out.push([...current]);
+        return;
+      }
+      for (let i = start; i < total; i++) {
+        current.push(i);
+        walk(i + 1);
+        current.pop();
+        if (out.length >= limit) return;
+      }
+    };
+    walk(0);
+    return out;
+  };
+
+  for (let rows = 1; rows <= n; rows++) {
+    const base = Math.floor(n / rows);
+    const extra = n % rows;
+    if (base < 1) continue;
+    if (base + (extra > 0 ? 1 : 0) > maxPerRow) continue;
+
+    if (extra === 0) {
+      candidates.push(new Array(rows).fill(base));
+      continue;
+    }
+    for (const picked of pickRows(rows, extra, 120)) {
+      const counts = new Array(rows).fill(base);
+      for (const i of picked) counts[i] = base + 1;
+      candidates.push(counts);
+    }
+  }
+
+  return candidates.length > 0 ? candidates : [[n]];
+}
+
+/**
+ * Builds the geometry for one candidate row split: every row is stretched so its items
+ * span the full width, and each item keeps its own aspect ratio (so nothing is
+ * letterboxed inside an over-sized slot).
+ */
+function layoutFromRowCounts(
+  aspects: number[],
+  counts: number[],
+  availWidth: number,
+  availHeight: number,
+  gap: number,
+  flexibleHeight: boolean,
+  maxHeight: number
+): JustifiedLayoutResult {
+  const rows = counts.length;
+  const heightLimit = flexibleHeight ? maxHeight : availHeight;
+
+  const rowAspectSums: number[] = [];
+  let cursor = 0;
+  for (const count of counts) {
+    let sum = 0;
+    for (let i = 0; i < count; i++) sum += Math.max(0.05, aspects[cursor + i] || 1);
+    rowAspectSums.push(sum);
+    cursor += count;
+  }
+
+  // Height each row needs when its items are stretched to fill the full width
+  const naturalHeights = counts.map(
+    (count, r) => (availWidth - (count - 1) * gap) / rowAspectSums[r]
+  );
+  const sumHeights = naturalHeights.reduce((a, b) => a + b, 0);
+  const gapsTotal = (rows - 1) * gap;
+
+  // Only shrink when the natural stack is taller than what we are allowed to use
+  let scale = 1;
+  if (sumHeights + gapsTotal > heightLimit) {
+    scale = Math.max(0.05, (heightLimit - gapsTotal) / sumHeights);
+  }
+
+  const usedHeight = sumHeights * scale + gapsTotal;
+  const contentHeight = flexibleHeight ? usedHeight : availHeight;
+
+  // Any height we could not consume is spread between the rows rather than dumped
+  // as one blank block at the bottom of the sheet.
+  const leftover = Math.max(0, contentHeight - usedHeight);
+  const extraRowGap = rows > 1 ? leftover / (rows - 1) : 0;
+  const topOffset = rows > 1 ? 0 : leftover / 2;
+
+  const rects: JustifiedRect[] = [];
+  let y = topOffset;
+  let index = 0;
+  let coveredArea = 0;
+
+  for (let r = 0; r < rows; r++) {
+    const count = counts[r];
+    const rowHeight = naturalHeights[r] * scale;
+    const rowGap = gap * scale;
+    const rowWidth = availWidth * scale;
+    let x = (availWidth - rowWidth) / 2; // centred only when the row had to shrink
+
+    for (let c = 0; c < count; c++) {
+      const aspect = Math.max(0.05, aspects[index] || 1);
+      const width = aspect * rowHeight;
+      rects.push({ x, y, width, height: rowHeight, row: r });
+      coveredArea += width * rowHeight;
+      x += width + rowGap;
+      index++;
+    }
+
+    y += rowHeight + gap + extraRowGap;
+  }
+
+  const coverage = coveredArea / Math.max(1, availWidth * Math.max(1, contentHeight));
+  return { rects, rowCounts: counts, contentHeight, coverage };
+}
+
+/**
+ * Justified "fill the sheet" solver — the same idea tools like online2pdf use for their
+ * multiple-pages-per-sheet output.
+ *
+ * Instead of dropping pages into a rigid rows x cols grid (which letterboxes every page
+ * and leaves the rest of the sheet blank), every row is stretched to the full width and
+ * the split into rows is searched so the stack of rows fills the available height as
+ * completely as possible. The result: pages come out as large as they can be and the
+ * sheet is actually used.
+ *
+ * With `flexibleHeight` the page height follows the content exactly (used when the page
+ * itself may grow "vertical"); otherwise the layout is fitted into a fixed sheet.
+ */
+export function solveJustifiedFill(
+  aspects: number[],
+  availWidth: number,
+  availHeight: number,
+  gap: number,
+  opts: {
+    flexibleHeight?: boolean;
+    maxHeight?: number;
+    maxPerRow?: number;
+    rowCounts?: number[];
+  } = {}
+): JustifiedLayoutResult {
+  const n = aspects.length;
+  const flexibleHeight = opts.flexibleHeight === true;
+  const maxHeight = opts.maxHeight ?? availHeight;
+
+  if (n === 0) {
+    return { rects: [], rowCounts: [], contentHeight: flexibleHeight ? 0 : availHeight, coverage: 0 };
+  }
+
+  // Caller pinned the grid shape (e.g. an explicit custom rows x cols choice)
+  if (opts.rowCounts && opts.rowCounts.length > 0) {
+    return layoutFromRowCounts(aspects, opts.rowCounts, availWidth, availHeight, gap, flexibleHeight, maxHeight);
+  }
+
+  const maxPerRow = Math.max(1, Math.min(opts.maxPerRow ?? 5, n));
+  const candidates = buildRowCountCandidates(n, maxPerRow);
+
+  let best: JustifiedLayoutResult | null = null;
+  let bestScore = -Infinity;
+
+  for (const counts of candidates) {
+    const result = layoutFromRowCounts(aspects, counts, availWidth, availHeight, gap, flexibleHeight, maxHeight);
+
+    // Prefer splits that still look like a tidy grid when quality is otherwise equal
+    const irregularity = Math.max(...counts) - Math.min(...counts);
+
+    let score: number;
+    if (flexibleHeight) {
+      // Page height is free, so aim for a natural A4-ish page that is completely filled
+      score = -(Math.abs(result.contentHeight - availHeight) + irregularity * 0.08 * availHeight);
+    } else {
+      score = result.coverage - irregularity * 0.02;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = result;
+    }
+  }
+
+  return best ?? layoutFromRowCounts(aspects, [n], availWidth, availHeight, gap, flexibleHeight, maxHeight);
+}
+
+/**
+ * Renders a single PageCard (with 1, 2, 3, or more pages/snippets) onto a high-DPI canvas.
  * WYSIWYG: Clean layout with NO artificial question/solution tags.
+ *
+ * The canvas WIDTH is always fixed to A4 width, but the HEIGHT is computed from the
+ * actual content that needs to be drawn (auto content-fit) instead of always being a
+ * fixed A4 height. This removes dead white space below short content, and lets pages
+ * with many merged snippets grow taller ("vertical") rather than shrinking every
+ * snippet down to fit a fixed-size sheet.
  */
 export const renderMergedCardToA4 = async (
   card: PageCard,
   targetWidth: number = Math.round(CANVAS_A4_WIDTH * EXPORT_SCALE),
-  targetHeight: number = Math.round(CANVAS_A4_HEIGHT * EXPORT_SCALE)
+  maxTargetHeight: number = Math.round(CANVAS_A4_HEIGHT * EXPORT_SCALE * MAX_PAGE_HEIGHT_MULTIPLIER)
 ): Promise<string> => {
-  const canvas = document.createElement('canvas');
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Could not create canvas context');
-
-  // Fill crisp white background
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, targetWidth, targetHeight);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-
-  const marginX = Math.round(50 * (targetWidth / CANVAS_A4_WIDTH));
+  const scaleFactor = targetWidth / CANVAS_A4_WIDTH;
+  const marginX = Math.round(50 * scaleFactor);
   const availableWidth = targetWidth - marginX * 2;
-  const marginY = Math.round(50 * (targetHeight / CANVAS_A4_HEIGHT));
-  const availableHeight = targetHeight - marginY * 2;
+  const marginY = Math.round(50 * scaleFactor);
+  // The "natural" A4 content box — used as the shape the auto layout aims for,
+  // never as a floor that would pad short content out with blank space.
+  const idealContentHeight = Math.round(CANVAS_A4_HEIGHT * scaleFactor) - marginY * 2;
 
   const items = ensureCardItems(card);
+
+  const finalize = (canvas: HTMLCanvasElement): string => {
+    const result = canvas.toDataURL('image/jpeg', 0.94);
+    canvas.width = 0;
+    canvas.height = 0;
+    return result;
+  };
+
+  const drawImageEnhanced = (
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number
+  ) => {
+    ctx.save();
+    ctx.filter = IMAGE_ENHANCE_FILTER;
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+    ctx.restore();
+  };
 
   // Case 1: Standalone Single Item (Unmerged)
   if (items.length <= 1) {
@@ -602,7 +833,12 @@ export const renderMergedCardToA4 = async (
     const src = item.croppedImage || item.image || card.questionImage;
     if (!src) {
       console.warn('renderMergedCardToA4: Empty image source on card', card.id);
-      return canvas.toDataURL('image/jpeg', 0.94);
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = Math.round(CANVAS_A4_HEIGHT * scaleFactor);
+      const ctx = canvas.getContext('2d');
+      if (ctx) { ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+      return finalize(canvas);
     }
     const img = await loadImage(src);
 
@@ -615,22 +851,36 @@ export const renderMergedCardToA4 = async (
     const sh = !item.croppedImage && item.crop ? Math.min(naturalH - sy, Math.max(1, Math.round((item.crop.height / 100) * naturalH))) : naturalH;
 
     const scaleMult = item.scale || 1.0;
-    const fitWidthScale = availableWidth / Math.max(1, sw);
-    const fitHeightScale = availableHeight / Math.max(1, sh);
-    const chosenScale = Math.min(fitWidthScale * scaleMult, fitHeightScale);
-    const drawW = Math.max(1, Math.round(sw * chosenScale));
-    const drawH = Math.max(1, Math.round(sh * chosenScale));
+    // Fit by width only — the page height auto-adjusts to whatever this produces.
+    const fitWidthScale = (availableWidth / Math.max(1, sw)) * scaleMult;
+    let drawW = Math.max(1, Math.round(sw * fitWidthScale));
+    let drawH = Math.max(1, Math.round(sh * fitWidthScale));
+
+    // Safety cap: never let a single snippet blow past the max page height.
+    const maxAvailableHeight = maxTargetHeight - marginY * 2;
+    if (drawH > maxAvailableHeight) {
+      const shrink = maxAvailableHeight / drawH;
+      drawH = Math.max(1, Math.round(drawH * shrink));
+      drawW = Math.max(1, Math.round(drawW * shrink));
+    }
+
+    // Page follows the content exactly — no padding out to a full sheet
+    const contentHeight = drawH;
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = contentHeight + marginY * 2;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not create canvas context');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     const drawX = Math.max(0, marginX + (availableWidth - drawW) / 2);
     const drawY = marginY;
+    drawImageEnhanced(ctx, img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
 
-    // CRITICAL FIX: Draw the single image onto the canvas!
-    ctx.drawImage(img, sx, sy, sw, sh, drawX, drawY, drawW, drawH);
-
-    const result = canvas.toDataURL('image/jpeg', 0.94);
-    canvas.width = 0;
-    canvas.height = 0;
-    return result;
+    return finalize(canvas);
   }
 
   // Case 2: Multi-Item Merged Set
@@ -650,14 +900,14 @@ export const renderMergedCardToA4 = async (
       const safeSw = Math.max(1, sw);
       const safeSh = Math.max(1, sh);
 
-      return { img, sx, sy, sw: safeSw, sh: safeSh, scaleMult };
+      return { img, sx, sy, sw: safeSw, sh: safeSh, scaleMult, aspect: safeSw / safeSh };
     })
   );
 
   // Subcase 2A: 2 Items (Clean vertical Question + Solution stack with optional divider)
   if (items.length === 2) {
-    const gap = Math.round(24 * (targetHeight / CANVAS_A4_HEIGHT));
-    const dividerHeight = card.showDivider !== false ? Math.round(18 * (targetHeight / CANVAS_A4_HEIGHT)) : gap;
+    const gap = Math.round(24 * scaleFactor);
+    const dividerHeight = card.showDivider !== false ? Math.round(18 * scaleFactor) : gap;
     const totalDividersHeight = dividerHeight + gap;
 
     const itemsCalculated = loaded.map(it => {
@@ -666,14 +916,28 @@ export const renderMergedCardToA4 = async (
       return { ...it, drawW, drawH };
     });
 
-    let totalItemsHeight = itemsCalculated.reduce((sum, it) => sum + it.drawH, 0);
-    const totalNeededHeight = totalItemsHeight + totalDividersHeight;
+    const totalItemsHeight = itemsCalculated.reduce((sum, it) => sum + it.drawH, 0);
+    const naturalTotalHeight = totalItemsHeight + totalDividersHeight;
 
+    // Only shrink if the natural content would exceed the sane max page height;
+    // otherwise let the page grow taller to fit both snippets at full size.
+    const maxAvailableHeight = maxTargetHeight - marginY * 2;
     let shrinkFactor = 1.0;
-    if (totalNeededHeight > availableHeight) {
-      const spaceForItems = Math.max(100, availableHeight - totalDividersHeight);
+    if (naturalTotalHeight > maxAvailableHeight) {
+      const spaceForItems = Math.max(100, maxAvailableHeight - totalDividersHeight);
       shrinkFactor = spaceForItems / Math.max(1, totalItemsHeight);
     }
+
+    const contentHeight = Math.round(naturalTotalHeight * shrinkFactor);
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = contentHeight + marginY * 2;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not create canvas context');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     let currentY = marginY;
     for (let i = 0; i < itemsCalculated.length; i++) {
@@ -682,14 +946,14 @@ export const renderMergedCardToA4 = async (
       const finalDrawW = Math.max(1, Math.round(it.sw * (finalDrawH / it.sh)));
       const drawX = Math.max(0, marginX + (availableWidth - finalDrawW) / 2);
 
-      ctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, drawX, currentY, finalDrawW, finalDrawH);
+      drawImageEnhanced(ctx, it.img, it.sx, it.sy, it.sw, it.sh, drawX, currentY, finalDrawW, finalDrawH);
       currentY += finalDrawH + gap;
 
       if (i === 0 && card.showDivider !== false) {
         ctx.save();
         const lineY = currentY + dividerHeight / 2;
         ctx.strokeStyle = '#CBD5E1';
-        ctx.lineWidth = Math.max(1.5, Math.round(1.5 * (targetWidth / CANVAS_A4_WIDTH)));
+        ctx.lineWidth = Math.max(1.5, Math.round(1.5 * scaleFactor));
         ctx.beginPath();
         ctx.moveTo(marginX + 20, lineY);
         ctx.lineTo(marginX + availableWidth - 20, lineY);
@@ -699,81 +963,59 @@ export const renderMergedCardToA4 = async (
       }
     }
 
-    const result = canvas.toDataURL('image/jpeg', 0.94);
-    canvas.width = 0;
-    canvas.height = 0;
-    return result;
+    return finalize(canvas);
   }
 
-  // Subcase 2B: 3 or more items (Smart N-Up Grid: 3, 4, 5, 6, 8, etc. pages per sheet)
+  // Subcase 2B: 3 or more items — smart justified fill.
+  // Every row is stretched across the full width and the split into rows is solved so
+  // the page ends up A4-shaped and completely used: no letterboxing inside slots, no
+  // blank band left at the bottom. Fewer items per row = bigger, more readable pages.
   const count = loaded.length;
-  let rows = 2;
-  let cols = 2;
-  if (count <= 4) {
-    rows = 2; cols = 2;
-  } else if (count <= 6) {
-    rows = 2; cols = 3;
-  } else if (count <= 8) {
-    rows = 2; cols = 4;
-  } else if (count <= 9) {
-    rows = 3; cols = 3;
-  } else if (count <= 12) {
-    rows = 3; cols = 4;
-  } else {
-    rows = 4; cols = 4;
-  }
+  const gap = Math.round(18 * scaleFactor);
+  const maxAvailableHeight = maxTargetHeight - marginY * 2;
 
-  const gapX = Math.round(18 * (targetWidth / CANVAS_A4_WIDTH));
-  const gapY = Math.round(18 * (targetHeight / CANVAS_A4_HEIGHT));
+  const layout = solveJustifiedFill(
+    loaded.map(it => it.aspect),
+    availableWidth,
+    idealContentHeight,
+    gap,
+    {
+      flexibleHeight: true,
+      maxHeight: maxAvailableHeight,
+      maxPerRow: Math.min(count, 4),
+    }
+  );
 
-  const slotW = (availableWidth - (cols - 1) * gapX) / cols;
-  const slotH = (availableHeight - (rows - 1) * gapY) / rows;
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = Math.round(layout.contentHeight) + marginY * 2;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not create canvas context');
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   for (let idx = 0; idx < count; idx++) {
     const it = loaded[idx];
-    const r = Math.floor(idx / cols);
-    const c = idx % cols;
+    const rect = layout.rects[idx];
+    if (!rect) continue;
 
-    // Center items on the last row if row is not completely filled (e.g. 3 items or 5 items)
-    const itemsInThisRow = (r === rows - 1 && count % cols !== 0) ? (count % cols) : Math.min(cols, count - r * cols);
-    const rowOffsetStartX = marginX + ((cols - itemsInThisRow) * (slotW + gapX)) / 2;
+    const drawX = marginX + rect.x;
+    const drawY = marginY + rect.y;
 
-    const cellX = rowOffsetStartX + (idx % cols) * (slotW + gapX);
-    const cellY = marginY + r * (slotH + gapY);
+    drawImageEnhanced(ctx, it.img, it.sx, it.sy, it.sw, it.sh, drawX, drawY, rect.width, rect.height);
 
-    const itAspect = it.sw / it.sh;
-    const slotAspect = slotW / slotH;
-
-    let drawW = slotW;
-    let drawH = slotH;
-
-    if (itAspect > slotAspect) {
-      drawW = slotW;
-      drawH = slotW / itAspect;
-    } else {
-      drawH = slotH;
-      drawW = slotH * itAspect;
-    }
-
-    const drawX = cellX + (slotW - drawW) / 2;
-    const drawY = cellY + (slotH - drawH) / 2;
-
-    ctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, drawX, drawY, drawW, drawH);
-
-    // Subtle border around each page snippet
     if (card.showDivider !== false) {
       ctx.save();
       ctx.strokeStyle = '#CBD5E1';
-      ctx.lineWidth = Math.max(1, Math.round(1 * (targetWidth / CANVAS_A4_WIDTH)));
-      ctx.strokeRect(drawX, drawY, drawW, drawH);
+      ctx.lineWidth = Math.max(1, Math.round(1 * scaleFactor));
+      ctx.strokeRect(drawX, drawY, rect.width, rect.height);
       ctx.restore();
     }
   }
 
-  const result = canvas.toDataURL('image/jpeg', 0.94);
-  canvas.width = 0;
-  canvas.height = 0;
-  return result;
+  return finalize(canvas);
 };
 
 /**
@@ -796,13 +1038,20 @@ export const exportMergedCardsToPdf = async (
     const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
 
     const embeddedImage = await pdfDoc.embedJpg(imageBytes);
-    const pdfPage = pdfDoc.addPage([a4WidthPt, a4HeightPt]);
+
+    // Page width is always A4; height follows the rendered content's real aspect ratio
+    // (renderMergedCardToA4 now auto-fits its own height), so a page with many merged
+    // snippets becomes a taller ("vertical") A4-width sheet instead of shrinking to fit
+    // a fixed A4 height, and short single-snippet pages don't carry dead white space.
+    const contentAspect = embeddedImage.width / embeddedImage.height;
+    const pageHeightPt = Math.max(a4HeightPt * 0.4, a4WidthPt / contentAspect);
+    const pdfPage = pdfDoc.addPage([a4WidthPt, pageHeightPt]);
 
     pdfPage.drawImage(embeddedImage, {
       x: 0,
       y: 0,
       width: a4WidthPt,
-      height: a4HeightPt,
+      height: pageHeightPt,
     });
 
     // Yield control so export progress updates smoothly on screen

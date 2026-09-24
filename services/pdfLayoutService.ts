@@ -1,6 +1,6 @@
 import { PDFDocument, rgb, degrees } from 'pdf-lib';
 import { PageCard } from './pdfStitchService';
-import { renderMergedCardToA4 } from './pdfStitchService';
+import { renderMergedCardToA4, solveJustifiedFill } from './pdfStitchService';
 
 export const MM_TO_PT = 72 / 25.4; // 1 mm ~ 2.834645669 pt
 
@@ -205,7 +205,66 @@ export function computeSlotPositions(
 }
 
 /**
- * Generate a clean N-Up PDF from an array of PageCards (from QaPageStitcher)
+ * Reorders a sheet's items so that, once they are laid out row by row, they are *read*
+ * in the direction the user picked (right-to-left, or down the columns first).
+ */
+function applyReadingOrder<T>(
+  items: T[],
+  rowCounts: number[],
+  readingDirection: ReadingDirectionOption,
+  readingOrder: ReadingOrderOption
+): T[] {
+  // Clamp the row shape to the items actually present — the final sheet of a document
+  // can be only partially filled, so a pinned grid may declare more slots than items.
+  const counts: number[] = [];
+  let remaining = items.length;
+  for (const count of rowCounts) {
+    const take = Math.max(0, Math.min(count, remaining));
+    counts.push(take);
+    remaining -= take;
+  }
+
+  const rows: T[][] = [];
+  const rowStarts: number[] = [];
+  let cursor = 0;
+  for (const count of counts) {
+    rowStarts.push(cursor);
+    rows.push(items.slice(cursor, cursor + count));
+    cursor += count;
+  }
+
+  if (readingDirection === 'col-by-col') {
+    // Transpose: walk the slots down the columns first, then write the items back into
+    // the same row shape so slot 1, 2, 3... run vertically instead of horizontally.
+    const maxCols = Math.max(...counts, 1);
+    const sequence: T[] = [];
+    for (let c = 0; c < maxCols; c++) {
+      for (let r = 0; r < rows.length; r++) {
+        if (c < counts[r]) sequence.push(items[rowStarts[r] + c]);
+      }
+    }
+
+    let idx = 0;
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < counts[r]; c++) rows[r][c] = sequence[idx++];
+    }
+  }
+
+  if (readingOrder === 'rtl') {
+    for (const row of rows) row.reverse();
+  }
+
+  return rows.flat();
+}
+
+/**
+ * Generate a clean N-Up PDF from an array of PageCards (from QaPageStitcher).
+ *
+ * Pages are placed with a justified "fill the sheet" layout rather than a rigid
+ * rows x cols grid: each row is stretched across the full width and the split into
+ * rows is solved so the rows fill the sheet height. That keeps every page as large as
+ * it can be and stops sheets from coming out half blank. When orientation is on "auto"
+ * both portrait and landscape are tried and the better-filling one wins.
  */
 export async function exportCardsWithPdfLayout(
   cards: PageCard[],
@@ -221,96 +280,126 @@ export async function exportCardsWithPdfLayout(
       ? (config.customRows || 2) * (config.customCols || 2)
       : (config.pagesPerSheet as number);
 
-  const { width: sheetWidth, height: sheetHeight, isLandscape } = getSheetDimensions(
-    config.pageSize,
-    config.orientation,
-    numPagesPerSheet === 1 ? 1 : (config.pagesPerSheet as PagesPerSheetOption),
-    config.customRows,
-    config.customCols
-  );
+  // Render + embed every card first so the layout can be solved from real page shapes
+  const embedded: { image: any; aspect: number }[] = [];
+  for (let cardIdx = 0; cardIdx < cards.length; cardIdx++) {
+    onProgress?.(cardIdx + 1, cards.length);
 
-  const { rows, cols } = getGridDimensions(
-    numPagesPerSheet === 1 ? 1 : config.pagesPerSheet,
-    isLandscape,
-    config.customRows,
-    config.customCols
-  );
-
-  const slotPositions = computeSlotPositions(
-    sheetWidth,
-    sheetHeight,
-    rows,
-    cols,
-    config.readingDirection,
-    config.readingOrder,
-    config.outerMargin,
-    config.innerMargin
-  );
-
-  const totalCards = cards.length;
-  let currentSheetPage: any = null;
-
-  for (let cardIdx = 0; cardIdx < totalCards; cardIdx++) {
-    onProgress?.(cardIdx + 1, totalCards);
-
-    const slotIndexOnSheet = cardIdx % numPagesPerSheet;
-    if (slotIndexOnSheet === 0) {
-      currentSheetPage = pdfDoc.addPage([sheetWidth, sheetHeight]);
-    }
-
-    const slot = slotPositions[slotIndexOnSheet];
-    const card = cards[cardIdx];
-
-    // Render card to image bytes
-    const dataUrl = await renderMergedCardToA4(card);
+    const dataUrl = await renderMergedCardToA4(cards[cardIdx]);
     const base64Data = dataUrl.split(',')[1];
     const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-    const embeddedImage = await pdfDoc.embedJpg(imageBytes);
+    const image = await pdfDoc.embedJpg(imageBytes);
+    embedded.push({ image, aspect: image.width / Math.max(1, image.height) });
 
-    // Calculate aspect fit within slot
-    const imgAspect = embeddedImage.width / embeddedImage.height;
-    const slotAspect = slot.width / slot.height;
-
-    let drawW = slot.width;
-    let drawH = slot.height;
-
-    if (imgAspect > slotAspect) {
-      // Content wider than slot
-      drawW = slot.width;
-      drawH = slot.width / imgAspect;
-    } else {
-      // Content taller than slot
-      drawH = slot.height;
-      drawW = slot.height * imgAspect;
-    }
-
-    const drawX = slot.x + (slot.width - drawW) / 2;
-    const drawY = slot.y + (slot.height - drawH) / 2;
-
-    // Draw page image
-    currentSheetPage.drawImage(embeddedImage, {
-      x: drawX,
-      y: drawY,
-      width: drawW,
-      height: drawH,
-    });
-
-    // Draw border if requested
-    if (config.withBorder) {
-      currentSheetPage.drawRectangle({
-        x: drawX,
-        y: drawY,
-        width: drawW,
-        height: drawH,
-        borderColor: rgb(0.72, 0.72, 0.72),
-        borderWidth: 0.75,
-      });
-    }
-
-    // Yield control smoothly for UI progress
     if (cardIdx % 2 === 0) {
       await new Promise(resolve => setTimeout(resolve, 0));
     }
+  }
+
+  const innerGapPt = config.innerMargin * MM_TO_PT;
+
+  // An explicit custom rows x cols choice pins the grid shape; otherwise it is solved
+  const pinnedRowCounts =
+    config.pagesPerSheet === 'custom' && config.customRows && config.customCols
+      ? new Array(Math.max(1, config.customRows)).fill(Math.max(1, config.customCols))
+      : undefined;
+
+  const groups: { image: any; aspect: number }[][] = [];
+  for (let start = 0; start < embedded.length; start += numPagesPerSheet) {
+    groups.push(embedded.slice(start, start + numPagesPerSheet));
+  }
+
+  const planSheet = (group: { image: any; aspect: number }[], orientation: OrientationOption) => {
+    const { width: sheetWidth, height: sheetHeight } = getSheetDimensions(
+      config.pageSize,
+      orientation,
+      numPagesPerSheet === 1 ? 1 : (config.pagesPerSheet as PagesPerSheetOption),
+      config.customRows,
+      config.customCols
+    );
+
+    const marginLeftPt = config.outerMargin.left * MM_TO_PT;
+    const marginRightPt = config.outerMargin.right * MM_TO_PT;
+    const marginTopPt = config.outerMargin.top * MM_TO_PT;
+    const marginBottomPt = config.outerMargin.bottom * MM_TO_PT;
+
+    const availWidth = Math.max(10, sheetWidth - marginLeftPt - marginRightPt);
+    const availHeight = Math.max(10, sheetHeight - marginTopPt - marginBottomPt);
+
+    // Solve the row shape first, then re-solve with the items placed in reading order
+    const shape = solveJustifiedFill(
+      group.map(g => g.aspect),
+      availWidth,
+      availHeight,
+      innerGapPt,
+      { rowCounts: pinnedRowCounts, maxPerRow: Math.min(group.length, 6) }
+    );
+
+    const order = applyReadingOrder(group, shape.rowCounts, config.readingDirection, config.readingOrder);
+    const layout = solveJustifiedFill(
+      order.map(g => g.aspect),
+      availWidth,
+      availHeight,
+      innerGapPt,
+      { rowCounts: shape.rowCounts }
+    );
+
+    return {
+      width: sheetWidth,
+      height: sheetHeight,
+      layout,
+      order,
+      originX: marginLeftPt,
+      originY: sheetHeight - marginTopPt,
+    };
+  };
+
+  // Orientation is decided once for the whole document (the option that fills the
+  // sheets best overall) so the exported PDF never mixes portrait and landscape sheets.
+  let chosenOrientation: OrientationOption = config.orientation;
+  if (config.orientation === 'auto') {
+    let bestTotal = -Infinity;
+    for (const orientation of ['portrait', 'landscape'] as OrientationOption[]) {
+      const total = groups.reduce((sum, group) => sum + planSheet(group, orientation).layout.coverage, 0);
+      if (total > bestTotal) {
+        bestTotal = total;
+        chosenOrientation = orientation;
+      }
+    }
+  }
+
+  for (const group of groups) {
+    const sheet = planSheet(group, chosenOrientation);
+    const sheetPage = pdfDoc.addPage([sheet.width, sheet.height]);
+
+    for (let i = 0; i < sheet.order.length; i++) {
+      const rect = sheet.layout.rects[i];
+      if (!rect) continue;
+
+      const drawX = sheet.originX + rect.x;
+      // Layout coordinates run top-down; PDF coordinates run bottom-up
+      const drawY = sheet.originY - rect.y - rect.height;
+
+      sheetPage.drawImage(sheet.order[i].image, {
+        x: drawX,
+        y: drawY,
+        width: rect.width,
+        height: rect.height,
+      });
+
+      if (config.withBorder) {
+        sheetPage.drawRectangle({
+          x: drawX,
+          y: drawY,
+          width: rect.width,
+          height: rect.height,
+          borderColor: rgb(0.72, 0.72, 0.72),
+          borderWidth: 0.75,
+        });
+      }
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 0));
   }
 
   const pdfBytes = await pdfDoc.save();

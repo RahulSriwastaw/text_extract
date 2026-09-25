@@ -4,7 +4,7 @@
  */
 
 (function () {
-  const EXT_VER = "2.5.4";
+  const EXT_VER = "2.5.5";
   if (window.__tfStudyAiGenericVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGenericVer = EXT_VER;
@@ -376,17 +376,26 @@
 
     // 2. Buttons in or near composer container
     const composer = findComposer();
-    const container = composer?.closest('form, [class*="composer"], [class*="input"], main') || document;
+    const container = composer?.closest('form, [class*="composer"], [class*="chat-input"], [class*="input"], rich-textarea') || composer?.parentElement || document;
     const buttons = deepQueryAll("button, [role='button'], div[class*='button']", container);
 
-    const exact = buttons.find((b) => {
+    // Filter out buttons belonging to previous message history or feedback controls
+    const validButtons = buttons.filter((b) => {
+      const inHistory = b.closest('[data-message-author-role="assistant"], [data-message-author-role="user"], .chat-history, .conversation-container, [class*="agent-turn"]');
+      if (inHistory) return false;
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-testid") || "") + " " + (b.title || "")).toLowerCase();
+      if (al.includes("feedback") || al.includes("report") || al.includes("share") || al.includes("copy") || al.includes("edit") || al.includes("retry") || al.includes("regenerate")) return false;
+      return true;
+    });
+
+    const exact = validButtons.find((b) => {
       const al = (b.getAttribute("aria-label") || "").trim().toLowerCase();
       return /^(send|send message|send prompt|submit|发送)$/i.test(al);
     });
     if (exact) return exact;
 
     // DeepSeek icon buttons
-    const dsBtn = buttons.find((b) => {
+    const dsBtn = validButtons.find((b) => {
       const cls = (b.className || "").toString().toLowerCase();
       const al = (b.getAttribute("aria-label") || "").toLowerCase();
       const testid = (b.getAttribute("data-testid") || "").toLowerCase();
@@ -397,23 +406,23 @@
     });
     if (dsBtn) return dsBtn;
 
-    // Claude and generic SVG send buttons
-    const svgSend = buttons.find((b) => {
+    // Claude and generic SVG send buttons near composer
+    const svgSend = validButtons.find((b) => {
       const al = (b.getAttribute("aria-label") || b.getAttribute("title") || b.textContent || "").toLowerCase();
       return (al.includes("send") || al === "↑") && !al.includes("stop");
     });
     if (svgSend) return svgSend;
 
-    // 3. Document-wide fallback
-    const allButtons = deepQueryAll("button, [role='button']");
-    return (
-      allButtons.find((b) => /^(send|submit|send message|send prompt)$/i.test((b.getAttribute("aria-label") || "").trim())) ||
-      allButtons.find((b) => {
-        const al = (b.getAttribute("aria-label") || b.textContent || "").toLowerCase();
-        return (al.includes("send") || al === "↑") && !al.includes("stop");
-      }) ||
-      null
-    );
+    // 3. Fallback: last valid button near composer (usually bottom-right circular arrow/send icon)
+    const filteredNear = validButtons.filter((b) => {
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-testid") || "") + " " + (b.title || "")).toLowerCase();
+      return !al.includes("upload") && !al.includes("attach") && !al.includes("file") && !al.includes("mic") && !al.includes("voice") && !al.includes("stop");
+    });
+    if (filteredNear.length > 0) {
+      return filteredNear[filteredNear.length - 1];
+    }
+
+    return null;
   }
 
   async function clickSendOrEnter(el) {
@@ -1253,21 +1262,28 @@
   const ATTACHMENT_CHIP_SELECTOR = '[data-testid*="file-preview"], [data-testid*="attachment"], [class*="attachment-preview"], ' +
     '[class*="file-preview"], [class*="uploaded-file"], [class*="file-chip"]';
 
-  // Count real attachment chips only. Treating any nearby "remove/close" control as proof of an
-  // upload let pages be sent with no image at all.
-  function attachmentChips() {
+  function composerContainer() {
     const composer = findComposer();
-    const container = composer?.closest('form, [class*="composer"], main') || document;
+    return composer?.closest('form, [class*="composer"], [class*="chat-input"], [class*="input"], rich-textarea') || composer?.parentElement || document;
+  }
+
+  // Count real attachment chips in active composer only, never past turns in chat history
+  function attachmentChips() {
+    const container = composerContainer();
     const visible = el => {
       try {
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       } catch { return false; }
     };
-    const chips = deepQueryAll(ATTACHMENT_CHIP_SELECTOR, container).filter(visible);
+    const chips = deepQueryAll(ATTACHMENT_CHIP_SELECTOR, container)
+      .filter(visible)
+      .filter(chip => !chip.closest('[data-message-author-role="assistant"], [data-message-author-role="user"], .chat-history, .conversation-container, [class*="agent-turn"]'));
     const outer = chips.filter((chip, _i, arr) => !arr.some(other => other !== chip && other.contains(chip)));
     if (outer.length) return outer;
-    return deepQueryAll('button[aria-label*="remove file" i], button[aria-label*="remove attachment" i], button[data-testid*="remove-file"]', container).filter(visible);
+    return deepQueryAll('button[aria-label*="remove file" i], button[aria-label*="remove attachment" i], button[data-testid*="remove-file"]', container)
+      .filter(visible)
+      .filter(b => !b.closest('[data-message-author-role="assistant"], [data-message-author-role="user"], .chat-history, .conversation-container, [class*="agent-turn"]'));
   }
 
   function countAttachments() {
@@ -1365,6 +1381,7 @@
       const baseline = countAttachments();
       if (inputs.length) {
         const input = inputs[inputs.length - 1];
+        try { input.value = ''; } catch {}
         const dt = new DataTransfer();
         dt.items.add(file);
         input.files = dt.files;

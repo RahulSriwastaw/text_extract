@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TextExtract Pro Bridge — AI Document Digitizer",
-  "version": "2.5.4",
+  "version": "2.5.5",
   "description": "Reliable MCQ and text extraction with queued requests, cancellation and result recovery for Gemini, ChatGPT, DeepSeek and Claude.",
   "author": "TextExtract",
   "permissions": ["tabs", "scripting", "clipboardRead", "clipboardWrite", "storage"],

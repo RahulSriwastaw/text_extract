@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.4";
+  const EXT_VER = "2.5.5";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -303,8 +303,9 @@
           }
         }
         if (!attached) throw new Error("Image upload not confirmed after 3 attempts. Open the AI tab, remove any stuck attachment, then retry this page.");
-        progress(requestId, "pdf", "Image attached — waiting for thumbnail…", adminTabId);
-        await sleep(600);
+        progress(requestId, "pdf", "Image attached — waiting for thumbnail and upload completion…", adminTabId);
+        await waitForAttachmentReady(35000);
+        await sleep(500);
       } else if (!skipPdf && job.pdfOnClipboard) {
         progress(requestId, "pdf", "Ctrl+V from clipboard…", adminTabId);
         const baseline = countAttachments();
@@ -547,12 +548,10 @@
 
   function composerContainer() {
     const composer = findComposer();
-    return composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, main') || document;
+    return composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, rich-textarea, .chat-input-container') || composer?.parentElement || document;
   }
 
-  // Count real attachment chips. Counting stray "remove/close" buttons anywhere near the
-  // composer made a leftover control look like a successful upload, so a page could be sent
-  // with no image at all — the usual cause of failures that only start a few pages in.
+  // Count real attachment chips in the composer only, never past turns in chat history
   function attachmentChips() {
     const container = composerContainer();
     const visible = el => {
@@ -561,14 +560,42 @@
         return r.width > 0 && r.height > 0;
       } catch { return false; }
     };
-    const chips = deepQueryAll(ATTACHMENT_CHIP_SELECTOR, container).filter(visible);
+    const chips = deepQueryAll(ATTACHMENT_CHIP_SELECTOR, container)
+      .filter(visible)
+      .filter(chip => !chip.closest('model-response, user-query, [data-message-author-role], .conversation-container'));
     const outer = chips.filter((chip, _i, arr) => !arr.some(other => other !== chip && other.contains(chip)));
     if (outer.length) return outer;
-    return deepQueryAll('button[aria-label*="remove file" i], button[aria-label*="remove attachment" i], button[aria-label*="delete file" i]', container).filter(visible);
+    return deepQueryAll('button[aria-label*="remove file" i], button[aria-label*="remove attachment" i], button[aria-label*="delete file" i]', container)
+      .filter(visible)
+      .filter(b => !b.closest('model-response, user-query, [data-message-author-role], .conversation-container'));
   }
 
   function countAttachments() {
     return attachmentChips().length;
+  }
+
+  async function waitForAttachmentReady(timeoutMs = 30000) {
+    const start = Date.now();
+    await sleep(600);
+    while (Date.now() - start < timeoutMs) {
+      const uploading = deepQueryAll(
+        '[class*="upload-progress"], [class*="uploading"], [aria-label*="uploading" i], ' +
+        '[class*="file-uploading"], .animate-spin, svg[class*="loading"], [data-test-id*="loading"], mat-progress-spinner'
+      ).filter(el => {
+        try {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && !el.closest('model-response, user-query, [data-message-author-role]');
+        } catch { return false; }
+      });
+      if (uploading.length > 0) {
+        LOG("Attachment upload still in progress in Gemini UI, waiting...");
+        await sleep(600);
+        continue;
+      }
+      await sleep(600);
+      return true;
+    }
+    return false;
   }
 
   // Dismiss any upload menu / overlay left open by an earlier page. These steal focus from
@@ -722,6 +749,7 @@
         }
       }
       if (!input) return false;
+      try { input.value = ''; } catch {}
       const dt = new DataTransfer;
       dt.items.add(file);
       input.files = dt.files;
@@ -857,19 +885,55 @@
     }));
   }
   function findSendButton() {
-    const buttons = deepQueryAll('button, [role="button"]');
-    return (
-      buttons.find(b => /^(send|submit|send message)$/i.test((b.getAttribute("aria-label") || "").trim())) ||
-      buttons.find(b => {
-        const al = (b.getAttribute("aria-label") || b.getAttribute("data-test-id") || b.title || "").toLowerCase();
-        return (al.includes("send") || al.includes("submit")) && !al.includes("stop");
-      }) ||
-      buttons.find(b => {
-        const svg = b.querySelector("svg");
-        return svg && (b.className || "").toLowerCase().includes("send");
-      }) ||
-      null
-    );
+    const composer = findComposer();
+    const container = composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, rich-textarea, .chat-input-container') || document;
+    
+    // Check candidate buttons near composer first
+    const nearButtons = composer ? deepQueryAll('button, [role="button"]', container) : [];
+    const allButtons = nearButtons.length ? nearButtons : deepQueryAll('button, [role="button"]');
+    
+    // Exclude any button that belongs to past chat messages (history / responses) or feedback
+    const validButtons = allButtons.filter(b => {
+      const inHistory = b.closest('model-response, user-query, [data-message-author-role], .conversation-container');
+      if (inHistory) return false;
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "") + " " + (b.title || "")).toLowerCase();
+      if (al.includes("feedback") || al.includes("report") || al.includes("share") || al.includes("copy") || al.includes("edit") || al.includes("retry")) return false;
+      return true;
+    });
+
+    // 1. Exact send/submit aria-label or test-id
+    const exact = validButtons.find(b => {
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "")).trim().toLowerCase();
+      return /^(send|submit|send message|send prompt)$/i.test(al) || al === 'send-button';
+    });
+    if (exact) return exact;
+
+    // 2. Buttons with send/submit text
+    const withText = validButtons.find(b => {
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "") + " " + (b.title || "")).toLowerCase();
+      return (al.includes("send") || al.includes("submit")) && !al.includes("stop");
+    });
+    if (withText) return withText;
+
+    // 3. SVG send icon button near composer
+    const svgBtn = validButtons.find(b => {
+      const svg = b.querySelector("svg");
+      return svg && ((b.className || "").toString().toLowerCase().includes("send") || (b.getAttribute("aria-label") || "").toLowerCase().includes("send"));
+    });
+    if (svgBtn) return svgBtn;
+
+    // 4. Return last valid button if near composer (typically the circular send icon in bottom corner)
+    if (nearButtons.length > 0) {
+      const filteredNear = validButtons.filter(b => {
+        const al = ((b.getAttribute("aria-label") || "") + " " + (b.title || "")).toLowerCase();
+        return !al.includes("upload") && !al.includes("attach") && !al.includes("file") && !al.includes("mic") && !al.includes("voice");
+      });
+      if (filteredNear.length > 0) {
+        return filteredNear[filteredNear.length - 1];
+      }
+    }
+
+    return null;
   }
   function isGenerating() {
     // 1. Check for Stop buttons (Gemini web UI uses various aria-labels / titles)
@@ -880,7 +944,7 @@
         if (r.width === 0 || r.height === 0) return false;
       } catch { return false; }
       const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.textContent || "")).toLowerCase().trim();
-      return (/stop|stop response|stop generation|stop generating|cancel response/i.test(al) ||
+      return (/\b(stop|stop response|stop generation|stop generating|cancel response)\b/i.test(al) ||
              b.querySelector('.ds-icon-stop, [class*="stop-icon"], svg[data-icon="stop"]') !== null) &&
              !al.includes("history") && !al.includes("search");
     });

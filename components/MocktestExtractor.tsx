@@ -2578,27 +2578,34 @@ Rules:
 
           {/* Right: Parallel Batch & One-Shot Toggle */}
           <div className="flex flex-wrap items-center gap-3">
-            {/* Batch Selector */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Batch:</span>
-              <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
-                {[1, 2, 3, 5].map((count) => (
-                  <button
-                    key={count}
-                    type="button"
-                    onClick={() => setBatchSize(count)}
-                    className={`px-2 py-0.5 text-xs font-bold rounded transition-all ${
-                      batchSize === count
-                        ? 'bg-amber-500 text-black shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                    title={`Process ${count} page(s) simultaneously`}
-                  >
-                    {count}P
-                  </button>
-                ))}
+            {/* Batch Selector (API Parallel vs Bridge Sequential) */}
+            {aiEngine === 'api' ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Parallel Batch:</span>
+                <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+                  {[1, 2, 3, 5].map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      onClick={() => setBatchSize(count)}
+                      className={`px-2 py-0.5 text-xs font-bold rounded transition-all ${
+                        batchSize === count
+                          ? 'bg-amber-500 text-black shadow-sm'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                      title={`Process ${count} page(s) simultaneously via Direct API key rotation`}
+                    >
+                      {count}P
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-[11px] font-medium text-slate-300" title="Extension Bridge browser chat tab me 1-by-1 sequentially page send aur extract karta hai.">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Bridge: 1-by-1</span>
+              </div>
+            )}
 
             <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
 
@@ -2608,7 +2615,7 @@ Rules:
                 <div className="flex items-center gap-1.5">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">New Chat:</span>
                   <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
-                    {[3, 5, 10, 0].map((count) => (
+                    {[2, 3, 5, 10, 0].map((count) => (
                       <button
                         key={count}
                         type="button"

@@ -4,7 +4,7 @@
  */
 
 (function () {
-  const EXT_VER = "2.5.1";
+  const EXT_VER = "2.5.4";
   if (window.__tfStudyAiGenericVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGenericVer = EXT_VER;
@@ -135,20 +135,22 @@
 
   function findComposer() {
     const selectors = [
+      "#prompt-textarea",
+      'div[id="prompt-textarea"]',
       "textarea#chat-input",
+      'div.ProseMirror[contenteditable="true"]',
+      'div[contenteditable="true"][data-placeholder]',
+      'div[contenteditable="true"][role="textbox"]',
+      'div[contenteditable="true"]',
       'textarea[placeholder*="Message" i]',
       'textarea[placeholder*="Ask" i]',
       'textarea[placeholder*="Send" i]',
-      'div[contenteditable="true"][data-placeholder]',
-      'div.ProseMirror[contenteditable="true"]',
-      'div[contenteditable="true"][role="textbox"]',
-      'div[contenteditable="true"]',
       "textarea",
     ];
     for (const sel of selectors) {
       const list = deepQueryAll(sel).filter((el) => {
         const r = el.getBoundingClientRect();
-        return r.width > 40 && r.height > 12 && r.bottom > 0 && !el.disabled;
+        return r.width > 20 && r.height > 12 && r.bottom > 0 && !el.disabled;
       });
       if (!list.length) continue;
       list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
@@ -173,11 +175,16 @@
   function promptNeedle(prompt) {
     const p = String(prompt || "").replace(/\s+/g, " ").trim();
     if (p.includes(COMPLETE_MARKER)) return COMPLETE_MARKER;
+    if (p.includes("STUDY_AI_COMPLETE")) return "STUDY_AI_COMPLETE";
+    if (p.includes("Universal Document Digitizer")) return "Universal Document Digitizer";
+    if (p.includes("Document Digitizer")) return "Document Digitizer";
+    if (p.includes("PDF-to-Text")) return "PDF-to-Text";
     if (p.includes("expert Indian exam-paper")) return "expert Indian exam-paper";
     if (p.includes("professional Exam Paper Digitizer")) return "professional Exam Paper Digitizer";
     if (p.includes("STRICT REQUIREMENT:")) return "STRICT REQUIREMENT:";
-    if (p.length > 80) return p.slice(40, 80);
-    return p.slice(0, Math.min(32, p.length));
+    if (p.includes("COMPLETE TEXT")) return "COMPLETE TEXT";
+    if (p.length > 80) return p.slice(10, 45);
+    return p.slice(0, Math.min(24, p.length));
   }
 
   async function tryEnableDeepSeekExtras() {
@@ -201,81 +208,207 @@
   }
 
   async function injectPrompt(el, prompt) {
+    await sleep(250);
     el = findComposer() || el;
+    if (!el) {
+      await waitForComposer(8000);
+      el = findComposer();
+    }
+    if (!el) throw new Error("Could not find chat composer to inject prompt.");
+
     el.click();
     el.focus();
     await sleep(200);
     if (/deepseek\.com/i.test(location.href)) await tryEnableDeepSeekExtras();
 
-    const payload = "\n" + prompt;
+    const currentText = composerText(findComposer() || el);
+    const payload = currentText.length > 0 ? ("\n" + prompt) : prompt;
     const needle = promptNeedle(prompt);
     const hasNeedle = () => {
-      const t = composerText(findComposer() || el);
-      return t.includes(needle) || t.includes(String(prompt).slice(0, 24));
+      const activeEl = findComposer() || el;
+      const t = composerText(activeEl);
+      if (!t) return false;
+      if (t.includes(needle)) return true;
+      if (t.includes(String(prompt).slice(0, 24))) return true;
+      if (t.includes("Universal Document Digitizer") || t.includes("Document Digitizer")) return true;
+      if (t.includes("COMPLETE TEXT") || t.includes("STUDY_AI_COMPLETE")) return true;
+      if (t.length > 40 && prompt.length > 40 && t.includes(prompt.slice(20, 50))) return true;
+      return false;
     };
 
+    // --- Strategy 1: TEXTAREA / INPUT (DeepSeek, etc.) ---
     if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
-      const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const desc = Object.getOwnPropertyDescriptor(proto, "value");
-      const next = (el.value || "") + payload;
-      if (desc?.set) desc.set.call(el, next);
-      else el.value = next;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.focus();
+      // Try native execCommand on focused textarea (properly triggers Vue/React listeners)
+      try {
+        el.select();
+        document.execCommand("selectAll", false, null);
+        document.execCommand("insertText", false, payload);
+      } catch {}
+      await sleep(100);
+
+      if (!hasNeedle()) {
+        const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        const desc = Object.getOwnPropertyDescriptor(proto, "value");
+        const next = (el.value || "") + (el.value && !payload.startsWith("\n") ? "\n" : "") + payload;
+        if (desc?.set) desc.set.call(el, next);
+        else el.value = next;
+
+        // Reset React internal tracker if attached
+        if (el._valueTracker) {
+          try { el._valueTracker.setValue(""); } catch {}
+        }
+        el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: payload }));
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, inputType: "insertText", data: payload }));
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      if (!hasNeedle()) {
+        try {
+          const dt = new DataTransfer();
+          dt.setData("text/plain", payload);
+          el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt }));
+        } catch {}
+      }
       await sleep(150);
-      if (hasNeedle()) return;
+      if (hasNeedle()) {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        return;
+      }
     }
 
+    // --- Strategy 2: ContentEditable (ChatGPT, Claude, etc.) ---
+    el.focus();
+    let targetBlock = el.querySelector("p") || el.querySelector('[contenteditable="true"]') || el;
+    targetBlock.focus();
+
+    // Place caret INSIDE targetBlock (crucial for ProseMirror/Lexical schemas)
     try {
       const sel = window.getSelection();
       const range = document.createRange();
-      range.selectNodeContents(el);
+      range.selectNodeContents(targetBlock);
       range.collapse(false);
       sel.removeAllRanges();
       sel.addRange(range);
     } catch {}
 
+    // A. Chunked execCommand insertText
     const chunkSize = 1500;
     for (let i = 0; i < payload.length; i += chunkSize) {
       try {
         document.execCommand("insertText", false, payload.slice(i, i + chunkSize));
       } catch {}
-      await sleep(30);
+      await sleep(25);
     }
-    await sleep(200);
-    if (hasNeedle()) return;
+    await sleep(150);
+    if (hasNeedle()) {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
 
+    // B. ClipboardEvent paste on targetBlock
     try {
       const dt = new DataTransfer();
       dt.setData("text/plain", payload);
-      el.dispatchEvent(
+      const safeHtml = `<p>${payload.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")}</p>`;
+      dt.setData("text/html", safeHtml);
+      targetBlock.dispatchEvent(
         new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt }),
       );
-      await sleep(250);
+      await sleep(200);
     } catch {}
-    if (hasNeedle()) return;
+    if (hasNeedle()) {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
 
+    // C. InputEvent beforeinput / input
     try {
-      el.textContent = (el.textContent || "") + payload;
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: payload.slice(0, 80) }));
+      targetBlock.dispatchEvent(
+        new InputEvent("beforeinput", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
+          data: payload,
+        }),
+      );
+      targetBlock.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          inputType: "insertText",
+          data: payload.slice(0, 100),
+        }),
+      );
+      await sleep(150);
     } catch {}
-    await sleep(150);
+    if (hasNeedle()) {
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+
+    // D. Safe innerHTML insertion inside target paragraph
+    try {
+      const esc = payload.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      if (targetBlock.tagName === "P") {
+        targetBlock.innerHTML = (targetBlock.innerHTML || "") + esc.replace(/\n/g, "<br>");
+      } else {
+        const pList = esc.split(/\n/).map((l) => `<p>${l || "<br>"}</p>`).join("");
+        el.innerHTML = (el.innerHTML || "") + pList;
+      }
+      targetBlock.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: payload.slice(0, 80) }));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    } catch {}
+    await sleep(200);
 
     if (!hasNeedle()) {
       const t = composerText(findComposer() || el);
-      if (t.length > 80 && /json|question|MCQ|exam/i.test(t)) return;
+      if (t.length > 40 && (isOurPromptText(t) || /digitiz|text|ocr|extract|pdf|markdown|json|question|mcq|exam/i.test(t))) return;
       throw new Error("Could not inject prompt. Click the chat input once, then retry from admin.");
     }
   }
 
   function findSendButton() {
-    const sendByTestId = deepQueryAll('button[data-testid="send-button"]')[0];
-    if (sendByTestId) return sendByTestId;
+    // 1. ChatGPT primary selectors
+    const chatgptSend = deepQueryAll('button[data-testid="send-button"], button[data-testid="fruitjuice-send-button"], button#send-button')[0];
+    if (chatgptSend) return chatgptSend;
 
-    const buttons = deepQueryAll("button, [role='button']");
+    // 2. Buttons in or near composer container
+    const composer = findComposer();
+    const container = composer?.closest('form, [class*="composer"], [class*="input"], main') || document;
+    const buttons = deepQueryAll("button, [role='button'], div[class*='button']", container);
+
+    const exact = buttons.find((b) => {
+      const al = (b.getAttribute("aria-label") || "").trim().toLowerCase();
+      return /^(send|send message|send prompt|submit|发送)$/i.test(al);
+    });
+    if (exact) return exact;
+
+    // DeepSeek icon buttons
+    const dsBtn = buttons.find((b) => {
+      const cls = (b.className || "").toString().toLowerCase();
+      const al = (b.getAttribute("aria-label") || "").toLowerCase();
+      const testid = (b.getAttribute("data-testid") || "").toLowerCase();
+      if (/ds-icon-button|_send|send-btn|chat-submit/i.test(cls)) return true;
+      if (/send/i.test(testid)) return true;
+      if (al.includes("send") || al.includes("发送")) return true;
+      return false;
+    });
+    if (dsBtn) return dsBtn;
+
+    // Claude and generic SVG send buttons
+    const svgSend = buttons.find((b) => {
+      const al = (b.getAttribute("aria-label") || b.getAttribute("title") || b.textContent || "").toLowerCase();
+      return (al.includes("send") || al === "↑") && !al.includes("stop");
+    });
+    if (svgSend) return svgSend;
+
+    // 3. Document-wide fallback
+    const allButtons = deepQueryAll("button, [role='button']");
     return (
-      buttons.find((b) => /^(send|submit)$/i.test((b.getAttribute("aria-label") || "").trim())) ||
-      buttons.find((b) => {
+      allButtons.find((b) => /^(send|submit|send message|send prompt)$/i.test((b.getAttribute("aria-label") || "").trim())) ||
+      allButtons.find((b) => {
         const al = (b.getAttribute("aria-label") || b.textContent || "").toLowerCase();
         return (al.includes("send") || al === "↑") && !al.includes("stop");
       }) ||
@@ -284,32 +417,40 @@
   }
 
   async function clickSendOrEnter(el) {
+    el = findComposer() || el;
+    let clicked = false;
     for (let attempt = 0; attempt < 25; attempt++) {
       const send = findSendButton();
-      const disabled = send?.disabled || send?.getAttribute("aria-disabled") === "true";
+      const disabled = !send || send.disabled || send.getAttribute("aria-disabled") === "true";
       if (send && !disabled) {
         send.click();
+        clicked = true;
         await sleep(400);
-        return;
+        break;
       }
-      await sleep(250);
+      await sleep(200);
     }
-    const send = findSendButton();
-    if (send) {
-      send.click();
-      await sleep(300);
-      return;
-    }
-    el.dispatchEvent(
-      new KeyboardEvent("keydown", {
+
+    // Always fallback to Enter key dispatch if send wasn't clicked or button was stuck disabled
+    if (!clicked && el) {
+      el.focus();
+      const send = findSendButton();
+      if (send) {
+        try { send.click(); } catch {}
+      }
+      const enterOpts = {
         key: "Enter",
         code: "Enter",
         keyCode: 13,
         which: 13,
         bubbles: true,
         cancelable: true,
-      }),
-    );
+      };
+      el.dispatchEvent(new KeyboardEvent("keydown", enterOpts));
+      el.dispatchEvent(new KeyboardEvent("keypress", enterOpts));
+      el.dispatchEvent(new KeyboardEvent("keyup", enterOpts));
+      await sleep(350);
+    }
   }
 
   function isGenerating() {
@@ -354,7 +495,7 @@
   }
 
   function isOurPromptText(text) {
-    return /You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF/i.test(
+    return /Universal Document Digitizer|PDF-to-Text OCR Specialist|COMPLETE TEXT of this PDF page|STUDY_AI_COMPLETE|You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|You are a professional Document Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF/i.test(
       text || "",
     );
   }
@@ -1090,16 +1231,19 @@
         // Preserve real completion evidence, never manufacture the marker.
         return json + (marked ? "\n" + (expectedMarker || COMPLETE_MARKER) : "");
       }
-      // Marker + stopped generation + stable text means the reply is finished, so the
-      // lenient reader can recover pages the strict parser rejects (split-question tails,
-      // stray prose) without ever accepting a still-streaming array.
-      if (json === null && marked && stableFor >= 3000) {
+      // Marker + stopped generation + stable text means the reply is finished
+      if (json === null && marked && stableFor >= 2000) {
         const recovered = extractQuestionsFromText(blob);
         if (recovered.length) {
           return "```json\n" + JSON.stringify(recovered, null, 2) + "\n```\n" + (expectedMarker || COMPLETE_MARKER);
         }
+        // Universal full-text or markdown output
+        return blob;
       }
       if (stableFor >= 15000 && json === null) {
+        if (!isGenerating() && blob && blob.length > 30) {
+          return blob;
+        }
         throw new Error("AI reply was found but its JSON format could not be read yet. After generation finishes, use Recapture or paste the code block with Paste CSV / JSON.");
       }
     }

@@ -1,5 +1,5 @@
 /* TextExtract Pro Bridge 2.5: durable, owner-scoped request queue. */
-const EXT_VERSION = '2.5.1';
+const EXT_VERSION = '2.5.4';
 const PROVIDERS = {
   gemini: { home: 'https://gemini.google.com/app', hosts: ['gemini.google.com'], script: 'content-gemini.js' },
   deepseek: { home: 'https://chat.deepseek.com/', hosts: ['chat.deepseek.com'], script: 'content-bridge-generic.js' },

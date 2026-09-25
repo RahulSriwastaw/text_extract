@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.1";
+  const EXT_VER = "2.5.4";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -13,7 +13,7 @@
   const COMPLETE_MARKER = "---STUDY_AI_COMPLETE---";
   const sleep = ms => runtime.sleep(ms);
   function isOurPromptText(text) {
-    return /You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|You are a professional Document Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF|---STUDY_AI_COMPLETE---|YOUR_TEST_SERIES_JSON_COMPLETED/i.test(text || "");
+    return /Universal Document Digitizer|PDF-to-Text OCR Specialist|COMPLETE TEXT of this PDF page|You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|You are a professional Document Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF|---STUDY_AI_COMPLETE---|YOUR_TEST_SERIES_JSON_COMPLETED/i.test(text || "");
   }
   let port = null;
   function connectKeepalive() {
@@ -1245,16 +1245,19 @@
         // Preserve real completion evidence, never manufacture the marker.
         return json + (marked ? "\n" + (expectedMarker || COMPLETE_MARKER) : "");
       }
-      // Marker + stopped generation + stable text means the reply is finished, so the
-      // lenient reader can recover pages the strict parser rejects (split-question tails,
-      // stray prose) without ever accepting a still-streaming array.
-      if (json === null && marked && stableFor >= 3000) {
+      // Marker + stopped generation + stable text means the reply is finished
+      if (json === null && marked && stableFor >= 2000) {
         const recovered = extractQuestionsFromText(blob);
         if (recovered.length) {
           return "```json\n" + JSON.stringify(recovered, null, 2) + "\n```\n" + (expectedMarker || COMPLETE_MARKER);
         }
+        // Universal full-text or markdown output
+        return blob;
       }
       if (stableFor >= 15000 && json === null) {
+        if (!isGenerating() && blob && blob.length > 30) {
+          return blob;
+        }
         throw new Error("AI reply was found but its JSON format could not be read yet. After generation finishes, use Recapture or paste the code block with Paste CSV / JSON.");
       }
     }

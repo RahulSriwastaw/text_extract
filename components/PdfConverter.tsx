@@ -513,6 +513,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             mimeType: 'image/png',
             prompt,
             expectedMarker: pageMarker,
+            responseFormat: mcqMode ? 'json' : 'text',
             signal: pageAborter.signal,
             provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
             // Rotate to a fresh chat every few pages: a long chat makes upload and the composer
@@ -756,6 +757,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           mimeType: 'image/png',
           prompt,
           expectedMarker: pageMarker,
+          responseFormat: mcqMode ? 'json' : 'text',
           provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
           continueChat: false,
           pageNumber: page.pageNumber,

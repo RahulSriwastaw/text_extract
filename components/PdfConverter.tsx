@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers, Bot, FileSpreadsheet } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import FileUploader from './FileUploader';
@@ -7,7 +7,7 @@ import HistorySidebar from './HistorySidebar';
 import McqSidebar from './McqSidebar';
 import MocktestStudioModal from './MocktestStudioModal';
 import UploadProgressBar, { UploadProgressData } from './UploadProgressBar';
-import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem, MockTestMcqItem } from '../types';
+import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem, MockTestMcqItem, ExtractedElement } from '../types';
 import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
 import { generateDocx, formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
@@ -60,7 +60,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const [user] = useCurrentUser();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
-  const [mcqMode, setMcqMode] = useState(true);
+  const [mcqMode, setMcqMode] = useState(false);
   const [showMcqNumbers, setShowMcqNumbers] = useState(true);
   const [showAnswers, setShowAnswers] = useState(true);
   const [refineMode, setRefineMode] = useState(false);
@@ -97,6 +97,22 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     return text.trim().split(/\s+/).filter(Boolean).length;
   };
 
+  // Crop figures and tables out of the page image. The direct API path already did this; the
+  // bridge path skipped it, so "Keep images" silently did nothing on the extension engine.
+  const attachCroppedFigures = async (imageUrl: string, elements: ExtractedElement[]): Promise<ExtractedElement[]> => {
+    if (!includeImages) return elements;
+    return Promise.all(elements.map(async (el) => {
+      if ((el.type === 'image' || el.type === 'table') && el.bbox) {
+        try {
+          return { ...el, imageB64: await cropImage(imageUrl, el.bbox) };
+        } catch {
+          return el;
+        }
+      }
+      return el;
+    }));
+  };
+
   useEffect(() => {
     checkAuth();
     const unsub = subscribeToExtensionStatus((status) => {
@@ -111,6 +127,14 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       .catch(err => console.error("Config fetch failed:", err));
     return () => unsub();
   }, []);
+
+  // Re-check the bridge whenever the user selects the extension engine: the mount-time ping can
+  // land before the extension is ready, and nothing else would retry it.
+  useEffect(() => {
+    if (aiEngine === 'extension' && !bridgeStatus.connected) {
+      pingStudyAiExtension().catch(() => {});
+    }
+  }, [aiEngine]);
 
   useEffect(() => {
     if (initialImages && initialImages.length > 0) {
@@ -462,18 +486,34 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
         try {
           const prompt = buildBridgePrompt(
-            numberingStyle, 
-            isBilingual, 
-            mcqMode, 
-            refineMode, 
+            numberingStyle,
+            isBilingual,
+            mcqMode,
+            refineMode,
             showAnswers,
-            prevTailChunk || undefined
+            prevTailChunk || undefined,
+            includeImages,
+            optionArrangement,
+            showMcqNumbers,
+            autoProofread
           );
+          // Register a controller so this one page can be stopped without ending the whole run.
+          pageAborters.current.get(page.id)?.abort();
+          const pageAborter = new AbortController();
+          pageAborters.current.set(page.id, pageAborter);
+
+          // Pin this page to its own reply. Without a marker the adapter falls back to guessing
+          // which chat turn belongs to which page, which breaks as soon as a page is retried.
+          const pageMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${generateId()}---`;
+          setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: pageMarker } : p));
+
           const bridgeRes = await extractWithStudyAiBridge({
             base64Image: page.imageUrl,
             fileName: `${fileName}_page_${page.pageNumber}.png`,
             mimeType: 'image/png',
             prompt,
+            expectedMarker: pageMarker,
+            signal: pageAborter.signal,
             provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
             // Rotate to a fresh chat every few pages: a long chat makes upload and the composer
             // unreliable. Continuation context travels in the prompt, not the chat history.
@@ -496,9 +536,11 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           if (bridgeRes.chatUrl) {
             activeChatUrl = bridgeRes.chatUrl;
             setPdfChatUrl(bridgeRes.chatUrl);
+            setPages(prev => prev.map(p => p.id === page.id ? { ...p, chatUrl: bridgeRes.chatUrl } : p));
           }
 
-          const { rawText, elements } = bridgeRes;
+          const { rawText } = bridgeRes;
+          const elements = await attachCroppedFigures(page.imageUrl, bridgeRes.elements);
 
           // Calculate words and points
           const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
@@ -566,9 +608,26 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             // Stagger requests by 600ms to avoid burst limits
             await new Promise(resolve => setTimeout(resolve, index * 600));
 
+            pageAborters.current.get(page.id)?.abort();
+            const pageAborter = new AbortController();
+            pageAborters.current.set(page.id, pageAborter);
+
             try {
-                const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers);
-                
+                const elements = await extractLayoutFromImage(
+                  page.imageUrl, 
+                  numberingStyle, 
+                  includeImages, 
+                  isBilingual, 
+                  mcqMode, 
+                  refineMode, 
+                  showAnswers,
+                  showMcqNumbers,
+                  autoProofread,
+                  optionArrangement
+                );
+                // Stop cannot cancel an in-flight API call, so discard its result instead.
+                if (pageAborter.signal.aborted) return;
+
                 // Calculate words and points
                 const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
                 const pageWords = countWords(pageText);
@@ -636,12 +695,30 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     }
   };
 
+  // One controller per page so a single page can be stopped without touching the others.
+  const pageAborters = useRef(new Map<string, AbortController>());
+
+  const isAbort = (e: any) => e?.name === 'AbortError';
+
+  const stopPage = (id: string) => {
+    const controller = pageAborters.current.get(id);
+    controller?.abort();
+    pageAborters.current.delete(id);
+    setPages(prev => prev.map(p => p.id === id && p.status === 'processing'
+      ? { ...p, status: 'pending', errorMessage: 'Stopped. Press Start to run this page again.' }
+      : p));
+  };
+
   const retryPage = async (id: string) => {
     const page = pages.find(p => p.id === id);
     if (!page) return;
-    
+
     // Reset global error msg if any, as user is attempting action
     setErrorMsg(null);
+
+    pageAborters.current.get(id)?.abort();
+    const aborter = new AbortController();
+    pageAborters.current.set(id, aborter);
 
     // Update to processing
     setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'processing', extractedText: undefined, elements: undefined, errorMessage: undefined } : p));
@@ -659,48 +736,78 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           }
         }
         const prompt = buildBridgePrompt(
-          numberingStyle, 
-          isBilingual, 
-          mcqMode, 
-          refineMode, 
+          numberingStyle,
+          isBilingual,
+          mcqMode,
+          refineMode,
           showAnswers,
-          prevTailChunk || undefined
+          prevTailChunk || undefined,
+          includeImages,
+          optionArrangement,
+          showMcqNumbers,
+          autoProofread
         );
-        const { rawText, elements } = await extractWithStudyAiBridge({
+        const pageMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${generateId()}---`;
+        setPages(prev => prev.map(p => p.id === id ? { ...p, expectedMarker: pageMarker } : p));
+
+        const { rawText, elements: bridgeElements, chatUrl } = await extractWithStudyAiBridge({
           base64Image: page.imageUrl,
           fileName: `${fileName}_page_${page.pageNumber}.png`,
           mimeType: 'image/png',
           prompt,
+          expectedMarker: pageMarker,
           provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
           continueChat: false,
           pageNumber: page.pageNumber,
           totalPages: pages.length,
+          signal: aborter.signal,
           onProgress: (_step, detail) => {
             setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: detail || undefined } : p));
           }
         });
 
+        const elements = await attachCroppedFigures(page.imageUrl, bridgeElements);
         const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
         const pageWords = countWords(pageText);
         setWordsConsumed(prev => prev + pageWords);
         setPointsConsumed(prev => prev + 1);
 
-        setPages(prev => prev.map(p => p.id === id ? { 
-          ...p, 
-          status: 'done', 
+        if (chatUrl) setPdfChatUrl(chatUrl);
+        setPages(prev => prev.map(p => p.id === id ? {
+          ...p,
+          status: 'done',
           elements,
+          chatUrl: chatUrl || p.chatUrl,
           errorMessage: undefined,
           extractedText: elements.map(e => e.type === 'text' ? (e.content || '') : `[Image: ${e.content || ''}]`).join('\n\n')
         } : p));
         return;
       } catch (e: any) {
-        setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: e?.message || String(e) } : p));
+        // Stop already put the page back to pending; do not overwrite it with an error.
+        if (!isAbort(e)) {
+          setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: e?.message || String(e) } : p));
+        }
         return;
+      } finally {
+        if (pageAborters.current.get(id) === aborter) pageAborters.current.delete(id);
       }
     }
 
     try {
-      const elements = await extractLayoutFromImage(page.imageUrl, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers);
+      const elements = await extractLayoutFromImage(
+        page.imageUrl, 
+        numberingStyle, 
+        includeImages, 
+        isBilingual, 
+        mcqMode, 
+        refineMode, 
+        showAnswers,
+        showMcqNumbers,
+        autoProofread,
+        optionArrangement
+      );
+      // The API call itself cannot be cancelled mid-flight; discard its result instead.
+      if (aborter.signal.aborted) return;
       
       // Calculate words and points
       const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
@@ -727,6 +834,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           extractedText: processedElements.map(e => e.type === 'text' ? (e.content || '') : `[Image: ${e.content || ''}]`).join('\n\n')
       } : p));
     } catch (e: any) {
+      if (isAbort(e) || aborter.signal.aborted) return;
       console.error("Retry Page Error:", e);
       const errorStr = e.message || String(e);
       let displayError = errorStr;
@@ -738,6 +846,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
       setPages(prev => prev.map(p => p.id === id ? { ...p, status: 'error', errorMessage: displayError } : p));
       setErrorMsg(displayError);
+    } finally {
+      if (pageAborters.current.get(id) === aborter) pageAborters.current.delete(id);
     }
   };
 
@@ -752,14 +862,16 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       const rawText = await captureFromStudyAiBridge({
         provider,
         fullChat: false,
-        chatUrl: pdfChatUrl || undefined,
-        pageNumber: page.pageNumber
+        chatUrl: page.chatUrl || pdfChatUrl || undefined,
+        pageNumber: page.pageNumber,
+        totalPages: pages.length,
+        expectedMarker: page.expectedMarker || undefined
       });
       if (!rawText || !rawText.trim()) {
         throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');
       }
 
-      const elements = parseExtensionOutputToElements(rawText);
+      const elements = await attachCroppedFigures(page.imageUrl, parseExtensionOutputToElements(rawText));
       const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
       const pageWords = countWords(pageText);
       setWordsConsumed(prev => prev + pageWords);
@@ -847,8 +959,16 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const downloadDocx = async () => {
     // Collect all elements from all selected and completed pages
     const allElements = pages
-      .filter(p => p.isSelected && p.status === 'done' && p.elements)
-      .flatMap(p => p.elements || [])
+      .filter(p => p.isSelected && p.status === 'done')
+      .flatMap(p => {
+        if (p.elements && p.elements.length > 0) {
+          return p.elements;
+        }
+        if (p.extractedText) {
+          return [{ id: `el_${p.id}`, type: 'text' as const, content: p.extractedText }];
+        }
+        return [];
+      })
       .filter(el => includeImages || el.type !== 'image');
     
     if (allElements.length === 0) {
@@ -857,7 +977,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     }
 
     try {
-      const blob = await generateDocx(allElements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers);
+      const blob = await generateDocx(allElements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers, mcqMode);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -937,7 +1057,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           setErrorMsg("No content found in this history item.");
           return;
         }
-        const blob = await generateDocx(elements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers);
+        const blob = await generateDocx(elements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers, mcqMode);
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -1446,15 +1566,16 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         </div>
 
                         {/* Bottom Row: Tools & Settings Grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-9 gap-2 pt-2.5 border-t border-white/[0.06]">
-                            {/* MCQ Mode */}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-2 pt-2.5 border-t border-white/[0.06]">
+                            {/* Extraction Mode Toggle */}
                             <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-amber-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">MCQ Mode</span>
+                                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Mode</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{mcqMode ? 'Active' : 'General'}</span>
+                                    <span className="text-[10px] text-slate-300 font-bold">{mcqMode ? 'MCQ Only' : 'Full Text'}</span>
                                     <button
                                         onClick={() => setMcqMode(!mcqMode)}
                                         className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${mcqMode ? 'bg-amber-500' : 'bg-white/[0.1]'}`}
+                                        title={mcqMode ? "MCQ mode active. Click to switch to Full Text mode." : "Full Text mode active (Extracts 100% of all text from PDF page). Click to switch to MCQ mode."}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
@@ -1501,6 +1622,21 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                     <option value={NumberingStyle.HASH} className="bg-[#11141F] text-slate-200">#1.</option>
                                     <option value={NumberingStyle.QUESTION_DOT} className="bg-[#11141F] text-slate-200">Question 1.</option>
                                     <option value={NumberingStyle.NUMBER_DOT} className="bg-[#11141F] text-slate-200">1.</option>
+                                </select>
+                            </div>
+
+                            {/* Option Arrangement */}
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-indigo-500/30 transition-all">
+                                <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Options Layout</span>
+                                <select 
+                                    value={optionArrangement}
+                                    onChange={(e) => setOptionArrangement(e.target.value as OptionArrangement)}
+                                    className="text-[10px] font-bold bg-[#0B0D13] border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-indigo-500"
+                                    title="Choose option arrangement for layout and DOCX export"
+                                >
+                                    <option value={OptionArrangement.VERTICAL} className="bg-[#11141F] text-slate-200">Vertical (A-D)</option>
+                                    <option value={OptionArrangement.HORIZONTAL} className="bg-[#11141F] text-slate-200">Horizontal (Inline)</option>
+                                    <option value={OptionArrangement.GRID} className="bg-[#11141F] text-slate-200">2x2 Grid</option>
                                 </select>
                             </div>
 
@@ -1674,6 +1810,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                     showAnswers={showAnswers}
                     showMcqNumbers={showMcqNumbers}
                     numberingStyle={numberingStyle}
+                    mcqMode={mcqMode}
                 />
              </motion.div>
            )}

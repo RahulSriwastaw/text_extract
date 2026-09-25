@@ -46,6 +46,10 @@ export interface ScannedPage {
   extractedText?: string; // Legacy support
   elements?: ExtractedElement[];
   isSelected: boolean;
+  /** Completion marker the AI reply for this page must carry, so Recapture pairs the right turn. */
+  expectedMarker?: string;
+  /** Chat this page was extracted in; Recapture needs it once a run rotates to a fresh chat. */
+  chatUrl?: string;
 }
 
 export interface ConversionConfig {

@@ -1,7 +1,8 @@
-import { NumberingStyle, ExtractedElement } from "../types";
+import { NumberingStyle, ExtractedElement, OptionArrangement } from "../types";
 import { performOCR } from './ocrService';
 import { getAiSettings } from './aiDbService';
 import { extractLayoutWithUserGemini } from './userGeminiService';
+import { proofreadWithStudyAiBridge, pingStudyAiExtension } from './studyAiBridgeService';
 
 export const extractLayoutFromImage = async (
   base64Image: string, 
@@ -11,6 +12,9 @@ export const extractLayoutFromImage = async (
   mcqMode: boolean = true,
   refineMode: boolean = false,
   showAnswers: boolean = true,
+  showMcqNumbers: boolean = true,
+  autoProofread: boolean = false,
+  optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
   retryCount: number = 0
 ): Promise<ExtractedElement[]> => {
   // Skipping client-side OCR for speed when processing in parallel.
@@ -37,7 +41,10 @@ export const extractLayoutFromImage = async (
       isBilingual,
       mcqMode,
       refineMode,
-      showAnswers
+      showAnswers,
+      showMcqNumbers,
+      autoProofread,
+      optionArrangement
     }),
   });
 
@@ -47,7 +54,7 @@ export const extractLayoutFromImage = async (
       const waitTime = Math.min(errorData.waitTime || (1000 + retryCount * 1000), 4000);
       console.warn(`[Client] API error (${response.status}). Fast-retrying with rotated key in ${waitTime}ms (Attempt ${retryCount + 1}/3)...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, retryCount + 1);
+      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, showMcqNumbers, autoProofread, optionArrangement, retryCount + 1);
     }
     
     if (response.status === 429) {
@@ -71,6 +78,15 @@ export const extractTextFromImage = async (base64Image: string, numberingStyle: 
 
 export const proofreadMcqs = async (rawText: string, isBilingual: boolean = false, retryCount: number = 0): Promise<any[]> => {
   const settings = await getAiSettings();
+
+  // If using Extension Bridge or user has no API key, execute directly via Extension Bridge
+  try {
+    const status = await pingStudyAiExtension(800);
+    if (status.connected && (!settings.apiKey || (settings.authType as string) === 'extension')) {
+      return await proofreadWithStudyAiBridge(rawText, isBilingual);
+    }
+  } catch {}
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -79,15 +95,16 @@ export const proofreadMcqs = async (rawText: string, isBilingual: boolean = fals
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/proofread', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ rawText, isBilingual }),
-  });
+  try {
+    const response = await fetch('/api/proofread', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ rawText, isBilingual }),
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    if (response.status === 429 && retryCount < 5) {
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (response.status === 429 && retryCount < 5) {
         let waitTime = errorData.waitTime || 60000;
         
         // Try to parse waitTime from nested error message
@@ -104,15 +121,33 @@ export const proofreadMcqs = async (rawText: string, isBilingual: boolean = fals
         console.warn(`[Client] Quota hit (Proofread). Waiting ${Math.round(waitTime/1000)}s before retry ${retryCount + 1}/5...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         return proofreadMcqs(rawText, isBilingual, retryCount + 1);
-    }
-    
-    if (response.status === 429) {
-      throw new Error("Gemini Free Tier Quota Exceeded (Proofread limit reached). Please wait a few minutes.");
-    }
-    
-    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-  }
+      }
+      
+      // Fallback to Extension Bridge if connected
+      try {
+        const status = await pingStudyAiExtension(800);
+        if (status.connected) {
+          return await proofreadWithStudyAiBridge(rawText, isBilingual);
+        }
+      } catch {}
 
-  const data = await response.json();
-  return data.questions;
+      if (response.status === 429) {
+        throw new Error("Gemini Free Tier Quota Exceeded (Proofread limit reached). Please wait a few minutes.");
+      }
+      
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data.questions;
+  } catch (err: any) {
+    // If backend fetch failed, try Extension Bridge as resilient fallback
+    try {
+      const status = await pingStudyAiExtension(800);
+      if (status.connected) {
+        return await proofreadWithStudyAiBridge(rawText, isBilingual);
+      }
+    } catch {}
+    throw err;
+  }
 };

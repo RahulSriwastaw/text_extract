@@ -266,6 +266,24 @@ test('handshake ignores unrelated PONGs; timeout publishes disconnected state', 
   const next = a.api.pingStudyAiExtension(); a.pong();
   assert.equal((await next).connected, true);
 });
+test('a disconnected bridge re-checks itself and connects when the extension shows up', async () => {
+  const a = app();
+  const status = [];
+  a.api.subscribeToExtensionStatus(s => status.push(s));
+  const first = a.api.pingStudyAiExtension(100);
+  a.fire(100);
+  assert.equal((await first).connected, false);
+  // Nothing used to re-check after this, so a tool opened before the extension was ready
+  // stayed "not connected" forever.
+  const pingsBefore = a.posted.filter(m => m.type === 'PING').length;
+  a.fire(1000);
+  await flush();
+  assert.ok(a.posted.filter(m => m.type === 'PING').length > pingsBefore);
+  a.pong();
+  await flush();
+  assert.equal(status.at(-1).connected, true);
+});
+
 test('app polls missing deliveries, preserves page metadata and ACKs the result', async () => {
   const a = app();
   const promise = a.api.extractWithStudyAiBridge({ prompt: 'Extract', pageNumber: 3 });

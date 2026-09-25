@@ -18,6 +18,7 @@ interface ProcessingListProps {
   showAnswers?: boolean;
   showMcqNumbers?: boolean;
   numberingStyle?: NumberingStyle;
+  mcqMode?: boolean;
 }
 
 const processTextForDisplay = (
@@ -25,9 +26,13 @@ const processTextForDisplay = (
   startCounter: number,
   showMcqNumbers: boolean,
   numberingStyle: NumberingStyle,
-  showAnswers: boolean
+  showAnswers: boolean,
+  mcqMode: boolean = false
 ): { text: string; nextCounter: number } => {
   if (!rawText) return { text: '', nextCounter: startCounter };
+  if (!mcqMode) {
+    return { text: rawText, nextCounter: startCounter };
+  }
   
   let res = rawText;
   if (!showAnswers) {
@@ -52,7 +57,7 @@ const processTextForDisplay = (
     const isOption = !isAnswerLine && /^(\([a-eA-E0-9]\)|[a-eA-E0-9][\.\)]|[A-E][\.\)])\s/.test(cleanLineText);
     const isSubQuestion = !isOption && /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
     const isMainQuestion = !isOption && !isAnswerLine && !isSubQuestion && (
-      /^#\s/i.test(cleanLineText) ||
+      /^#\s*\d+/i.test(cleanLineText) ||
       /^(?:Q\.?\s*\d+|Prashn\s*[:\-]?\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*[:\-]?\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText)
     );
 
@@ -85,7 +90,8 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
   includeImages, 
   showAnswers = true,
   showMcqNumbers = true,
-  numberingStyle = NumberingStyle.QUESTION_DOT
+  numberingStyle = NumberingStyle.QUESTION_DOT,
+  mcqMode = false
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -102,14 +108,15 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
           currentCounter,
           showMcqNumbers,
           numberingStyle,
-          showAnswers
+          showAnswers,
+          mcqMode
         );
         map.set(page.id, text);
         currentCounter = nextCounter;
       }
     }
     return map;
-  }, [pages, showMcqNumbers, numberingStyle, showAnswers]);
+  }, [pages, showMcqNumbers, numberingStyle, showAnswers, mcqMode]);
 
   if (pages.length === 0) return null;
 

@@ -1,6 +1,6 @@
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
-import { NumberingStyle } from '../types.js';
+import { NumberingStyle, OptionArrangement } from '../types.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -1165,108 +1165,127 @@ const extractLayoutWithRetry = async (
   mcqMode: boolean,
   refineMode: boolean = false,
   showAnswers: boolean = true,
-  userKey?: string
+  userKey?: string,
+  showMcqNumbers: boolean = true,
+  autoProofread: boolean = false,
+  optionArrangement: OptionArrangement = OptionArrangement.VERTICAL
 ): Promise<any> => {
   const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
+  // 1. Question Numbering Feature Connection
   let numberingInstruction = '';
-  switch (numberingStyle) {
-    case NumberingStyle.Q_DOT:
-      numberingInstruction = 'Replace the question number (e.g., "1.", "Q.1", "23.", "Q12.") at the start of a question with "Q" followed by the number and a dot (e.g., "Q1.", "Q23.").';
-      break;
-    case NumberingStyle.HASH:
-      numberingInstruction = 'Replace the question number (e.g., "1.", "Q.1", "23.", "Q12.") at the start of a question with "#" followed by the number and a dot (e.g., "#1.", "#23.").';
-      break;
-    case NumberingStyle.QUESTION_DOT:
-      numberingInstruction = 'Replace the question number (e.g., "1.", "Q.1", "23.", "Q12.") at the start of a question with the word "Question" followed by the number and a dot (e.g., "Question 1.", "Question 23.").';
-      break;
-    case NumberingStyle.NUMBER_DOT:
-      numberingInstruction = 'Ensure the question number is formatted as the number followed by a dot (e.g., "1.", "23."). Remove any prefixes like "Q." or "Q".';
-      break;
-    default:
-      numberingInstruction = 'Replace the question number at the start of a question with the number followed by a dot.';
+  if (!showMcqNumbers) {
+    numberingInstruction = 'DO NOT prefix questions with question numbers. Omit or remove numbers (e.g. remove #1., Q1., 1.). Output only the clean question stem directly.';
+  } else {
+    switch (numberingStyle) {
+      case NumberingStyle.Q_DOT:
+        numberingInstruction = 'Format each question prefix with "Q" followed by the number and a dot (e.g., "Q1.", "Q23.").';
+        break;
+      case NumberingStyle.HASH:
+        numberingInstruction = 'Format each question prefix with "#" followed by the number and a dot (e.g., "#1.", "#23.").';
+        break;
+      case NumberingStyle.QUESTION_DOT:
+        numberingInstruction = 'Format each question prefix with the word "Question" followed by the number and a dot (e.g., "Question 1.", "Question 23.").';
+        break;
+      case NumberingStyle.NUMBER_DOT:
+        numberingInstruction = 'Format each question prefix with just the number followed by a dot (e.g., "1.", "23."). Remove prefixes like "Q." or "Q".';
+        break;
+      default:
+        numberingInstruction = 'Format each question prefix with the number followed by a dot (e.g. "1.", "2.").';
+    }
   }
 
+  // 2. Answers Feature Connection
   const answerInstruction = showAnswers
     ? `**ANSWER EXTRACTION ENABLED**:
-- Identify the correct answer from the paper or deduce it, and add "Answer: [Correct Option Letter]" (e.g., "Answer: C") on its own new line after the options.`
+- Identify the correct answer from the paper or deduce it, and add "Answer: [Correct Option Letter]" (e.g., "Answer: C") on its own new line immediately after the options.`
     : `**STRICT NO-ANSWER RULE (ANSWERS DISABLED)**:
-- DO NOT extract, deduce, guess, or output any answers!
-- Under NO circumstances should you include "Answer: ...", solutions, or answer keys.
-- For each MCQ, end immediately after the last option (d).`;
+- DO NOT extract, deduce, guess, or output any answers or answer keys under any circumstances!
+- For each question, end immediately after the last option.`;
 
+  // 3. Bilingual Mode Feature Connection
   const bilingualInstruction = isBilingual
     ? `**MANDATORY BILINGUAL TRANSLATION (HINDI + ENGLISH)**:
-- YOU MUST OUTPUT EVERY QUESTION AND TEXTUAL OPTION IN BOTH HINDI AND ENGLISH.
+- YOU MUST OUTPUT EVERY QUESTION, HEADING, PARAGRAPH, AND TEXTUAL OPTION IN BOTH HINDI AND ENGLISH.
 - **AUTOMATIC TRANSLATION**:
-  - If the source image contains text in HINDI ONLY, you MUST translate the question text and textual options into ENGLISH!
-  - If the source image contains text in ENGLISH ONLY, you MUST translate the question text and textual options into HINDI!
-  - If both languages are already on the page, combine and preserve both.
-- **QUESTION FORMAT (TWO-LINE FORMAT WITHOUT SLASH)**:
-  Line 1: "Question: [Number]. [Hindi Question Text]" (NO forward slash / at the end)
-  Line 2: "[English Question Text]"
-  Example:
-  Question: 1. सबसे छोटी प्राकृत संख्या कौन-सी है?
-  Which is the smallest natural number?
-- **OPTIONS FORMAT**: Each option on its OWN NEW LINE:
+  - If the source image contains text in HINDI ONLY, translate the text into ENGLISH and provide both!
+  - If the source image contains text in ENGLISH ONLY, translate the text into HINDI and provide both!
+  - If both languages are already on the page, combine and preserve both faithfully.
+- **TWO-LINE FORMAT (FOR QUESTIONS & PARAGRAPHS)**:
+  Line 1: Hindi Text (NO forward slash / at the end)
+  Line 2: English Text
+- **OPTIONS FORMAT**: Each option on its OWN line:
   (a) [Hindi Option] / [English Option]
   (b) [Hindi Option] / [English Option]
-  (c) [Hindi Option] / [English Option]
-  (d) [Hindi Option] / [English Option]
 - **STRICT RULE FOR NUMBERS & FORMULAS (DO NOT DUPLICATE)**:
-  - If an option is a pure number, percentage, unit, or math formula (e.g. "0", "1", "2", "3", "45%", "$$x=2$$"), write it ONLY ONCE without slash (e.g. "(a) 0", "(b) 2", "(c) 1", "(d) 3").
-${showAnswers ? '- **ANSWER FORMAT**: After options, add "Answer: [Label]" (e.g. "Answer: C") on its OWN NEW LINE.' : '- **NO ANSWERS**: Do not include answers or answer lines.'}`
-    : `**CRITICAL RULE: NO TRANSLATION**:
-- Extract the text EXACTLY in the language it is written.
-- If it is in Hindi, output ONLY Hindi.
-- If it is in English, output ONLY English.
+  - If an option is a pure number, percentage, unit, or math formula (e.g. "0", "1", "45%", "$$x=2$$", "km/h"), write it ONLY ONCE without slash (e.g. "(a) 0", "(b) 45%").
+- **LANGUAGE TEST EXCEPTION**: English Language / Grammar tests stay 100% English; Hindi Language / व्याकरण tests stay 100% Hindi.`
+    : `**CRITICAL RULE: STRICT SOURCE LANGUAGE (NO TRANSLATION)**:
+- Extract the text EXACTLY in the language it is written on the page.
+- If it is in Hindi, output ONLY Hindi. If it is in English, output ONLY English.
 - DO NOT translate anything.`;
 
+  // 4. Images & Diagrams Feature Connection
   const imageInstruction = includeImages 
-    ? `2. **Diagrams & Figures**:
-   - **PLACEMENT**: Identify diagrams (images) and place them in the 'elements' array exactly where they appear in the reading order (e.g., if a diagram is between the question text and the options, it should be placed there).
-   - **DESCRIPTION**: For 'image' types, provide a concise but descriptive 'content' field explaining what the diagram shows (e.g., "Circuit diagram with resistors R1 and R2", "Geometry figure showing a triangle inside a circle").`
+    ? `2. **Diagrams & Figures (KEEP IMAGES ENABLED)**:
+   - Identify diagrams, charts, circuit diagrams, geometry figures, maps, and non-text visual elements, and place them in the 'elements' array exactly where they appear in the reading order.
+   - For 'image' types, provide a concise but descriptive 'content' field explaining what the diagram shows (e.g., "Circuit diagram with resistors R1 and R2", "Geometry figure showing a triangle inside a circle").`
     : `2. **Diagrams & Figures**:
    - **DO NOT EXTRACT DIAGRAMS OR IMAGES**: Ignore all non-textual content such as diagrams, charts, and figures. Do not create any 'image' elements.`;
 
   const imageFormattingInstruction = includeImages
     ? `2. **Image Elements**:
    - Identify regions containing diagrams, charts, pattern series, geometry figures, or any non-textual content.
-   - Provide the bounding box (bbox) for these regions in normalized coordinates [0-1000].`
+   - Provide the bounding box (bbox) for these regions in normalized coordinates [0-1000] ([ymin, xmin, ymax, xmax]).`
     : `2. **Image Elements**:
    - **STRICTLY IGNORE**: Do not extract any image elements.`;
 
+  // 5. Option Arrangement Feature Connection
+  let optArrangementInstruction = 'For multiple-choice options, ensure each option (a), (b), (c), (d) is on a separate line.';
+  if (optionArrangement === OptionArrangement.HORIZONTAL) {
+    optArrangementInstruction = 'Format all options horizontally inline on a single line separated by clean spacing: (a) ...   (b) ...   (c) ...   (d) ...';
+  } else if (optionArrangement === OptionArrangement.GRID) {
+    optArrangementInstruction = 'Format options in a balanced 2x2 grid (two options per line): (a) ...   (b) ... \\n (c) ...   (d) ...';
+  }
+
+  // 6. Refine Mode Feature Connection
+  const refineInstruction = refineMode
+    ? `**REFINE MODE ENABLED (STRICT CONTENT CLEANING & FILTERING)**:
+- YOUR GOAL: Extract ONLY the pure primary content.
+- **STRICTLY EXCLUDE ALL EXAM METADATA & TAGS**:
+  - Completely IGNORE and DO NOT extract any previous year exam details, source tags, or shift names (e.g., "(SSC CGL Tier-I 02.12.2022 Shift-II)", "[RRB NTPC 2021]", "[UPSC 2020]", shift timings, exam dates, or test series tags).
+- **REMOVE JUNK & BRANDING**: Exclude book chapter names, page headers/footers, page numbers, watermarks, Telegram/website links, publisher names, exam center codes, or decorative borders.
+- **PRESERVE PURE CONTENT**: Extract the actual content, questions, options, paragraphs, and tables cleanly.`
+    : `**FULL EXTRACTION MODE (A TO Z)**:
+- Extract EVERY piece of text from the page, including headers, footers, page numbers, and exam tags. Leave nothing out.`;
+
+  // 7. Auto Proofread Feature Connection
+  const proofreadInstruction = autoProofread
+    ? `**AUTO PROOFREAD & OCR CORRECTION ENABLED**:
+- Silently fix OCR scanning errors: reconnect hyphenated words split across line breaks (e.g. "or- \\n ganization" -> "organization"), fix character confusions (e.g. "rn" misread as "m", "1" vs "l", "0" vs "O"), restore missing spaces between glued words, and ensure flawless grammar and formatting.`
+    : `**LITERAL OCR EXTRACTION**: Extract text faithfully as printed on the page.`;
+
+  // 8. MCQ Mode vs Universal Document Mode
   const mcqInstruction = mcqMode 
     ? `**MCQ / QUESTION-SET EXTRACTION MODE**:
 - This document contains Multiple Choice Questions (MCQs), practice questions, or test sets.
 - Format each MCQ clearly:
   Question: 1. [Question Text]
-  (a) [Option A]
-  (b) [Option B]
-  (c) [Option C]
-  (d) [Option D]
+  ${optArrangementInstruction}
 ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
-- If a reading passage, comprehension text, poem, or table appears before questions, extract it completely in full markdown before the questions.`
-    : `**UNIVERSAL DOCUMENT / GENERAL TEXT EXTRACTION MODE**:
-- Extract ANY type of document content with 100% fidelity:
+- 100% COMPLETE EXTRACTION: If the page contains reading passages, comprehension text, directions, instructions, or theory alongside questions, extract them all completely and attach passages to their questions.`
+    : `**UNIVERSAL DOCUMENT / FULL TEXT EXTRACTION MODE**:
+- CRITICAL MANDATE: Extract 100% COMPLETE TEXT of the entire PDF page without skipping or omitting anything!
+- Extract EVERY SINGLE WORD, line, heading, paragraph, table, formula, note, instruction, or question visible on this page.
+- Do NOT isolate only MCQs. Even if this page contains exam questions, practice tests, or questions with options, EXTRACT ALL TEXT on the page in natural reading order.
+- Maintain document hierarchy & formatting:
   1. **Headings & Hierarchy**: Mark document headings with markdown (# Main Heading, ## Sub-Heading, ### Section).
   2. **Paragraphs & Articles**: Maintain clean paragraphs with natural line flow. Preserve bold (**bold**) and italics (*italic*).
   3. **Tables & Matrices**: Extract tabular data into Markdown tables (| Col 1 | Col 2 |) with standard separator rows (|---|---|).
   4. **Lists & Bullet Points**: Preserve bullet points (•, -, *) and numbered lists (1., 2., a., b., i., ii.).
   5. **Math & Science**: Enclose all mathematical expressions and formulas in LaTeX double dollar signs (\`$$\\frac{a}{b}$$\`, \`$$x^2 + y^2$$\`, \`$$\\sqrt{z}$$\`).
   6. **Notes & Blockquotes**: Mark notes or callouts with \`> Note: ...\`.
-  7. **Handwritten / Scanned Notes**: Transcribe accurately in natural reading order.`;
-
-  const refineInstruction = refineMode
-    ? `**REFINE MODE ENABLED (STRICT CONTENT CLEANING & FILTERING)**:
-- YOUR GOAL: Extract ONLY the pure primary content.
-- **STRICTLY EXCLUDE ALL EXAM METADATA & TAGS**:
-  - Completely IGNORE and DO NOT extract any previous year exam details, source tags, or shift names (e.g., "(SSC CGL Tier-I (CBE) परीक्षा, 02.12.2022 Shift-II)", "(SSC CGL Tier-II (CBE) परीक्षा, 07.03.2023)", "[RRB NTPC 2021]", "(UPSC 2020)", "(CTET 2022)", shift timings, exam dates, or test series tags).
-  - Do NOT attach exam tags to options or questions.
-- **REMOVE JUNK & BRANDING**: Exclude book chapter names, page headers/footers, page numbers, watermarks, Telegram/website links, publisher names, exam center codes, or decorative text.
-- **PRESERVE PURE CONTENT**: Extract the actual question, options, paragraphs, and tables cleanly and accurately.`
-    : `**FULLY EXTRACTION MODE (A TO Z)**:
-- Extract EVERY piece of text from the page, including headers, footers, page numbers, and small boilerplate text. Leave nothing out.`;
+  7. **DO NOT FORCE QUESTIONS**: Do NOT convert general text into question format.`;
 
   const executeCall = async (client: any) => {
     const primaryModel = getPrimaryModel();
@@ -1279,17 +1298,18 @@ ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
         }
       },
       {
-        text: `You are a professional Exam Paper Digitizer. Analyze the provided image and extract all elements in their correct reading order.
+        text: `You are an elite, highly precise Universal Document Digitizer and PDF-to-Text Conversion Engine. Analyze the provided image and extract all elements in their correct reading order with 100% fidelity.
 
 ${bilingualInstruction}
 ${mcqInstruction}
 ${answerInstruction}
 ${refineInstruction}
+${proofreadInstruction}
 
 **CRITICAL RULE: COMPLETE EXTRACTION**:
 - You MUST read the ENTIRE page from top to bottom.
-- Do NOT skip any questions, options, paragraphs, or text, no matter how small the font is or where it is located on the page (unless it is junk text and Refine Mode is ON).
-- Ensure every single question and its options are extracted.
+- Do NOT skip any text, questions, options, paragraphs, or tables, no matter where located on the page (unless Refine Mode is ON and it is excluded junk text).
+- Ensure all content is extracted completely.
 
 **OCR CONTEXT**:
 Here is the raw text extracted by OCR:
@@ -1300,7 +1320,7 @@ Use this as a reference to improve your accuracy, especially for math formulas a
 1. **Text Elements**:
    - Identify distinct blocks of text (paragraphs, questions, options, headers).
    - ${numberingInstruction}
-   - For multiple-choice options, ensure each option (a), (b), (c), (d) is on a separate line.
+   - ${optArrangementInstruction}
    - Preserve mathematical formulas and scientific notations accurately.
    - **STRICT MATH RULE**: You MUST enclose ALL mathematical formulas, variables, equations, and expressions in double dollar signs like \`$$\` ... \`$$\` (e.g., \`$$x^2 + y^2 = r^2$$\`, \`$$(\\sec A + \\tan A) \\times (1 - \\sin A) \\times \\sec A$$\`).
    - **NO DANGLING DOLLARS**: NEVER output a closing \`$$\` without a matching opening \`$$\`! Never output broken math like \`(sec A + tan A)... \\sec A$$\` or \`\\frac{16\\pi}{3} cm^2$$\`. Every math expression MUST start with \`$$\` and end with \`$$\`.
@@ -1313,8 +1333,8 @@ Use this as a reference to improve your accuracy, especially for math formulas a
 ${imageInstruction}
 
 3. **Tables**:
-   - If you find a table, extract it as a 'table' type.
-   - Represent the table content in Markdown format.
+   - If you find a table or structured grid, extract it as a 'table' type.
+   - Represent the table content in clean Markdown table format (| Col 1 | Col 2 |\\n|---|---|).
 
 **OUTPUT FORMAT**:
 You must respond ONLY with a valid JSON array of objects. Do not include any markdown formatting like \`\`\`json or \`\`\` in your response. Just the raw JSON array.
@@ -1403,6 +1423,9 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
       if (el.type === 'text') {
         if (mcqMode) {
           contentStr = formatMcqText(contentStr);
+          if (!showMcqNumbers) {
+            contentStr = contentStr.replace(/^(\s*(?:\*\*)?(?:#?(?:Question|Q)\.?\s*[:\-]?\s*|\bPrashn\s*[:\-]?\s*|\bप्रश्न\s*[:\-]?\s*|#\s*)?(?:\((\d+)\)|\[(\d+)\]|(\d+))?(?:[\.\)\-:]?\s*(?:\*\*)?\s*|[\.\)\-:]\s*))/im, '');
+          }
         }
         if (isBilingual) {
           contentStr = cleanBilingualDuplicates(contentStr);
@@ -1410,7 +1433,7 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
         if (refineMode) {
           contentStr = cleanRefinedText(contentStr);
         }
-        if (!showAnswers) {
+        if (!showAnswers && mcqMode) {
           contentStr = contentStr
             .replace(/([^\n]+?)\s*\/+\s*Answer\s*[:\-]\s*[a-eA-E]/gi, '$1')
             .replace(/^\s*Answer\s*[:\-]\s*[a-eA-E]\s*$/gim, '')
@@ -1508,9 +1531,34 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
 
 app.post('/api/extract', async (req, res) => {
   try {
-    const { base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers = true } = req.body;
+    const { 
+      base64Image, 
+      ocrText, 
+      numberingStyle, 
+      includeImages, 
+      isBilingual, 
+      mcqMode, 
+      refineMode, 
+      showAnswers = true,
+      showMcqNumbers = true,
+      autoProofread = false,
+      optionArrangement
+    } = req.body;
     const userKey = (req.headers['x-user-gemini-key'] as string) || '';
-    const elements = await extractLayoutWithRetry(base64Image, ocrText, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, userKey);
+    const elements = await extractLayoutWithRetry(
+      base64Image, 
+      ocrText, 
+      numberingStyle, 
+      includeImages, 
+      isBilingual, 
+      mcqMode, 
+      refineMode, 
+      showAnswers, 
+      userKey,
+      showMcqNumbers,
+      autoProofread,
+      optionArrangement
+    );
     res.json({ elements });
   } catch (error: any) {
     console.warn("Extraction failed:", error?.message || error);

@@ -6,8 +6,8 @@
  */
 
 import { getAiSettings, AiMessage } from './aiDbService';
-import { NumberingStyle, ExtractedElement } from '../types';
-import { pingStudyAiExtension, extractWithStudyAiBridge, getStoredAiProvider } from './studyAiBridgeService';
+import { NumberingStyle, ExtractedElement, OptionArrangement } from '../types';
+import { pingStudyAiExtension, extractWithStudyAiBridge, getStoredAiProvider, buildBridgePrompt } from './studyAiBridgeService';
 
 const GEMINI_MODEL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_GEMINI_MODEL)
   ? (import.meta as any).env.VITE_GEMINI_MODEL
@@ -342,11 +342,39 @@ export async function extractLayoutWithUserGemini(
   numberingStyle: NumberingStyle = NumberingStyle.HASH,
   includeImages: boolean = true,
   isBilingual: boolean = false,
-  mcqMode: boolean = true
+  mcqMode: boolean = true,
+  refineMode: boolean = false,
+  showAnswers: boolean = true,
+  showMcqNumbers: boolean = true,
+  autoProofread: boolean = false,
+  optionArrangement: OptionArrangement = OptionArrangement.VERTICAL
 ): Promise<ExtractedElement[]> {
   const auth = await checkUserGeminiAuth();
   if (!auth.isAuthenticated) {
     throw new Error('User Gemini authorization required for local extraction.');
+  }
+
+  const prompt = buildBridgePrompt(
+    numberingStyle,
+    isBilingual,
+    mcqMode,
+    refineMode,
+    showAnswers,
+    undefined,
+    includeImages,
+    optionArrangement,
+    showMcqNumbers,
+    autoProofread
+  );
+
+  // Support Extension Bridge (Zero-Token mode)
+  if ((auth.authType as string) === 'extension') {
+    const bridgeRes = await extractWithStudyAiBridge({
+      base64Image,
+      prompt,
+      provider: getStoredAiProvider()
+    });
+    return bridgeRes.elements || [];
   }
 
   const settings = await getAiSettings();
@@ -366,17 +394,7 @@ export async function extractLayoutWithUserGemini(
     headers['Authorization'] = `Bearer ${settings.accessToken}`;
   }
 
-  const prompt = `You are an expert OCR and exam question extractor.
-Extract all questions, text, and tables from this image.
-Format every multiple choice question clearly:
-Question: <Question text>
-(A) <Option A>
-(B) <Option B>
-(C) <Option C>
-(D) <Option D>
-Answer: <Correct Answer letter if visible>
-
-Return a structured JSON array of elements with type: "text" | "table", content: string.`;
+  const cleanPrompt = prompt.replace(/\n*---STUDY_AI_COMPLETE---\s*$/, '').trim();
 
   const response = await fetch(url, {
     method: 'POST',
@@ -386,7 +404,7 @@ Return a structured JSON array of elements with type: "text" | "table", content:
         {
           role: 'user',
           parts: [
-            { text: prompt },
+            { text: cleanPrompt },
             {
               inlineData: {
                 mimeType: 'image/jpeg',

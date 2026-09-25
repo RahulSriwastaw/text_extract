@@ -1212,7 +1212,8 @@ export const generateDocx = async (
     optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
     showSerialNumbers: boolean = true,
     numberingStyle: NumberingStyle = NumberingStyle.QUESTION_DOT,
-    showAnswers: boolean = true
+    showAnswers: boolean = true,
+    mcqMode: boolean = false
 ): Promise<Blob> => {
   const docChildren: any[] = [];
   let tableBuffer: string[] = [];
@@ -1572,9 +1573,9 @@ export const generateDocx = async (
     // Sub Question: "(i)", "i.", "(a)" if it looks like a list item (Roman numerals are prioritized)
     const isSubQuestion = !isOption && /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText);
 
-    // Main Question: "# What is...", "Q.1", "(1) ", "1) ", "1.", "प्रश्न 1", "Question: 1.", "Q1."
-    const isMainQuestion = !isOption && !isAnswerLine && !isSubQuestion && (
-      /^#\s/i.test(cleanLineText) ||
+    // Main Question: Only recognize as questions if mcqMode is true!
+    const isMainQuestion = mcqMode && !isOption && !isAnswerLine && !isSubQuestion && (
+      /^#\s*\d+/i.test(cleanLineText) ||
       /^(?:Q\.?\s*\d+|Prashn\s*[:\-]?\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*[:\-]?\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText)
     );
 

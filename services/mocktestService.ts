@@ -1,6 +1,7 @@
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
 import { getAiSettings } from './aiDbService';
 import { hasFigureImage } from './figureStorageService';
+import { pingStudyAiExtension, solveQuestionWithStudyAiBridge, repairQuestionWithStudyAiBridge } from './studyAiBridgeService';
 
 export type { MockTestMcqItem };
 
@@ -1913,6 +1914,20 @@ export async function generateDeepSolutionForItem(
   item: MockTestMcqItem
 ): Promise<{ solution_hi: string; solution_en: string; difficulty_level?: DifficultyLevel }> {
   const settings = await getAiSettings();
+
+  // If using Extension Bridge or user has no API key, execute via Extension Bridge
+  try {
+    const status = await pingStudyAiExtension(800);
+    if (status.connected && (!settings.apiKey || (settings.authType as string) === 'extension')) {
+      const bridgeSol = await solveQuestionWithStudyAiBridge(item);
+      return {
+        solution_hi: cleanMocktestText(bridgeSol.solution_hi || ''),
+        solution_en: cleanMocktestText(bridgeSol.solution_en || ''),
+        difficulty_level: (bridgeSol.difficulty_level || item.difficulty_level || 'medium') as DifficultyLevel
+      };
+    }
+  } catch {}
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
@@ -1920,38 +1935,66 @@ export async function generateDeepSolutionForItem(
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/mocktest-solve', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      question_hi: item.question_hi,
-      question_en: item.question_en,
-      option1_hi: item.option1_hi,
-      option2_hi: item.option2_hi,
-      option3_hi: item.option3_hi,
-      option4_hi: item.option4_hi,
-      option5_hi: item.option5_hi || '',
-      option1_en: item.option1_en,
-      option2_en: item.option2_en,
-      option3_en: item.option3_en,
-      option4_en: item.option4_en,
-      option5_en: item.option5_en || '',
-      answer: item.answer,
-      question_type: item.question_type
-    })
-  });
+  try {
+    const response = await fetch('/api/mocktest-solve', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        question_hi: item.question_hi,
+        question_en: item.question_en,
+        option1_hi: item.option1_hi,
+        option2_hi: item.option2_hi,
+        option3_hi: item.option3_hi,
+        option4_hi: item.option4_hi,
+        option5_hi: item.option5_hi || '',
+        option1_en: item.option1_en,
+        option2_en: item.option2_en,
+        option3_en: item.option3_en,
+        option4_en: item.option4_en,
+        option5_en: item.option5_en || '',
+        answer: item.answer,
+        question_type: item.question_type
+      })
+    });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to generate solution');
+    if (!response.ok) {
+      // Resilient fallback to Extension Bridge
+      try {
+        const status = await pingStudyAiExtension(800);
+        if (status.connected) {
+          const bridgeSol = await solveQuestionWithStudyAiBridge(item);
+          return {
+            solution_hi: cleanMocktestText(bridgeSol.solution_hi || ''),
+            solution_en: cleanMocktestText(bridgeSol.solution_en || ''),
+            difficulty_level: (bridgeSol.difficulty_level || item.difficulty_level || 'medium') as DifficultyLevel
+          };
+        }
+      } catch {}
+
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to generate solution');
+    }
+
+    const data = await response.json();
+    return {
+      solution_hi: cleanMocktestText(data.solution_hi || ''),
+      solution_en: cleanMocktestText(data.solution_en || ''),
+      difficulty_level: data.difficulty_level || item.difficulty_level
+    };
+  } catch (err) {
+    try {
+      const status = await pingStudyAiExtension(800);
+      if (status.connected) {
+        const bridgeSol = await solveQuestionWithStudyAiBridge(item);
+        return {
+          solution_hi: cleanMocktestText(bridgeSol.solution_hi || ''),
+          solution_en: cleanMocktestText(bridgeSol.solution_en || ''),
+          difficulty_level: (bridgeSol.difficulty_level || item.difficulty_level || 'medium') as DifficultyLevel
+        };
+      }
+    } catch {}
+    throw err;
   }
-
-  const data = await response.json();
-  return {
-    solution_hi: cleanMocktestText(data.solution_hi || ''),
-    solution_en: cleanMocktestText(data.solution_en || ''),
-    difficulty_level: data.difficulty_level || item.difficulty_level
-  };
 }
 
 /**
@@ -1965,6 +2008,34 @@ export async function repairMockTestItemWithAi(
   const baseItem = autoRecoverItemOptionsFromStem(item);
 
   const settings = await getAiSettings();
+
+  // If using Extension Bridge or user has no API key, execute via Extension Bridge
+  try {
+    const status = await pingStudyAiExtension(800);
+    if (status.connected && (!settings.apiKey || (settings.authType as string) === 'extension')) {
+      const data = await repairQuestionWithStudyAiBridge(baseItem);
+      const mergedItem: MockTestMcqItem = {
+        ...baseItem,
+        question_hi: data.question_hi || baseItem.question_hi,
+        question_en: data.question_en || baseItem.question_en,
+        option1_hi: data.option1_hi || baseItem.option1_hi,
+        option2_hi: data.option2_hi || baseItem.option2_hi,
+        option3_hi: data.option3_hi || baseItem.option3_hi,
+        option4_hi: data.option4_hi || baseItem.option4_hi,
+        option1_en: data.option1_en || baseItem.option1_en,
+        option2_en: data.option2_en || baseItem.option2_en,
+        option3_en: data.option3_en || baseItem.option3_en,
+        option4_en: data.option4_en || baseItem.option4_en,
+        solution_hi: data.solution_hi || baseItem.solution_hi,
+        solution_en: data.solution_en || baseItem.solution_en,
+        answer: data.answer || baseItem.answer,
+        subject: data.subject || baseItem.subject,
+        difficulty_level: (data.difficulty_level || baseItem.difficulty_level || 'medium').toLowerCase() as DifficultyLevel,
+      };
+      return cleanMockTestItem(mergedItem);
+    }
+  } catch {}
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
@@ -1972,39 +2043,95 @@ export async function repairMockTestItemWithAi(
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/mocktest-repair-item', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ item: baseItem })
-  });
+  try {
+    const response = await fetch('/api/mocktest-repair-item', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ item: baseItem })
+    });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to auto-repair question with AI');
+    if (!response.ok) {
+      // Fallback to Extension Bridge
+      try {
+        const status = await pingStudyAiExtension(800);
+        if (status.connected) {
+          const data = await repairQuestionWithStudyAiBridge(baseItem);
+          const mergedItem: MockTestMcqItem = {
+            ...baseItem,
+            question_hi: data.question_hi || baseItem.question_hi,
+            question_en: data.question_en || baseItem.question_en,
+            option1_hi: data.option1_hi || baseItem.option1_hi,
+            option2_hi: data.option2_hi || baseItem.option2_hi,
+            option3_hi: data.option3_hi || baseItem.option3_hi,
+            option4_hi: data.option4_hi || baseItem.option4_hi,
+            option1_en: data.option1_en || baseItem.option1_en,
+            option2_en: data.option2_en || baseItem.option2_en,
+            option3_en: data.option3_en || baseItem.option3_en,
+            option4_en: data.option4_en || baseItem.option4_en,
+            solution_hi: data.solution_hi || baseItem.solution_hi,
+            solution_en: data.solution_en || baseItem.solution_en,
+            answer: data.answer || baseItem.answer,
+            subject: data.subject || baseItem.subject,
+            difficulty_level: (data.difficulty_level || baseItem.difficulty_level || 'medium').toLowerCase() as DifficultyLevel,
+          };
+          return cleanMockTestItem(mergedItem);
+        }
+      } catch {}
+
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to auto-repair question with AI');
+    }
+
+    const data = await response.json();
+
+    const mergedItem: MockTestMcqItem = {
+      ...baseItem,
+      question_hi: data.question_hi || baseItem.question_hi,
+      question_en: data.question_en || baseItem.question_en,
+      option1_hi: data.option1_hi || baseItem.option1_hi,
+      option2_hi: data.option2_hi || baseItem.option2_hi,
+      option3_hi: data.option3_hi || baseItem.option3_hi,
+      option4_hi: data.option4_hi || baseItem.option4_hi,
+      option1_en: data.option1_en || baseItem.option1_en,
+      option2_en: data.option2_en || baseItem.option2_en,
+      option3_en: data.option3_en || baseItem.option3_en,
+      option4_en: data.option4_en || baseItem.option4_en,
+      solution_hi: data.solution_hi || baseItem.solution_hi,
+      solution_en: data.solution_en || baseItem.solution_en,
+      answer: data.answer || baseItem.answer,
+      subject: data.subject || baseItem.subject,
+      difficulty_level: (data.difficulty_level || baseItem.difficulty_level || 'medium').toLowerCase() as DifficultyLevel,
+    };
+
+    return cleanMockTestItem(mergedItem);
+  } catch (err) {
+    try {
+      const status = await pingStudyAiExtension(800);
+      if (status.connected) {
+        const data = await repairQuestionWithStudyAiBridge(baseItem);
+        const mergedItem: MockTestMcqItem = {
+          ...baseItem,
+          question_hi: data.question_hi || baseItem.question_hi,
+          question_en: data.question_en || baseItem.question_en,
+          option1_hi: data.option1_hi || baseItem.option1_hi,
+          option2_hi: data.option2_hi || baseItem.option2_hi,
+          option3_hi: data.option3_hi || baseItem.option3_hi,
+          option4_hi: data.option4_hi || baseItem.option4_hi,
+          option1_en: data.option1_en || baseItem.option1_en,
+          option2_en: data.option2_en || baseItem.option2_en,
+          option3_en: data.option3_en || baseItem.option3_en,
+          option4_en: data.option4_en || baseItem.option4_en,
+          solution_hi: data.solution_hi || baseItem.solution_hi,
+          solution_en: data.solution_en || baseItem.solution_en,
+          answer: data.answer || baseItem.answer,
+          subject: data.subject || baseItem.subject,
+          difficulty_level: (data.difficulty_level || baseItem.difficulty_level || 'medium').toLowerCase() as DifficultyLevel,
+        };
+        return cleanMockTestItem(mergedItem);
+      }
+    } catch {}
+    throw err;
   }
-
-  const data = await response.json();
-
-  const mergedItem: MockTestMcqItem = {
-    ...baseItem,
-    question_hi: data.question_hi || baseItem.question_hi,
-    question_en: data.question_en || baseItem.question_en,
-    option1_hi: data.option1_hi || baseItem.option1_hi,
-    option2_hi: data.option2_hi || baseItem.option2_hi,
-    option3_hi: data.option3_hi || baseItem.option3_hi,
-    option4_hi: data.option4_hi || baseItem.option4_hi,
-    option1_en: data.option1_en || baseItem.option1_en,
-    option2_en: data.option2_en || baseItem.option2_en,
-    option3_en: data.option3_en || baseItem.option3_en,
-    option4_en: data.option4_en || baseItem.option4_en,
-    solution_hi: data.solution_hi || baseItem.solution_hi,
-    solution_en: data.solution_en || baseItem.solution_en,
-    answer: data.answer || baseItem.answer,
-    subject: data.subject || baseItem.subject,
-    difficulty_level: (data.difficulty_level || baseItem.difficulty_level || 'medium').toLowerCase() as DifficultyLevel,
-  };
-
-  return cleanMockTestItem(mergedItem);
 }
 
 /**

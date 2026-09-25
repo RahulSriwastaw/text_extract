@@ -1,6 +1,7 @@
 import katex from 'katex';
 import { LatexRepairRequest, LatexRepairResponse, MockTestMcqItem } from '../types';
 import { getAiSettings } from './aiDbService';
+import { pingStudyAiExtension, repairLatexWithStudyAiBridge } from './studyAiBridgeService';
 
 // In-memory undo history map for item backups (stores previous versions of items before repair)
 const itemBackups = new Map<string, MockTestMcqItem[]>();
@@ -149,6 +150,17 @@ export function validateFormulaClient(formula: string): { valid: boolean; error?
  */
 export async function repairLatexViaApi(request: LatexRepairRequest): Promise<LatexRepairResponse> {
   const settings = await getAiSettings();
+  const formula = request.selectedFormula || request.content || '';
+  const context = request.contentType || request.scope || '';
+
+  // If using Extension Bridge or user has no API key, execute via Extension Bridge
+  try {
+    const status = await pingStudyAiExtension(800);
+    if (status.connected && (!settings.apiKey || (settings.authType as string) === 'extension')) {
+      return await repairLatexWithStudyAiBridge(formula, context);
+    }
+  } catch {}
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
@@ -171,6 +183,14 @@ export async function repairLatexViaApi(request: LatexRepairRequest): Promise<La
     clearTimeout(timeoutId);
 
     if (!res.ok) {
+      // Fallback to Extension Bridge if connected
+      try {
+        const status = await pingStudyAiExtension(800);
+        if (status.connected) {
+          return await repairLatexWithStudyAiBridge(formula, context);
+        }
+      } catch {}
+
       const errData = await res.json().catch(() => ({}));
       const msg = errData.error || `Server responded with status ${res.status}`;
       throw new Error(msg);
@@ -180,6 +200,15 @@ export async function repairLatexViaApi(request: LatexRepairRequest): Promise<La
     return data;
   } catch (err: any) {
     clearTimeout(timeoutId);
+
+    // Resilient fallback to Extension Bridge
+    try {
+      const status = await pingStudyAiExtension(800);
+      if (status.connected) {
+        return await repairLatexWithStudyAiBridge(formula, context);
+      }
+    } catch {}
+
     if (err?.name === 'AbortError') {
       throw new Error('LaTeX repair request timed out after 45 seconds. Please try again.');
     }

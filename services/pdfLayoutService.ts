@@ -1,6 +1,7 @@
 import { PDFDocument, rgb, degrees } from 'pdf-lib';
 import { PageCard } from './pdfStitchService';
-import { renderMergedCardToA4, solveJustifiedFill } from './pdfStitchService';
+import { cropImageByPercentage, ensureCardItems, renderMergedCardToA4, solveJustifiedFill } from './pdfStitchService';
+import { appendReadablePages, ReadableDrawable } from './readablePdfLayout';
 
 export const MM_TO_PT = 72 / 25.4; // 1 mm ~ 2.834645669 pt
 
@@ -11,7 +12,7 @@ export type ReadingOrderOption = 'ltr' | 'rtl';
 export type PagesPerSheetOption = 1 | 2 | 4 | 6 | 8 | 9 | 16 | 'custom';
 
 export interface PdfLayoutConfig {
-  layoutMode: 'multiple' | 'single';
+  layoutMode: 'readable' | 'multiple' | 'single';
   pagesPerSheet: PagesPerSheetOption;
   customRows?: number;
   customCols?: number;
@@ -31,7 +32,7 @@ export interface PdfLayoutConfig {
 }
 
 export const DEFAULT_PDF_LAYOUT_CONFIG: PdfLayoutConfig = {
-  layoutMode: 'multiple',
+  layoutMode: 'readable',
   pagesPerSheet: 4,
   customRows: 2,
   customCols: 2,
@@ -41,10 +42,10 @@ export const DEFAULT_PDF_LAYOUT_CONFIG: PdfLayoutConfig = {
   pageSize: 'A4',
   orientation: 'auto',
   outerMargin: {
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
+    top: 8,
+    bottom: 8,
+    left: 8,
+    right: 8,
   },
   innerMargin: 5,
   outputFileName: 'converted.pdf',
@@ -257,14 +258,21 @@ function applyReadingOrder<T>(
   return rows.flat();
 }
 
+function readableSheet(config: PdfLayoutConfig) {
+  const dimensions = getSheetDimensions(config.pageSize, config.orientation, 1);
+  return {
+    ...dimensions,
+    top: config.outerMargin.top * MM_TO_PT,
+    bottom: config.outerMargin.bottom * MM_TO_PT,
+    left: config.outerMargin.left * MM_TO_PT,
+    right: config.outerMargin.right * MM_TO_PT,
+    gap: config.innerMargin * MM_TO_PT,
+  };
+}
+
 /**
- * Generate a clean N-Up PDF from an array of PageCards (from QaPageStitcher).
- *
- * Pages are placed with a justified "fill the sheet" layout rather than a rigid
- * rows x cols grid: each row is stretched across the full width and the split into
- * rows is solved so the rows fill the sheet height. That keeps every page as large as
- * it can be and stops sheets from coming out half blank. When orientation is on "auto"
- * both portrait and landscape are tried and the better-filling one wins.
+ * Readable mode flows original snippets at full width onto additional sheets.
+ * Explicit N-Up modes retain the compact justified layout and orientation solver.
  */
 export async function exportCardsWithPdfLayout(
   cards: PageCard[],
@@ -272,6 +280,35 @@ export async function exportCardsWithPdfLayout(
   onProgress?: (current: number, total: number) => void
 ): Promise<Blob> {
   const pdfDoc = await PDFDocument.create();
+
+  if (config.layoutMode === 'readable') {
+    const drawables: ReadableDrawable[] = [];
+    for (let cardIdx = 0; cardIdx < cards.length; cardIdx++) {
+      const card = cards[cardIdx];
+      onProgress?.(cardIdx + 1, cards.length);
+      // Embed the individual source snippets. Rendering a merged thumbnail first
+      // would permanently bake its tiny text into the exported PDF.
+      for (const item of ensureCardItems(card)) {
+        let source = item.croppedImage || item.image;
+        if (!item.croppedImage && item.crop) source = await cropImageByPercentage(source, item.crop);
+        if (!/^data:image\/(png|jpe?g);base64,/i.test(source)) {
+          source = await cropImageByPercentage(source, { x: 0, y: 0, width: 100, height: 100 });
+        }
+        const image = /^data:image\/png;/i.test(source)
+          ? await pdfDoc.embedPng(source)
+          : await pdfDoc.embedJpg(source);
+        drawables.push({
+          width: image.width, height: image.height, scale: item.scale,
+          border: config.withBorder && card.showDivider !== false,
+          draw: (page, box) => page.drawImage(image, box),
+        });
+      }
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    appendReadablePages(pdfDoc, drawables, readableSheet(config));
+    const bytes = await pdfDoc.save();
+    return new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
+  }
 
   const numPagesPerSheet =
     config.layoutMode === 'single'
@@ -420,6 +457,16 @@ export async function relayoutExistingPdf(
   const totalSrcPages = srcDoc.getPageCount();
   const pageIndices = Array.from({ length: totalSrcPages }, (_, i) => i);
   const embeddedPages = await outDoc.embedPdf(srcDoc, pageIndices);
+
+  if (config.layoutMode === 'readable') {
+    appendReadablePages(outDoc, embeddedPages.map(page => ({
+      width: page.width, height: page.height, border: config.withBorder,
+      draw: (sheet, box) => sheet.drawPage(page, box),
+    })), readableSheet(config));
+    onProgress?.(totalSrcPages, totalSrcPages);
+    const bytes = await outDoc.save();
+    return new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
+  }
 
   const numPagesPerSheet =
     config.layoutMode === 'single'

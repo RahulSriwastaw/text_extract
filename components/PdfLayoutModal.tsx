@@ -59,10 +59,11 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
   });
 
   const [marginUnit, setMarginUnit] = useState<'mm' | 'pt'>('mm');
+  const isReadable = config.layoutMode === 'readable';
 
   // Compute sheet calculations for UI preview
   const numPagesPerSheet =
-    config.layoutMode === 'single'
+    config.layoutMode !== 'multiple'
       ? 1
       : config.pagesPerSheet === 'custom'
       ? (config.customRows || 2) * (config.customCols || 2)
@@ -188,10 +189,21 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                   onChange={(e) => setConfig(p => ({ ...p, layoutMode: e.target.value as any }))}
                   className="w-full bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
                 >
+                  <option value="readable">Readable auto adjust (Recommended)</option>
                   <option value="multiple">Multiple pages per sheet</option>
                   <option value="single">Single page per sheet</option>
                 </select>
               </div>
+
+              {isReadable && (
+                <div className="space-y-2 text-xs text-blue-200 leading-relaxed">
+                  <p>Each snippet uses the full page width. Longer content moves to the next page instead of shrinking. Very tall content continues on another page with a small overlap.</p>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={config.withBorder} onChange={e => setConfig(p => ({ ...p, withBorder: e.target.checked }))} />
+                    Show borders
+                  </label>
+                </div>
+              )}
 
               {/* Pages Per Sheet & Border */}
               {config.layoutMode === 'multiple' && (
@@ -355,7 +367,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                 className={`w-28 p-2 rounded-xl border bg-black/40 shadow-inner flex flex-col items-center justify-center transition-all ${
                   isLandscape ? 'h-20' : 'h-28'
                 } ${config.withBorder ? 'border-blue-500/40 shadow-blue-500/5' : 'border-white/10'}`}
-                title={`Reading order preview: ${rows} rows × ${cols} cols (${isLandscape ? 'Landscape' : 'Portrait'}). Final placement auto-fits each page to fill the sheet.`}
+                title={isReadable ? 'Full-width content flows onto additional pages as needed.' : `Reading order preview: ${rows} rows × ${cols} cols (${isLandscape ? 'Landscape' : 'Portrait'}). Final placement auto-fits each page to fill the sheet.`}
               >
                 <div
                   className="w-full h-full grid gap-1 p-1 rounded-lg bg-zinc-900/80"
@@ -458,7 +470,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               <div className="flex items-center gap-2 p-2 bg-black/30 border border-white/10 rounded-xl text-xs text-slate-300">
                 <span className="text-[11px] font-semibold text-slate-400">
                   {config.pageSize} ({config.orientation === 'auto'
-                    ? 'Auto-fit'
+                    ? isReadable ? 'Portrait' : 'Auto-fit'
                     : isLandscape ? 'Landscape' : 'Portrait'})
                 </span>
                 <span className="text-[10px] text-slate-500">
@@ -559,7 +571,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
           </div>
 
           {/* SECTION 5: INNER MARGIN */}
-          {config.layoutMode === 'multiple' && numPagesPerSheet > 1 && (
+          {(isReadable || (config.layoutMode === 'multiple' && numPagesPerSheet > 1)) && (
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pb-5 border-b border-white/[0.08] items-center">
               <div className="md:col-span-4">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-300 block">
@@ -621,13 +633,13 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               <span className="mx-2 text-white/20">|</span>
               <span className="text-slate-400">Layout:</span>{' '}
               <span className="font-extrabold text-blue-300">
-                {numPagesPerSheet === 1 ? '1-Up (Standard)' : `${numPagesPerSheet}-Up (${rows}×${cols})`}
+                {isReadable ? 'Readable auto adjust' : numPagesPerSheet === 1 ? '1-Up (Standard)' : `${numPagesPerSheet}-Up (${rows}×${cols})`}
               </span>
             </div>
             <div>
               <span className="text-slate-400">Resulting PDF:</span>{' '}
               <span className="font-black text-emerald-400 text-sm">
-                ~{estimatedSheets} Sheets ({config.pageSize})
+                {isReadable ? `As many ${config.pageSize} pages as needed` : `~${estimatedSheets} Sheets (${config.pageSize})`}
               </span>
             </div>
           </div>
@@ -667,7 +679,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
           </button>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {onApplyToCards && (
+            {onApplyToCards && !isReadable && (
               <button
                 type="button"
                 onClick={() => {
@@ -689,9 +701,9 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                 onClick={onQuickDownload}
                 disabled={isExporting}
                 className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 transition-all disabled:opacity-30"
-                title="Bypass layout and directly download standard 1-page A4 PDF"
+                title="Download with readable full-width layout and default A4 settings"
               >
-                Quick 1-Page PDF
+                Quick Readable PDF
               </button>
             )}
 
@@ -709,7 +721,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  <span>Convert & Download PDF (~{estimatedSheets} Sheets)</span>
+                  <span>{isReadable ? 'Convert & Download Readable PDF' : `Convert & Download PDF (~${estimatedSheets} Sheets)`}</span>
                 </>
               )}
             </button>

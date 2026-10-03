@@ -1025,40 +1025,6 @@ export const exportMergedCardsToPdf = async (
   cards: PageCard[],
   onProgress?: (current: number, total: number) => void
 ): Promise<Blob> => {
-  const pdfDoc = await PDFDocument.create();
-  const a4WidthPt = 595.28;
-  const a4HeightPt = 841.89;
-
-  for (let i = 0; i < cards.length; i++) {
-    const card = cards[i];
-    onProgress?.(i + 1, cards.length);
-
-    const dataUrl = await renderMergedCardToA4(card);
-    const base64Data = dataUrl.split(',')[1];
-    const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-
-    const embeddedImage = await pdfDoc.embedJpg(imageBytes);
-
-    // Page width is always A4; height follows the rendered content's real aspect ratio
-    // (renderMergedCardToA4 now auto-fits its own height), so a page with many merged
-    // snippets becomes a taller ("vertical") A4-width sheet instead of shrinking to fit
-    // a fixed A4 height, and short single-snippet pages don't carry dead white space.
-    const contentAspect = embeddedImage.width / embeddedImage.height;
-    const pageHeightPt = Math.max(a4HeightPt * 0.4, a4WidthPt / contentAspect);
-    const pdfPage = pdfDoc.addPage([a4WidthPt, pageHeightPt]);
-
-    pdfPage.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width: a4WidthPt,
-      height: pageHeightPt,
-    });
-
-    // Yield control so export progress updates smoothly on screen
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-
-  const pdfBytes = await pdfDoc.save();
-  return new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
+  const { exportCardsWithPdfLayout, DEFAULT_PDF_LAYOUT_CONFIG } = await import('./pdfLayoutService');
+  return exportCardsWithPdfLayout(cards, DEFAULT_PDF_LAYOUT_CONFIG, onProgress);
 };
-

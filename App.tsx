@@ -92,6 +92,7 @@ function ExistingApp() {
             >
               <LandingPage
                 onExploreTools={() => setActiveTool('tools')}
+                onOpenTool={(tool) => setActiveTool(tool)}
               />
             </motion.div>
           )}

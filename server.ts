@@ -9,7 +9,7 @@ import apiApp from "./api/index.js";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
 
   // API routes FIRST
   app.use(apiApp);

@@ -6,6 +6,10 @@
  * systematic, human-like standard.
  */
 
+import { normalizeHtmlLatex } from './htmlLatex.js';
+
+export { HTML_LATEX_FORMAT_RULES, normalizeHtmlLatex, htmlToPlainText } from './htmlLatex.js';
+
 const EXAM_KEYWORD_REGEX = '(?:\\b(?:RRB|SSC|NTPC|CBT|Tech|ALP|JE|Group[\\s\\-]*D|RPF|SI|Constable|CGL|CHSL|MTS|CPO|GD|Steno|UPSC|CDS|NDA|AFCAT|IBPS|SBI|PO|Clerk|BPSC|UPPSC|MPPSC|HSSC|DSSSB|CTET|UPTET|REET|Railway)\\b|(?:एसएससी|आरआरबी|एनटीपीसी|रेलवे|ग्रुप[\\s\\-]*डी|टेक))';
 const SHIFT_KEYWORD_REGEX = '(?:Afternoon|Morning|Evening|Night|Shift[\\s\\-]*[I|II|III|IV|V|1|2|3|4|5]|Batch[\\s\\-]*\\d+|दोपहर|सुबह|शाम|रात|प्रथम[\\s\\-]*पाली|द्वितीय[\\s\\-]*पाली|तृतीय[\\s\\-]*पाली|पाली[\\s\\-]*\\d+)';
 const DATE_PATTERN_REGEX = '(?:\\d{1,2}[\\/\\.\\-]\\d{1,2}[\\/\\.\\-](?:19|20)?\\d{2}|\\b(?:19|20)\\d{2}\\s*(?:Shift|Tier|Stage|पाली))';
@@ -313,15 +317,8 @@ export function cleanMocktestText(text: string): string {
   res = res.replace(/⅓/g, '$\\frac{1}{3}$');
   res = res.replace(/⅔/g, '$\\frac{2}{3}$');
 
-  // 22. Strip HTML container & formatting tags (preserves figure <img> tags and LaTeX math)
-  res = res
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/<\/?(?:p|b|strong|i|em|span|div|table|thead|tbody|tr|td|th|ul|ol|li|hr)\b[^>]*>/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]{2,}/g, ' ');
-
-  return res.trim();
+  // 22. Canonical HTML + LaTeX: sanitized <p>/<br>/<b>/<sup>/<table>/<ul>/<img> structure, math as $...$ / $$...$$
+  return normalizeHtmlLatex(res);
 }
 
 /**
@@ -358,7 +355,51 @@ export function prepareAiJsonString(raw: string): string {
     .replace(/(?<!\\)\\neq/g, '\\\\neq')
     .replace(/(?<!\\)\\approx/g, '\\\\approx');
 
-  return s;
+  return escapeLatexBackslashesForJson(s);
+}
+
+/**
+ * LaTeX commands whose first letter collides with a JSON escape (\b \f \n \r \t \u).
+ * Only these are ambiguous; e.g. "\nThe" stays a newline but "\neq" is LaTeX.
+ */
+const AMBIGUOUS_LATEX_COMMANDS = new Set([
+  'beta', 'bar', 'binom', 'begin', 'bf', 'big', 'bigg', 'bigl', 'bigr', 'bmod', 'boldsymbol', 'bot', 'bullet', 'because', 'backslash', 'boxed', 'brace', 'breve',
+  'frac', 'forall', 'flat', 'frown',
+  'neq', 'ne', 'nu', 'not', 'nabla', 'ni', 'neg', 'nexists', 'newline', 'nleq', 'ngeq', 'notin', 'nmid', 'nparallel',
+  'rho', 'right', 'rightarrow', 'rangle', 'rceil', 'rfloor', 'rm', 'rbrace', 'rvert', 'rVert', 'rightleftharpoons', 'root',
+  'times', 'theta', 'tan', 'tanh', 'text', 'textbf', 'textit', 'textrm', 'tfrac', 'to', 'tau', 'triangle', 'therefore', 'top', 'tilde', 'thinspace', 'tag',
+  'underline', 'uparrow', 'upsilon', 'underbrace', 'unit', 'uplus',
+]);
+
+/**
+ * Doubles single backslashes that start LaTeX commands inside raw AI JSON so JSON.parse keeps them.
+ * Invalid JSON escapes (\l, \g, \s, \a, \c, \d, \o, \p …) are always LaTeX; ambiguous ones are checked against a list.
+ */
+function escapeLatexBackslashesForJson(s: string): string {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] !== '\\') { out += s[i++]; continue; }
+    let run = 0;
+    while (s[i + run] === '\\') run++;
+    out += s.slice(i, i + run);
+    i += run;
+    if (run % 2 === 0) continue; // already-escaped pairs
+
+    const word = (s.slice(i).match(/^[a-zA-Z]+/) || [''])[0];
+    const next = s[i] ?? '';
+    let isLatex = false;
+    if (word) {
+      if (!'bfnrtu'.includes(word[0])) isLatex = true;
+      else if (word[0] === 'u') isLatex = !/^u[0-9a-fA-F]{4}/.test(s.slice(i, i + 5));
+      else isLatex = AMBIGUOUS_LATEX_COMMANDS.has(word);
+    } else if (next && !'"\\/bfnrtu'.includes(next)) {
+      // \{, \}, \%, \$, \,, \;, \!, \  etc. – invalid in JSON, valid in LaTeX
+      isLatex = true;
+    }
+    if (isLatex) out += '\\';
+  }
+  return out;
 }
 
 /**

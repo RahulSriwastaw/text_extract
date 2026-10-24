@@ -35,6 +35,8 @@ import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
 import { MocktestPasteCsvModal } from './MocktestPasteCsvModal';
 import { LatexRepairModal } from './LatexRepairModal';
 import { LatexRenderer, useMathJax } from './LatexRenderer';
+import { HtmlLatexField } from './HtmlLatexField';
+import { htmlToPlainText } from '../services/htmlLatex';
 import { 
   MockTestMcqItem, 
   DifficultyLevel,
@@ -2033,6 +2035,24 @@ Rules:
       items: (p.items || []).map(it => it.id === id ? cleanMockTestItem({ ...it, ...updates }) : it)
     })));
   };
+
+  // Typing in edit mode stores the raw source (no trimming/re-wrapping under the cursor);
+  // the item is normalized to clean HTML + LaTeX once editing ends (see effect below).
+  const updateItemDraft = (id: string, updates: Partial<MockTestMcqItem>) => {
+    setExtractedMcqs(prev => prev.map(it => it.id === id ? { ...it, ...updates } : it));
+    setPages(prev => prev.map(p => ({
+      ...p,
+      items: (p.items || []).map(it => it.id === id ? { ...it, ...updates } : it)
+    })));
+  };
+
+  const prevEditingItemIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prevId = prevEditingItemIdRef.current;
+    prevEditingItemIdRef.current = editingItemId;
+    if (prevId && prevId !== editingItemId) updateItem(prevId, {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingItemId]);
 
   const deleteItem = (id: string) => {
     setExtractedMcqs(prev => prev.filter(it => it.id !== id).map((it, idx) => ({
@@ -4294,11 +4314,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                     </div>
 
                                     {isEditing ? (
-                                      <textarea
-                                        rows={2}
+                                      <HtmlLatexField
+                                        rows={3}
                                         value={item.question_hi}
-                                        onChange={(e) => updateItem(item.id, { question_hi: e.target.value })}
-                                        className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none"
+                                        onChange={(v) => updateItemDraft(item.id, { question_hi: v })}
                                       />
                                     ) : (
                                       <>
@@ -4361,7 +4380,8 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         const optFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item[enKey] as string);
                                         const hasImg = optFigUrls.length > 0 || hasFigureImage(item[key]) || hasFigureImage(item[enKey] as string);
                                         const cleanOptText = (item[key] || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim();
-                                        const isBlank = !hasImg && (!cleanOptText || cleanOptText.toLowerCase() === 'blank');
+                                        const optPlainText = htmlToPlainText(cleanOptText);
+                                        const isBlank = !hasImg && (!optPlainText || optPlainText.toLowerCase() === 'blank');
                                         const targetOptField = `option${optIdx + 1}` as FigureTargetField;
 
                                         return (
@@ -4382,16 +4402,15 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 {optLetter}
                                               </span>
                                               {isEditing ? (
-                                                <input
-                                                  type="text"
+                                                <HtmlLatexField
+                                                  singleLine
                                                   value={item[key] || ''}
-                                                  onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                  onChange={(v) => updateItemDraft(item.id, { [key]: v })}
                                                   placeholder={`Option ${optLetter}`}
-                                                  className="w-full bg-transparent text-xs text-white focus:outline-none"
                                                 />
                                               ) : (
-                                                <span className="flex-1 min-w-0" title={item[key]}>
-                                                  {cleanOptText ? (
+                                                <span className="flex-1 min-w-0" title={htmlToPlainText(item[key] || '')}>
+                                                  {optPlainText ? (
                                                     <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
                                                   ) : hasImg ? (
                                                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300/90">
@@ -4426,9 +4445,9 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                               <div className="flex flex-wrap gap-2 pl-6 pt-0.5">
                                                 {optFigUrls.map((url, uIdx) => (
                                                   <div key={uIdx} className="relative group/optfig rounded-lg bg-white p-1 border border-white/20 shadow-md inline-block">
-                                                    <img 
-                                                      src={url} 
-                                                      alt={`Option ${optLetter} Diagram`} 
+                                                    <img
+                                                      src={url}
+                                                      alt={`Option ${optLetter} Diagram`}
                                                       className="max-h-20 max-w-[140px] object-contain rounded cursor-pointer hover:scale-105 transition-transform"
                                                       onClick={() => setPreviewLightboxUrl(url)}
                                                       title="Click to view full size"
@@ -4481,11 +4500,11 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         </div>
                                       </div>
                                       {isEditing ? (
-                                        <textarea
-                                          rows={3}
+                                        <HtmlLatexField
+                                          rows={4}
                                           value={item.solution_hi}
-                                          onChange={(e) => updateItem(item.id, { solution_hi: e.target.value })}
-                                          className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-200 focus:outline-none"
+                                          onChange={(v) => updateItemDraft(item.id, { solution_hi: v })}
+                                          textClassName="text-amber-200"
                                         />
                                       ) : (
                                         <div className="p-2.5 rounded-lg bg-amber-500/[0.03] border border-amber-500/20 space-y-2">
@@ -4567,11 +4586,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                     </div>
 
                                     {isEditing ? (
-                                      <textarea
-                                        rows={2}
+                                      <HtmlLatexField
+                                        rows={3}
                                         value={item.question_en}
-                                        onChange={(e) => updateItem(item.id, { question_en: e.target.value })}
-                                        className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-white focus:outline-none"
+                                        onChange={(v) => updateItemDraft(item.id, { question_en: v })}
                                       />
                                     ) : (
                                       <>
@@ -4633,7 +4651,8 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         const optFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item[hiKey] as string);
                                         const hasImg = optFigUrls.length > 0 || hasFigureImage(item[key]) || hasFigureImage(item[hiKey] as string);
                                         const cleanOptText = (item[key] || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim();
-                                        const isBlank = !hasImg && (!cleanOptText || cleanOptText.toLowerCase() === 'blank');
+                                        const optPlainText = htmlToPlainText(cleanOptText);
+                                        const isBlank = !hasImg && (!optPlainText || optPlainText.toLowerCase() === 'blank');
                                         const targetOptField = `option${optIdx + 1}` as FigureTargetField;
 
                                         return (
@@ -4654,16 +4673,15 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 {optLetter}
                                               </span>
                                               {isEditing ? (
-                                                <input
-                                                  type="text"
+                                                <HtmlLatexField
+                                                  singleLine
                                                   value={item[key] || ''}
-                                                  onChange={(e) => updateItem(item.id, { [key]: e.target.value })}
+                                                  onChange={(v) => updateItemDraft(item.id, { [key]: v })}
                                                   placeholder={`Option ${optLetter}`}
-                                                  className="w-full bg-transparent text-xs text-white focus:outline-none"
                                                 />
                                               ) : (
-                                                <span className="flex-1 min-w-0" title={item[key]}>
-                                                  {cleanOptText ? (
+                                                <span className="flex-1 min-w-0" title={htmlToPlainText(item[key] || '')}>
+                                                  {optPlainText ? (
                                                     <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
                                                   ) : hasImg ? (
                                                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300/90">
@@ -4753,11 +4771,11 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         </div>
                                       </div>
                                       {isEditing ? (
-                                        <textarea
-                                          rows={3}
+                                        <HtmlLatexField
+                                          rows={4}
                                           value={item.solution_en}
-                                          onChange={(e) => updateItem(item.id, { solution_en: e.target.value })}
-                                          className="w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-blue-200 focus:outline-none"
+                                          onChange={(v) => updateItemDraft(item.id, { solution_en: v })}
+                                          textClassName="text-blue-200"
                                         />
                                       ) : (
                                         <div className="p-2.5 rounded-lg bg-blue-500/[0.03] border border-blue-500/20 space-y-2">

@@ -115,17 +115,79 @@ h1, h2, h3, h4, h5, h6, .font-display {
 }
 
 /* KaTeX Formula Enhancements */
-.katex {
+/* `html` prefix keeps these above katex.min.css regardless of stylesheet load order */
+html .katex {
   font-size: 1.1em;
-  color: #F8FAFC;
+  color: inherit;
 }
 
-.katex-display {
+html .katex-display {
   margin: 0.75em 0;
   padding: 8px 12px;
   background: rgba(0, 0, 0, 0.25);
   border-radius: 6px;
   border-left: 3px solid #FF6B2B;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* MCQ HTML + LaTeX content (LatexRenderer) – Tailwind preflight resets lists/tables, restore them here */
+.mcq-html {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.mcq-html p { margin: 0 0 0.45em; }
+.mcq-html p:last-child { margin-bottom: 0; }
+.mcq-html b, .mcq-html strong { font-weight: 700; }
+.mcq-html i, .mcq-html em { font-style: italic; }
+.mcq-html u { text-decoration: underline; text-underline-offset: 2px; }
+.mcq-html s { text-decoration: line-through; }
+.mcq-html sup, .mcq-html sub { font-size: 0.75em; line-height: 0; }
+.mcq-html mark { background: rgba(250, 204, 21, 0.25); color: inherit; padding: 0 2px; border-radius: 2px; }
+.mcq-html code { font-family: var(--font-mono); font-size: 0.92em; background: rgba(255, 255, 255, 0.06); padding: 0 4px; border-radius: 4px; }
+.mcq-html ul, .mcq-html ol { margin: 0.35em 0 0.5em; padding-left: 1.4em; }
+.mcq-html ul { list-style: disc; }
+.mcq-html ol { list-style: decimal; }
+.mcq-html li { margin: 0.15em 0; }
+.mcq-html table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+}
+.mcq-html th, .mcq-html td {
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: left;
+  vertical-align: top;
+}
+.mcq-html th { background: rgba(255, 107, 43, 0.12); color: #FDBA74; font-weight: 700; }
+.mcq-html tr:nth-child(2n) td { background: rgba(255, 255, 255, 0.02); }
+.mcq-html blockquote { border-left: 3px solid rgba(255, 255, 255, 0.2); padding-left: 0.75em; margin: 0.4em 0; }
+.mcq-html hr { border: 0; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 0.6em 0; }
+.mcq-html img {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 11rem;
+  background: #fff;
+  padding: 4px;
+  border-radius: 8px;
+  margin: 2px 0;
+}
+.mcq-html-inline { display: inline; }
+.mcq-html-inline .katex-display { display: inline-block; margin: 0 0.2em; padding: 2px 6px; }
+.mcq-html .math-error {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: #FCA5A5;
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px dashed rgba(244, 63, 94, 0.55);
+  border-radius: 4px;
+  padding: 0 4px;
+  cursor: help;
 }
 
 /* Animations */

@@ -4,7 +4,7 @@
  */
 
 (function () {
-  const EXT_VER = "2.5.5";
+  const EXT_VER = "2.5.7";
   if (window.__tfStudyAiGenericVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGenericVer = EXT_VER;
@@ -133,25 +133,55 @@
     return out;
   }
 
+  // A hidden duplicate (visibility:hidden, off-screen clone, or a collapsed search box) can still
+  // report a non-zero bounding rect, so size alone let text get typed into an invisible element
+  // while the real composer stayed empty. Require actual visibility + on-screen placement too.
+  function isTrulyVisible(el) {
+    if (!el || !el.isConnected) return false;
+    if (el.closest('[aria-hidden="true"], [inert], [hidden]')) return false;
+    if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") return false;
+    const style = getComputedStyle(el);
+    if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 20 || r.height <= 12) return false;
+    if (r.bottom <= 0 || r.right <= 0) return false;
+    if (r.top > (window.innerHeight || document.documentElement.clientHeight)) return false;
+    return true;
+  }
+
+  function isLikelyNotComposer(el) {
+    const attrs = (
+      (el.getAttribute("aria-label") || "") + " " +
+      (el.getAttribute("placeholder") || "") + " " +
+      (el.getAttribute("name") || "") + " " +
+      (el.getAttribute("data-testid") || "")
+    ).toLowerCase();
+    if (/search|find in|filter|rename|project name|username|email|password/i.test(attrs)) return true;
+    if (el.closest('[role="search"], [class*="sidebar"], [class*="history-item"], [data-testid*="conversation-turn"]')) return true;
+    return false;
+  }
+
   function findComposer() {
     const selectors = [
       "#prompt-textarea",
       'div[id="prompt-textarea"]',
+      'div[data-testid="chat-input"]',
+      'div[contenteditable="true"][data-testid*="composer" i]',
       "textarea#chat-input",
+      'textarea[data-testid*="composer" i]',
       'div.ProseMirror[contenteditable="true"]',
       'div[contenteditable="true"][data-placeholder]',
+      'div[contenteditable="true"][aria-placeholder]',
       'div[contenteditable="true"][role="textbox"]',
       'div[contenteditable="true"]',
       'textarea[placeholder*="Message" i]',
       'textarea[placeholder*="Ask" i]',
       'textarea[placeholder*="Send" i]',
+      'textarea[placeholder*="Reply" i]',
       "textarea",
     ];
     for (const sel of selectors) {
-      const list = deepQueryAll(sel).filter((el) => {
-        const r = el.getBoundingClientRect();
-        return r.width > 20 && r.height > 12 && r.bottom > 0 && !el.disabled;
-      });
+      const list = deepQueryAll(sel).filter((el) => !el.disabled && isTrulyVisible(el) && !isLikelyNotComposer(el));
       if (!list.length) continue;
       list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
       return list[0];
@@ -165,6 +195,12 @@
       if (findComposer()) return;
       await sleep(350);
     }
+    LOG(
+      "Composer search failed. contenteditable count:",
+      deepQueryAll('[contenteditable="true"]').length,
+      "textarea count:",
+      deepQueryAll("textarea").length,
+    );
     throw new Error("Chat composer not found — login on this AI tab first.");
   }
 
@@ -205,6 +241,22 @@
         } catch {}
       }
     }
+  }
+
+  // ChatGPT's composer is React-controlled: raw DOM insertion (execCommand/paste/innerHTML
+  // fallbacks) can show text for an instant, passing a naive check, then React's next
+  // reconciliation wipes it back to its own (empty) internal state — right before we click
+  // send. That produced image-only sends with a blank prompt. This re-reads the LIVE composer
+  // right before sending so a wiped-out prompt is caught and retried instead of silently sent.
+  function verifyComposerHasPrompt(prompt) {
+    const composer = findComposer();
+    if (!composer) return false;
+    const t = composerText(composer);
+    if (!t) return false;
+    const needle = promptNeedle(prompt);
+    if (t.includes(needle)) return true;
+    const minLen = Math.min(50, Math.floor(String(prompt || "").length * 0.2));
+    return minLen > 0 && t.length >= minLen;
   }
 
   async function injectPrompt(el, prompt) {
@@ -371,13 +423,13 @@
 
   function findSendButton() {
     // 1. ChatGPT primary selectors
-    const chatgptSend = deepQueryAll('button[data-testid="send-button"], button[data-testid="fruitjuice-send-button"], button#send-button')[0];
+    const chatgptSend = deepQueryAll('button[data-testid="send-button"], button[data-testid="composer-submit-button"], button[data-testid="fruitjuice-send-button"], button#send-button').filter(isTrulyVisible)[0];
     if (chatgptSend) return chatgptSend;
 
     // 2. Buttons in or near composer container
     const composer = findComposer();
     const container = composer?.closest('form, [class*="composer"], [class*="chat-input"], [class*="input"], rich-textarea') || composer?.parentElement || document;
-    const buttons = deepQueryAll("button, [role='button'], div[class*='button']", container);
+    const buttons = deepQueryAll("button, [role='button'], div[class*='button']", container).filter(isTrulyVisible);
 
     // Filter out buttons belonging to previous message history or feedback controls
     const validButtons = buttons.filter((b) => {
@@ -1509,15 +1561,38 @@
       }
       runtime.check();
       progress(requestId, "prompt", "Injecting prompt…", adminTabId);
-      await injectPrompt(findComposer() || el, job.prompt);
-      await sleep(600);
-      runtime.check();
+      let promptStuck = false;
+      for (let attempt = 1; attempt <= 3 && !promptStuck; attempt++) {
+        await injectPrompt(findComposer() || el, job.prompt);
+        await sleep(600);
+        runtime.check();
+        // Re-read the LIVE composer right before trusting it — some sites (ChatGPT) silently
+        // wipe a script-inserted prompt on their next re-render, well after injectPrompt()
+        // already returned "success".
+        promptStuck = verifyComposerHasPrompt(job.prompt);
+        if (!promptStuck) {
+          LOG(`Prompt did not stick after injection attempt ${attempt} — retrying...`);
+          progress(requestId, "prompt", `Prompt was cleared — retrying (${attempt})…`, adminTabId);
+          await sleep(400);
+        }
+      }
+      if (!promptStuck) {
+        throw new Error("Prompt text kept getting cleared from the chat input before sending. Click the chat input once, then retry this page.");
+      }
       // An image-less send wastes the turn and answers about the previous page's image.
       if (needsImage && countAttachments() < 1) {
         throw new Error("Image attachment disappeared before sending. Retry this page.");
       }
       progress(requestId, "send", "Sending…", adminTabId);
       await clickSendOrEnter(findComposer() || el);
+      // Belt-and-suspenders: if the composer is still non-empty right after the click/Enter
+      // attempt, the send likely didn't actually fire (or fired with stale/no text) — verify.
+      await sleep(300);
+      const postSendText = composerText(findComposer());
+      if (postSendText && postSendText.length > 10 && !isGenerating() && getAssistantTurnNodes().length <= initialReplyCount) {
+        LOG("Composer still has text after send attempt — retrying send once more.");
+        await clickSendOrEnter(findComposer() || el);
+      }
 
       // Verify send initiated
       let sendConfirmed = false;

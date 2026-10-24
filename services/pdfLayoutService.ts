@@ -1,7 +1,7 @@
 import { PDFDocument, rgb, degrees } from 'pdf-lib';
 import { PageCard } from './pdfStitchService';
 import { cropImageByPercentage, ensureCardItems, renderMergedCardToA4, solveJustifiedFill } from './pdfStitchService';
-import { appendReadablePages, ReadableDrawable } from './readablePdfLayout';
+import { appendReadablePages, planReadablePages, ReadableDrawable } from './readablePdfLayout';
 
 export const MM_TO_PT = 72 / 25.4; // 1 mm ~ 2.834645669 pt
 
@@ -274,15 +274,31 @@ function readableSheet(config: PdfLayoutConfig) {
  * Readable mode flows original snippets at full width onto additional sheets.
  * Explicit N-Up modes retain the compact justified layout and orientation solver.
  */
+/** Where one card landed on an exported sheet, as fractions (0-1) of the sheet size. */
+export interface SheetCardPlacement {
+  cardId: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type SheetPlan = SheetCardPlacement[];
+
+const cardLabel = (card: PageCard) => ensureCardItems(card).map(it => it.pageNum).join('+');
+
 export async function exportCardsWithPdfLayout(
   cards: PageCard[],
   config: PdfLayoutConfig,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void,
+  onSheetPlans?: (plans: SheetPlan[]) => void
 ): Promise<Blob> {
   const pdfDoc = await PDFDocument.create();
 
   if (config.layoutMode === 'readable') {
     const drawables: ReadableDrawable[] = [];
+    const drawableCards: PageCard[] = [];
     for (let cardIdx = 0; cardIdx < cards.length; cardIdx++) {
       const card = cards[cardIdx];
       onProgress?.(cardIdx + 1, cards.length);
@@ -302,10 +318,30 @@ export async function exportCardsWithPdfLayout(
           border: config.withBorder && card.showDivider !== false,
           draw: (page, box) => page.drawImage(image, box),
         });
+        drawableCards.push(card);
       }
       await new Promise(resolve => setTimeout(resolve, 0));
     }
-    appendReadablePages(pdfDoc, drawables, readableSheet(config));
+    const sheet = readableSheet(config);
+    appendReadablePages(pdfDoc, drawables, sheet);
+    if (onSheetPlans) {
+      const placements = planReadablePages(
+        drawables, sheet.width - sheet.left - sheet.right, sheet.height - sheet.top - sheet.bottom, sheet.gap,
+      );
+      const plans: SheetPlan[] = [];
+      for (const part of placements) {
+        const card = drawableCards[part.itemIndex];
+        (plans[part.pageIndex] ||= []).push({
+          cardId: card.id,
+          label: cardLabel(card),
+          x: (sheet.left + part.x) / sheet.width,
+          y: (sheet.top + part.y) / sheet.height,
+          width: part.width / sheet.width,
+          height: part.height / sheet.height,
+        });
+      }
+      onSheetPlans(plans);
+    }
     const bytes = await pdfDoc.save();
     return new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' });
   }
@@ -318,7 +354,8 @@ export async function exportCardsWithPdfLayout(
       : (config.pagesPerSheet as number);
 
   // Render + embed every card first so the layout can be solved from real page shapes
-  const embedded: { image: any; aspect: number }[] = [];
+  type EmbeddedCard = { image: any; aspect: number; cardId: string; label: string };
+  const embedded: EmbeddedCard[] = [];
   for (let cardIdx = 0; cardIdx < cards.length; cardIdx++) {
     onProgress?.(cardIdx + 1, cards.length);
 
@@ -326,7 +363,12 @@ export async function exportCardsWithPdfLayout(
     const base64Data = dataUrl.split(',')[1];
     const imageBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
     const image = await pdfDoc.embedJpg(imageBytes);
-    embedded.push({ image, aspect: image.width / Math.max(1, image.height) });
+    embedded.push({
+      image,
+      aspect: image.width / Math.max(1, image.height),
+      cardId: cards[cardIdx].id,
+      label: cardLabel(cards[cardIdx]),
+    });
 
     if (cardIdx % 2 === 0) {
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -341,12 +383,12 @@ export async function exportCardsWithPdfLayout(
       ? new Array(Math.max(1, config.customRows)).fill(Math.max(1, config.customCols))
       : undefined;
 
-  const groups: { image: any; aspect: number }[][] = [];
+  const groups: EmbeddedCard[][] = [];
   for (let start = 0; start < embedded.length; start += numPagesPerSheet) {
     groups.push(embedded.slice(start, start + numPagesPerSheet));
   }
 
-  const planSheet = (group: { image: any; aspect: number }[], orientation: OrientationOption) => {
+  const planSheet = (group: EmbeddedCard[], orientation: OrientationOption) => {
     const { width: sheetWidth, height: sheetHeight } = getSheetDimensions(
       config.pageSize,
       orientation,
@@ -405,9 +447,19 @@ export async function exportCardsWithPdfLayout(
     }
   }
 
+  const sheetPlans: SheetPlan[] = [];
   for (const group of groups) {
     const sheet = planSheet(group, chosenOrientation);
     const sheetPage = pdfDoc.addPage([sheet.width, sheet.height]);
+    const marginTop = sheet.height - sheet.originY;
+    sheetPlans.push(sheet.layout.rects.map((rect, i) => ({
+      cardId: sheet.order[i].cardId,
+      label: sheet.order[i].label,
+      x: (sheet.originX + rect.x) / sheet.width,
+      y: (marginTop + rect.y) / sheet.height,
+      width: rect.width / sheet.width,
+      height: rect.height / sheet.height,
+    })));
 
     for (let i = 0; i < sheet.order.length; i++) {
       const rect = sheet.layout.rects[i];
@@ -439,6 +491,7 @@ export async function exportCardsWithPdfLayout(
     await new Promise(resolve => setTimeout(resolve, 0));
   }
 
+  onSheetPlans?.(sheetPlans);
   const pdfBytes = await pdfDoc.save();
   return new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
 }

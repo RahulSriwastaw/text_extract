@@ -339,7 +339,7 @@ export function normalizeStrictSubject(
 }
 
 /**
- * Returns clean plain text normalized with LaTeX math (NO HTML tags).
+ * Returns the canonical HTML + LaTeX form: sanitized <p>-wrapped HTML with math in $...$ / $$...$$.
  */
 export function ensureHtmlParagraph(text: string): string {
   if (!text) return '';
@@ -347,6 +347,8 @@ export function ensureHtmlParagraph(text: string): string {
 }
 
 import {
+  HTML_LATEX_FORMAT_RULES,
+  htmlToPlainText,
   stripExamTagsAndJunk,
   cleanMocktestText,
   stripOptionLetterReferences,
@@ -774,19 +776,24 @@ export function autoRecoverItemOptionsFromStem(item: MockTestMcqItem): MockTestM
   }
 
   const [opt1Val, opt2Val, opt3Val, opt4Val] = bestExtract.opts;
+  // Options are stored as HTML (<p>Blank</p>), so compare their plain text
+  const isBlankOpt = (v?: string) => {
+    const plain = htmlToPlainText(v || '').toLowerCase();
+    return !plain || plain === 'blank';
+  };
 
   return {
     ...item,
     question_en: extractedEn ? extractedEn.stem : qEn,
     question_hi: extractedHi ? extractedHi.stem : qHi,
-    option1_hi: (!hasFig1 && (!item.option1_hi || item.option1_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[0] : opt1Val) : item.option1_hi,
-    option2_hi: (!hasFig2 && (!item.option2_hi || item.option2_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[1] : opt2Val) : item.option2_hi,
-    option3_hi: (!hasFig3 && (!item.option3_hi || item.option3_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[2] : opt3Val) : item.option3_hi,
-    option4_hi: (!hasFig4 && (!item.option4_hi || item.option4_hi.toLowerCase() === 'blank')) ? (extractedHi ? extractedHi.opts[3] : opt4Val) : item.option4_hi,
-    option1_en: (!hasFig1 && (!item.option1_en || item.option1_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[0] : opt1Val) : item.option1_en,
-    option2_en: (!hasFig2 && (!item.option2_en || item.option2_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[1] : opt2Val) : item.option2_en,
-    option3_en: (!hasFig3 && (!item.option3_en || item.option3_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[2] : opt3Val) : item.option3_en,
-    option4_en: (!hasFig4 && (!item.option4_en || item.option4_en.toLowerCase() === 'blank')) ? (extractedEn ? extractedEn.opts[3] : opt4Val) : item.option4_en,
+    option1_hi: (!hasFig1 && isBlankOpt(item.option1_hi)) ? (extractedHi ? extractedHi.opts[0] : opt1Val) : item.option1_hi,
+    option2_hi: (!hasFig2 && isBlankOpt(item.option2_hi)) ? (extractedHi ? extractedHi.opts[1] : opt2Val) : item.option2_hi,
+    option3_hi: (!hasFig3 && isBlankOpt(item.option3_hi)) ? (extractedHi ? extractedHi.opts[2] : opt3Val) : item.option3_hi,
+    option4_hi: (!hasFig4 && isBlankOpt(item.option4_hi)) ? (extractedHi ? extractedHi.opts[3] : opt4Val) : item.option4_hi,
+    option1_en: (!hasFig1 && isBlankOpt(item.option1_en)) ? (extractedEn ? extractedEn.opts[0] : opt1Val) : item.option1_en,
+    option2_en: (!hasFig2 && isBlankOpt(item.option2_en)) ? (extractedEn ? extractedEn.opts[1] : opt2Val) : item.option2_en,
+    option3_en: (!hasFig3 && isBlankOpt(item.option3_en)) ? (extractedEn ? extractedEn.opts[2] : opt3Val) : item.option3_en,
+    option4_en: (!hasFig4 && isBlankOpt(item.option4_en)) ? (extractedEn ? extractedEn.opts[3] : opt4Val) : item.option4_en,
   };
 }
 
@@ -936,8 +943,8 @@ export function convertToMathJaxSyntax(text: string): string {
 
 /**
  * Normalizes all text fields of a MockTestMcqItem to ensure:
- * 1. Clean normal text (NO HTML tags like <p>, <br>, <b>).
- * 2. Standard KaTeX/LaTeX ($...$) for mathematical/scientific formulas.
+ * 1. Clean, sanitized HTML (<p>, <br>, <b>, <sup>, <table>, <ol>, <img>).
+ * 2. Standard KaTeX/LaTeX ($...$, $$...$$) for mathematical/scientific formulas.
  */
 export function standardizeItemHtmlAndMathJax(item: MockTestMcqItem, _useMathJax: boolean = true): MockTestMcqItem {
   return cleanMockTestItem(item);
@@ -1882,8 +1889,8 @@ CARRY-OVER CONTINUATION INSTRUCTIONS:
   return `Extract ALL MCQs, MSQs, and NAT questions from this exam image into a strict JSON array.${carryOverSection}
 
 FORMAT & TYPOGRAPHY RULES:
-1. NO HTML TAGS: Output question stems, options, and solutions as clean normal text. Never output <p>, <br>, <b>, <table>, or <span>. Use simple \\n for line breaks.
-2. LATEX FOR MATH/SCIENCE ONLY: Wrap formulas, equations, fractions, and roots in $...$ (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$, $H_2O$). Keep normal text, units (e.g. km/h), and currency (₹500) as normal plain text.
+1-2. HTML + LATEX FORMAT (question stems, options and solutions):
+${HTML_LATEX_FORMAT_RULES}
 3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both question_hi and question_en (and their options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण, मुहावरे आदि): DO NOT translate into English! Both question_hi and question_en (and their options) MUST contain ONLY the original Hindi text.
@@ -2666,10 +2673,8 @@ export function buildMockTestBridgePrompt(
 Extract all multiple-choice questions (MCQs) from this exam page into a strict JSON array.${carryOverSection}
 
 RULES:
-1. NO HTML TAGS: Output clean normal text without <p>, <b>, <br>, <table>, or <span>. Use natural \\n for line breaks.
-2. LATEX FOR MATH & SCIENCE ONLY:
-   - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
-   - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
+1-2. HTML + LATEX FORMAT (questions, options and solutions):
+${HTML_LATEX_FORMAT_RULES}
 3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original Hindi text.
@@ -2721,10 +2726,8 @@ export function buildMockTestSimilarBridgePrompt(
 The attached exam page questions serve STRICTLY AS CONCEPT REFERENCE. Create BRAND NEW, UNIQUE PRACTICE MCQs (DO NOT copy verbatim).
 
 RULES:
-1. NO HTML TAGS: Output clean normal text without <p>, <b>, <br>, <table>, or <span>. Use natural \\n for line breaks.
-2. LATEX FOR MATH & SCIENCE ONLY:
-   - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
-   - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
+1-2. HTML + LATEX FORMAT (questions, options and solutions):
+${HTML_LATEX_FORMAT_RULES}
 3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original Hindi text.

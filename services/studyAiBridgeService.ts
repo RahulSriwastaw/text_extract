@@ -6,6 +6,7 @@
  */
 
 import { ExtractedElement, NumberingStyle, OptionArrangement } from '../types';
+import { HTML_LATEX_FORMAT_RULES, safeParseAiJsonObject } from './textCleanService';
 
 export const PAGE_SOURCE = 'tf-study-ai';
 export const EXT_SOURCE = 'tf-study-ai-extension';
@@ -869,8 +870,7 @@ Question (English): ${item.question_en || ''}
 GUIDELINES:
 - State given data, core formula in LaTeX ($...$), and step-by-step intermediate calculations.
 - STRICT NO-OPTION-LETTER RULE: Never refer to option letters ("Option A is correct"). State actual facts, formulas, or calculated values.
-- NO HTML TAGS: Use natural newlines (\\n).
-- LATEX FOR MATH: Wrap formulas in $...$.
+${HTML_LATEX_FORMAT_RULES}
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON object inside \`\`\`json ... \`\`\` code block:
@@ -893,7 +893,9 @@ At the very end after the JSON code block, on a new line, output:
   const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
   const jsonStr = match[1] ? match[1].trim() : raw.trim();
   try {
-    const parsed = JSON.parse(jsonStr);
+    // LaTeX-safe parse: single backslashes (\frac, \times) would otherwise become \f / \t control chars
+    const parsed = safeParseAiJsonObject(jsonStr);
+    if (!parsed.solution_hi && !parsed.solution_en) throw new Error('No solution fields');
     return {
       solution_hi: parsed.solution_hi || '',
       solution_en: parsed.solution_en || '',
@@ -934,7 +936,8 @@ TASKS:
 2. ALL 4 OPTIONS: Restore clean option1_hi..option4_hi and option1_en..option4_en.
 3. CORRECT ANSWER: Deduce exact answer ("A", "B", "C", or "D").
 4. SOLUTION: Step-by-step pedagogical solution in both Hindi and English. No option-letter references.
-5. LATEX: Wrap math in $...$. NO HTML tags.
+5. FORMAT:
+${HTML_LATEX_FORMAT_RULES}
 
 OUTPUT FORMAT:
 Return ONLY a valid JSON object inside \`\`\`json ... \`\`\` code block:
@@ -969,7 +972,7 @@ At the very end after the JSON code block, on a new line, output:
   const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, raw];
   const jsonStr = match[1] ? match[1].trim() : raw.trim();
   try {
-    return JSON.parse(jsonStr);
+    return safeParseAiJsonObject(jsonStr);
   } catch {
     return {};
   }

@@ -132,7 +132,7 @@ const ToolsPage: React.FC<ToolsPageProps> = ({
               Pick Your Tool
             </h1>
             <p className="text-sm sm:text-base text-slate-400">
-              Three focused digitizers, one AI engine. Choose a tool below to get started.
+              Digitize documents, extract questions, and convert question banks. Choose a tool below to get started.
             </p>
           </motion.div>
 
@@ -201,6 +201,10 @@ const ToolsPage: React.FC<ToolsPageProps> = ({
               </motion.button>
             ))}
           </div>
+          <a href="/csv-converter" className="mt-6 flex items-center justify-between gap-4 p-6 rounded-3xl bg-white/[0.03] border border-white/[0.08] hover:border-emerald-400/60 transition-colors">
+            <div><span className="text-xs font-bold uppercase tracking-wider text-emerald-300">34-column CSV</span><h3 className="mt-2 text-xl font-bold text-white">Universal CSV Converter</h3><p className="mt-2 text-sm text-slate-400">Map ALP and GK question banks, preserve bilingual passages and images, review validation, and export with a source audit.</p></div>
+            <ArrowRight className="w-5 h-5 text-emerald-300 shrink-0" />
+          </a>
         </motion.div>
       </main>
     </div>

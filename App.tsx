@@ -12,9 +12,24 @@ import { useCurrentUser } from './services/authService';
 import { Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+const UniversalCsvConverter = React.lazy(() => import('./components/UniversalCsvConverter'));
+
 export type ActiveTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
 
 function App() {
+  if (window.location.pathname.replace(/\/$/, '') === '/csv-converter') {
+    return (
+      <ErrorBoundary>
+        <React.Suspense fallback={<div className="p-8 text-slate-300">Loading CSV converter…</div>}>
+          <UniversalCsvConverter />
+        </React.Suspense>
+      </ErrorBoundary>
+    );
+  }
+  return <ExistingApp />;
+}
+
+function ExistingApp() {
   const [activeTool, setActiveTool] = useState<ActiveTool>('landing');
   const [isAdmin, setIsAdmin] = useState(false);
   const [preloadedPages, setPreloadedPages] = useState<string[]>([]);

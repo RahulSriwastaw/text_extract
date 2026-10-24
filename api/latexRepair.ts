@@ -1,6 +1,6 @@
 import katex from 'katex';
 import { LatexRepairResponse, LatexRepairStatus, LatexValidationIssue, MockTestMcqItem } from '../types.js';
-import { cleanMocktestText, safeParseAiJsonObject } from '../services/textCleanService.js';
+import { cleanMocktestText, safeParseAiJsonObject, HTML_LATEX_FORMAT_RULES, normalizeHtmlLatex } from '../services/textCleanService.js';
 
 export interface LatexExtractResult {
   hasFormulas: boolean;
@@ -182,7 +182,7 @@ export function normalizeLatexLocally(content: string): string {
         }
       }
     }
-    rawLines[li] = inner;
+    rawLines[li] = (hasPStart ? '<p>' : '') + inner + (hasPEnd ? '</p>' : '');
   }
   res = rawLines.join('\n');
 
@@ -202,13 +202,8 @@ export function normalizeLatexLocally(content: string): string {
     return isDisplay ? `$$${inner}$$` : `$${inner}$`;
   });
 
-  // Strip all HTML tags completely
-  res = res
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?(?:p|b|strong|i|em|span|div|table|thead|tbody|tr|td|th|ul|ol|li|hr)[^>]*>/gi, '')
-    .trim();
-
-  return res.trim();
+  // Canonical HTML + LaTeX (keeps <p>/<table>/<ol> structure, sanitizes everything else)
+  return normalizeHtmlLatex(res);
 }
 
 /**
@@ -231,8 +226,9 @@ CRITICAL RULES:
    - Fix broken braces (e.g. \\frac{a}{b), missing brackets, unescaped symbols, mismatched \\left and \\right.
    - Fix corrupted LaTeX commands from OCR or JSON escaping (e.g. rac -> \\frac, imes -> \\times).
    - Ensure proper math delimiters: inline math in $...$, display equations in $$...$$.
-2. NO HTML TAGS:
-   - Output clean normal text without HTML tags (NO <p>, <br>, <b>, <table>, <span>).
+2. KEEP THE HTML + LATEX FORMAT:
+${HTML_LATEX_FORMAT_RULES}
+   - Keep the existing HTML structure (<p>, <br>, <b>, <table>, <ol>, <img>) exactly; only repair the LaTeX inside $...$ / $$...$$.
    - Preserve all Hindi (Devanagari) and English text exactly. Do NOT change question wording or options.
 3. MATHEMATICAL INTEGRITY:
    - Do NOT change mathematical relations, numbers, or exponents.

@@ -9,7 +9,8 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --target=node20 --outfile=dist/server.cjs --format=cjs --packages=external",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
-    "test:bridge": "node --test tests/bridge.test.mjs"
+    "test:bridge": "node --test tests/bridge.test.mjs",
+    "test:csv": "tsx --test tests/universalCsv.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.37.0",
@@ -30,6 +31,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "sanitize-html": "^2.18.0",
     "tailwindcss": "^4.2.1",
     "temml": "^0.13.5",
     "tesseract.js": "^7.0.0",
@@ -38,6 +40,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^22.14.0",
+    "@types/sanitize-html": "^2.16.2",
     "@vitejs/plugin-react": "^5.0.0",
     "esbuild": "^0.28.0",
     "typescript": "~5.8.2",

@@ -29,10 +29,10 @@ interface PdfLayoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   totalItemsCount: number;
-  initialFileName?: string;
+  config: PdfLayoutConfig;
+  onConfigChange: (config: PdfLayoutConfig) => void;
+  onApplyPreview: () => void;
   onExport: (config: PdfLayoutConfig) => Promise<void>;
-  onQuickDownload?: () => Promise<void>;
-  onApplyToCards?: (pagesPerSheet: number) => void;
   isExporting: boolean;
   exportProgress?: { current: number; total: number } | null;
 }
@@ -41,22 +41,14 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
   isOpen,
   onClose,
   totalItemsCount,
-  initialFileName = '',
+  config,
+  onConfigChange,
+  onApplyPreview,
   onExport,
-  onQuickDownload,
-  onApplyToCards,
   isExporting,
   exportProgress,
 }) => {
-  const defaultCleanName = useMemo(() => {
-    const raw = (initialFileName || 'document').replace(/\.pdf$/i, '').trim();
-    return `${raw} - converted`;
-  }, [initialFileName]);
-
-  const [config, setConfig] = useState<PdfLayoutConfig>({
-    ...DEFAULT_PDF_LAYOUT_CONFIG,
-    outputFileName: `${defaultCleanName}.pdf`,
-  });
+  const setConfig = (update: (prev: PdfLayoutConfig) => PdfLayoutConfig) => onConfigChange(update(config));
 
   const [marginUnit, setMarginUnit] = useState<'mm' | 'pt'>('mm');
   const isReadable = config.layoutMode === 'readable';
@@ -679,33 +671,16 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
           </button>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {onApplyToCards && !isReadable && (
-              <button
-                type="button"
-                onClick={() => {
-                  onApplyToCards(numPagesPerSheet);
-                  onClose();
-                }}
-                disabled={isExporting}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-extrabold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all shadow-sm disabled:opacity-30"
-                title="Partition all document pages into sheet cards of this size right in your workspace"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Apply {numPagesPerSheet}-Up to Workspace</span>
-              </button>
-            )}
-
-            {onQuickDownload && (
-              <button
-                type="button"
-                onClick={onQuickDownload}
-                disabled={isExporting}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 transition-all disabled:opacity-30"
-                title="Download with readable full-width layout and default A4 settings"
-              >
-                Quick Readable PDF
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={onApplyPreview}
+              disabled={isExporting}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all disabled:opacity-30"
+              title="Apply these settings and show the exact output preview"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Apply & Preview</span>
+            </button>
 
             <button
               type="button"

@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.5";
+  const EXT_VER = "2.5.7";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -314,9 +314,21 @@
       }
       runtime.check();
       progress(requestId, "prompt", "Injecting extraction prompt…", adminTabId);
-      await injectPromptKeepAttachments(findComposer() || el, job.prompt);
-      await sleep(500);
-      runtime.check();
+      let promptStuck = false;
+      for (let attempt = 1; attempt <= 3 && !promptStuck; attempt++) {
+        await injectPromptKeepAttachments(findComposer() || el, job.prompt);
+        await sleep(500);
+        runtime.check();
+        promptStuck = verifyComposerHasPrompt(job.prompt);
+        if (!promptStuck) {
+          LOG(`Prompt did not stick after injection attempt ${attempt} — retrying...`);
+          progress(requestId, "prompt", `Prompt was cleared — retrying (${attempt})…`, adminTabId);
+          await sleep(400);
+        }
+      }
+      if (!promptStuck) {
+        throw new Error("Prompt text kept getting cleared from the Gemini input before sending. Click the chat box once, then retry this page.");
+      }
       // Last check before the turn is spent: an image-less or prompt-less send wastes the page
       // and returns an answer about the previous image.
       if (needsImage && countAttachments() < 1) {
@@ -324,6 +336,12 @@
       }
       progress(requestId, "send", "Sending to Gemini…", adminTabId);
       await clickSendOrEnter(findComposer() || el);
+      await sleep(300);
+      const postSendText = composerText(findComposer());
+      if (postSendText && postSendText.length > 10 && !isGenerating() && getModelResponseNodes().length <= initialReplyCount) {
+        LOG("Composer still has text after send attempt — retrying send once more.");
+        await clickSendOrEnter(findComposer() || el);
+      }
       progress(requestId, "wait", "Waiting for Gemini reply…", adminTabId);
       const expectedMarker = job.expectedMarker || msg.expectedMarker || null;
       const text = await waitForJsonReplyLive(18e4, requestId, baseline, adminTabId, initialReplyCount, expectedMarker, job.responseFormat);
@@ -544,14 +562,18 @@
     }
   }
   const ATTACHMENT_CHIP_SELECTOR = 'uploader-file-card, file-preview, [data-test-id*="file-preview"], ' +
-    '[data-test-id*="uploaded"], [class*="attachment-preview"], [class*="file-preview"], [class*="uploader-file"]';
+    '[data-test-id*="uploaded"], [class*="attachment-preview"], [class*="file-preview"], [class*="uploader-file"], ' +
+    '[class*="file-chip"], [class*="file-card"], [class*="thumbnail"], [class*="attachment-chip"]';
 
   function composerContainer() {
     const composer = findComposer();
     return composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, rich-textarea, .chat-input-container') || composer?.parentElement || document;
   }
 
-  // Count real attachment chips in the composer only, never past turns in chat history
+  // Count real attachment chips in the composer only, never past turns in chat history.
+  // Class names on Gemini's upload UI churn often, so beyond the named selectors above we also
+  // treat a blob: image thumbnail or a "remove file" button near the composer as proof of an
+  // attachment — those survive UI renames far better than a specific class/tag list.
   function attachmentChips() {
     const container = composerContainer();
     const visible = el => {
@@ -560,14 +582,23 @@
         return r.width > 0 && r.height > 0;
       } catch { return false; }
     };
+    const notHistory = chip => !chip.closest('model-response, user-query, [data-message-author-role], .conversation-container');
     const chips = deepQueryAll(ATTACHMENT_CHIP_SELECTOR, container)
       .filter(visible)
-      .filter(chip => !chip.closest('model-response, user-query, [data-message-author-role], .conversation-container'));
+      .filter(notHistory);
     const outer = chips.filter((chip, _i, arr) => !arr.some(other => other !== chip && other.contains(chip)));
     if (outer.length) return outer;
-    return deepQueryAll('button[aria-label*="remove file" i], button[aria-label*="remove attachment" i], button[aria-label*="delete file" i]', container)
+
+    const removeButtons = deepQueryAll('button[aria-label*="remove file" i], button[aria-label*="remove attachment" i], button[aria-label*="delete file" i], button[aria-label*="remove image" i]', container)
       .filter(visible)
-      .filter(b => !b.closest('model-response, user-query, [data-message-author-role], .conversation-container'));
+      .filter(notHistory);
+    if (removeButtons.length) return removeButtons;
+
+    // Fallback: a freshly attached image renders as a blob: thumbnail inside the composer area.
+    const blobImages = deepQueryAll('img[src^="blob:"], [style*="blob:"]', container)
+      .filter(visible)
+      .filter(notHistory);
+    return blobImages;
   }
 
   function countAttachments() {
@@ -667,7 +698,9 @@
     await sleep(200);
 
     // Method 1: native hidden file input assignment (most reliable & clean)
-    if (await tryFileInputAssign(file) && await waitForAttachment(file.name, 12000, baseline)) return true;
+    const inputAccepted = await tryFileInputAssign(file);
+    LOG("file input assign accepted:", inputAccepted);
+    if (inputAccepted && await waitForAttachment(file.name, 15000, baseline)) return true;
 
     // Method 2: HTML5 native Drag & Drop directly on composer
     if (await tryDropFile(el, file) && await waitForAttachment(file.name, 8000, baseline)) return true;
@@ -726,6 +759,10 @@
     return inputs.find(i => /image|png|jpg|pdf|\*|file/i.test(i.accept || i.name || "")) || inputs[0] || null;
   }
 
+  // Returns true if the input actually accepted our file (checked immediately, before any
+  // framework code has a chance to clear input.value). This is a much more reliable success
+  // signal than waiting for a specific attachment-chip element to render, since Gemini's upload
+  // preview markup changes across releases while the underlying <input type=file> contract does not.
   async function tryFileInputAssign(file) {
     const proto = HTMLInputElement.prototype;
     const orig = proto.click;
@@ -755,7 +792,7 @@
       input.files = dt.files;
       input.dispatchEvent(new Event("change", { bubbles: true }));
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
+      return input.files && input.files.length > 0 && input.files[0].name === file.name;
     } catch {
       return false;
     } finally {
@@ -789,6 +826,20 @@
     if (p.length > 80) return p.slice(40, 80);
     return p.slice(0, Math.min(32, p.length));
   }
+  // Re-reads the LIVE composer right before we trust it. A script-inserted prompt can appear for
+  // an instant (passing injectPromptKeepAttachments' own check) and then get wiped by Gemini's
+  // next re-render before Send is actually clicked — this catches that and lets the caller retry.
+  function verifyComposerHasPrompt(prompt) {
+    const composer = findComposer();
+    if (!composer) return false;
+    const t = composerText(composer);
+    if (!t) return false;
+    const needle = promptNeedle(prompt);
+    if (t.includes(needle)) return true;
+    const minLen = Math.min(50, Math.floor(String(prompt || "").length * 0.2));
+    return minLen > 0 && t.length >= minLen;
+  }
+
   async function injectPromptKeepAttachments(el, prompt) {
     closeOpenOverlays();
     el = findComposer() || el;

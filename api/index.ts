@@ -10,7 +10,8 @@ import {
   stripSolutionPrefix,
   prepareAiJsonString,
   safeParseAiJson,
-  safeParseAiJsonObject
+  safeParseAiJsonObject,
+  HTML_LATEX_FORMAT_RULES
 } from '../services/textCleanService.js';
 import {
   repairContentLatex,
@@ -1599,11 +1600,8 @@ const stripServerOptionLetterReferences = stripOptionLetterReferences;
 
 
 const STRICT_MATH_AND_TEXT_PROMPT_RULES = `
-- NO HTML TAGS: Strictly DO NOT output HTML tags (<p>, <b>, <br>, <span>, <table>). Output clean, normal text with \\n for line breaks.
-- LATEX FOR MATH & SCIENCE ONLY:
-  * Enclose formulas, equations, roots, powers, fractions, and variables in standard LaTeX $...$ (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
-  * Plain text words, units, numbers, and currency (₹) MUST be plain text (e.g. "40 km/h", "₹500", not in LaTeX).
-  * Use standard Unicode arrows: →, ⇒.
+${HTML_LATEX_FORMAT_RULES}
+- Use standard Unicode arrows in text: →, ⇒.
 - COMPREHENSIVE, STEP-BY-STEP DETAILED SOLUTIONS (FOR ALL STUDENT LEVELS):
   * Provide in-depth, thorough solutions so that even beginner or weaker students can understand easily.
   * For Math/Numericals: State Given Data ("दिया गया है / Given that:"), Key Formula/Theorem in LaTeX ($...$), complete step-by-step arithmetic without skipping intermediate steps, and final calculated value with units.
@@ -1662,8 +1660,8 @@ CRITICAL PEDAGOGICAL GUIDELINES (DETAILED & STUDENT-FRIENDLY STANDARD):
      * State the grammatical rule, tense, voice, idiom meaning, or vocabulary usage clearly with examples.
 
 2. FORMATTING RULES:
-- NO HTML TAGS: Output clean normal text without <p>, <b>, <br>, <table>, or <span>. Use natural newlines (\\n) for line breaks.
-- LATEX FOR MATH & SCIENCE ONLY: Use standard LaTeX $...$ for mathematical/scientific formulas.
+${HTML_LATEX_FORMAT_RULES}
+- Structure solutions as short <p> paragraphs (given data, formula, each calculation step, final value); use <ol>/<ul> for fact lists.
 - STRICT NO-PREFIX & NO-FILLER RULE: DO NOT start with 'हल:', 'Solution:', or 'Explanation:'. Start directly with the derivation or explanation.
 - STRICT NO-OPTION-LETTER RULE: Options shuffle dynamically! NEVER write "सही विकल्प A है" or "Option A is correct". State facts, formulas, or calculated values directly!
 
@@ -1834,7 +1832,6 @@ INSPECTION INSTRUCTIONS:
 3. Extract ONLY the true missing fields.
 4. STRICT ACCURACY & TRUTHFULNESS:
    - If a missing field is NOT visible or cannot be found anywhere on the image(s), DO NOT invent fake data. Return empty string "" for that field.
-   - Wrap fields in semantic HTML (<p>...</p>).
 ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
 5. Output ONLY valid JSON:
 {
@@ -1960,10 +1957,8 @@ CARRY-OVER CONTINUATION INSTRUCTIONS:
 Input contains exam questions. Use them STRICTLY AS A CONCEPT REFERENCE to generate BRAND NEW, UNIQUE PRACTICE MCQs (DO NOT copy verbatim).${carryOverPrompt}
 
 RULES:
-1. NO HTML TAGS: Output clean normal text for all questions, options, and explanations (NO <p>, <b>, <br>, <table>, <span>). Use natural \\n for line breaks.
-2. LATEX FOR MATH & SCIENCE ONLY:
-   - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
-   - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
+1-2. HTML + LATEX FORMAT (questions, options and explanations):
+${HTML_LATEX_FORMAT_RULES}
 3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original Hindi text.
@@ -2000,10 +1995,8 @@ Output ONLY a valid JSON array of objects:
 Extract all multiple-choice questions (MCQs) from the input into a strict JSON array.${carryOverPrompt}
 
 RULES:
-1. NO HTML TAGS: Output clean normal text for all questions, options, and explanations (NO <p>, <b>, <br>, <table>, <span>). Use natural \\n for line breaks.
-2. LATEX FOR MATH & SCIENCE ONLY:
-   - Use standard LaTeX $...$ for mathematical/scientific formulas, equations, roots, powers, fractions, and variables (e.g. $x^2 + y^2 = 25$, $\\frac{a}{b}$, $\\sqrt{x}$).
-   - For regular words, units, numbers, and currency (₹), write normal plain text (e.g. "40 km/h", "₹500", not in LaTeX).
+1-2. HTML + LATEX FORMAT (questions, options and explanations):
+${HTML_LATEX_FORMAT_RULES}
 3. LANGUAGE PAPERS & BILINGUAL RULES (CRITICAL):
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original Hindi text.
@@ -2303,8 +2296,8 @@ STRICT EDITORIAL GUIDELINES:
    - DO NOT alter mathematical numerical values, variables, or the correct answer.
 ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
 
-4. NO HTML TAGS & COMPREHENSIVE SOLUTIONS:
-   - Output clean normal text without HTML tags (NO <p>, <b>, <br>, <span>, <table>).
+4. HTML + LATEX FORMAT & COMPREHENSIVE SOLUTIONS:
+   - Keep every field in the clean HTML + LaTeX format above (<p> paragraphs, real <table>/<ol> for tables and statement lists, math in $...$).
    - Ensure solutions have detailed, thorough step-by-step explanations without prefix labels like "हल:" or "Solution:".
    - NEVER mention option letters ("Option A is correct") in solutions.
 
@@ -2732,7 +2725,7 @@ app.post('/api/upload-figure', async (req, res) => {
     fs.writeFileSync(filePath, buffer);
 
     const relativeUrl = `/uploads/figures/${filename}`;
-    const host = req.get('host') || 'localhost:3000';
+    const host = req.get('host') || 'localhost:3001';
     const protocol = req.protocol || 'http';
     const absoluteUrl = `${protocol}://${host}${relativeUrl}`;
 

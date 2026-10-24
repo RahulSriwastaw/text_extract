@@ -503,7 +503,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
       <div className="flex items-center justify-between px-5 py-3 bg-slate-950/90 border-b border-white/[0.1] z-20 shrink-0">
         {/* Page Indicator & Title */}
         <div className="flex items-center gap-3">
-          <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-black font-extrabold text-xs shadow-md shadow-amber-500/20">
+          <span className="px-3 py-1 rounded-xl bg-accent text-on-accent font-semibold text-xs shadow-md ">
             Page {activePage.pageNumber} of {pages.length}
           </span>
           <span className="text-xs text-slate-300 font-medium hidden sm:inline truncate max-w-xs">
@@ -526,7 +526,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
             <ZoomOut className="w-4 h-4" />
           </button>
 
-          <div className="px-2.5 py-0.5 text-xs font-mono font-extrabold text-amber-300 min-w-[54px] text-center bg-black/40 rounded-lg">
+          <div className="px-2.5 py-0.5 text-xs font-mono font-semibold text-amber-300 min-w-[54px] text-center bg-black/40 rounded-lg">
             {Math.round(zoomLevel * 100)}%
           </div>
 
@@ -553,7 +553,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
               }
             }}
             className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all ${
-              zoomLevel === 1 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
+              zoomLevel === 1 ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-300 hover:text-white'
             }`}
             title="Reset to 100% Fit"
           >
@@ -563,7 +563,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
             type="button"
             onClick={() => setZoomLevel(2.5)}
             className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all hidden sm:block ${
-              zoomLevel === 2.5 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
+              zoomLevel === 2.5 ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-300 hover:text-white'
             }`}
             title="Zoom 250%"
           >
@@ -573,7 +573,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
             type="button"
             onClick={() => setZoomLevel(5)}
             className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all ${
-              zoomLevel === 5 ? 'bg-amber-500 text-black' : 'text-slate-300 hover:text-white'
+              zoomLevel === 5 ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-300 hover:text-white'
             }`}
             title="Maximum 500% Zoom"
           >
@@ -604,7 +604,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
             onClick={() => setToolMode('pan')}
             className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
               toolMode === 'pan'
-                ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/30'
+                ? 'bg-accent text-on-accent border-amber-400 shadow-md '
                 : 'bg-white/[0.06] hover:bg-white/[0.12] border-white/[0.15] text-slate-200'
             }`}
             title="Pan / Move Mode (Hotkeys: Space or H / Right-click drag)"
@@ -617,9 +617,9 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
           <button
             type="button"
             onClick={() => setToolMode('crop')}
-            className={`px-3 py-1.5 rounded-xl border text-xs font-black flex items-center gap-1.5 transition-all shadow-md ${
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-md ${
               toolMode === 'crop'
-                ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] border-orange-400 text-white ring-2 ring-orange-500/40 shadow-orange-500/20'
+                ? 'bg-accent border-orange-400 text-on-accent ring-2 ring-orange-500/40 '
                 : 'bg-white/[0.06] hover:bg-white/[0.12] border-white/[0.15] text-slate-200'
             }`}
             title="Multi-Crop Mode (Hotkey: C) - Draw multiple crops on page and save all in 1-Click"
@@ -652,8 +652,8 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
       >
         {/* Cropping Mode Hint Pill */}
         {toolMode === 'crop' && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-full bg-black/85 border border-[#FF6B2B]/60 text-orange-200 text-xs font-semibold shadow-2xl backdrop-blur flex items-center gap-2 pointer-events-none">
-            <span className="w-2 h-2 rounded-full bg-[#FF6B2B] animate-ping" />
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-full bg-black/85 border border-accent/60 text-orange-200 text-xs font-semibold shadow-2xl backdrop-blur flex items-center gap-2 pointer-events-none">
+            <span className="w-2 h-2 rounded-full bg-accent animate-ping" />
             <span>
               Click & drag across figures to multi-crop • <b>Right-click or Space</b> to drag move • Staged: <b className="text-amber-300">{stagedCrops.length}</b>
             </span>
@@ -662,7 +662,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
 
         {/* Toast Notification */}
         {figureSuccessToast && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-black shadow-2xl flex items-center gap-2 animate-in fade-in zoom-in duration-150">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in zoom-in duration-150">
             <CheckCheck className="w-4 h-4" />
             <span>{figureSuccessToast}</span>
           </div>
@@ -734,7 +734,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
                   height: `${crop.box.height}%`,
                 }}
               >
-                <div className="absolute -top-6 left-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/95 text-emerald-200 font-mono text-[10px] font-black whitespace-nowrap shadow border border-emerald-400/60 pointer-events-auto">
+                <div className="absolute -top-6 left-0 flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/95 text-emerald-200 font-mono text-[11px] font-bold whitespace-nowrap shadow border border-emerald-400/60 pointer-events-auto">
                   <span>#{idx + 1} [{badgeLabel}]</span>
                   <button
                     type="button"
@@ -755,12 +755,12 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
           {/* Direct DOM Active Drawing Cropping Selection Box Overlay (0 React Re-renders!) */}
           <div
             ref={cropBoxOverlayRef}
-            className="absolute border-2 border-[#FF6B2B] bg-[#FF6B2B]/20 shadow-[0_0_12px_rgba(255,107,43,0.7)] pointer-events-none rounded z-30"
+            className="absolute border-2 border-accent bg-accent/20 shadow-[0_0_12px_rgba(255,107,43,0.7)] pointer-events-none rounded z-30"
             style={{ display: 'none', left: '0%', top: '0%', width: '0%', height: '0%' }}
           >
             <div
               ref={cropBadgeRef}
-              className="absolute -top-6 left-0 px-1.5 py-0.5 rounded bg-black/90 text-white font-mono text-[10px] font-bold whitespace-nowrap shadow border border-[#FF6B2B]/60"
+              className="absolute -top-6 left-0 px-1.5 py-0.5 rounded bg-black/90 text-white font-mono text-[11px] font-bold whitespace-nowrap shadow border border-accent/60"
             >
               0% × 0%
             </div>
@@ -777,14 +777,14 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
             {/* Header */}
             <div className="flex items-center justify-between border-b border-white/10 pb-2">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-[#FF6B2B]/20 text-[#FF6B2B]">
+                <div className="p-1.5 rounded-lg bg-accent/20 text-accent">
                   <Scissors className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-black uppercase tracking-wide text-white">
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-white">
                     Multi-Crop Staged ({stagedCrops.length})
                   </h4>
-                  <p className="text-[10px] text-slate-400">Save all cropped diagrams in 1-Click</p>
+                  <p className="text-[11px] text-slate-400">Save all cropped diagrams in 1-Click</p>
                 </div>
               </div>
               <button
@@ -804,7 +804,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
               <select
                 value={selectedTargetQuestionId}
                 onChange={(e) => setSelectedTargetQuestionId(e.target.value)}
-                className="bg-black/60 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-[#FF6B2B]"
+                className="bg-black/60 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white outline-none focus:border-accent"
               >
                 {extractedMcqs.length === 0 ? (
                   <option value="">No questions extracted yet</option>
@@ -820,11 +820,11 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
 
             {/* Auto-Order Sequence Button */}
             <div className="flex items-center justify-between bg-white/[0.04] p-1.5 rounded-xl border border-white/10">
-              <span className="text-[10px] text-slate-400">Need standard sequence?</span>
+              <span className="text-[11px] text-slate-400">Need standard sequence?</span>
               <button
                 type="button"
                 onClick={handleAutoSequenceStagedCrops}
-                className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[10px] flex items-center gap-1 border border-amber-500/30 transition-all"
+                className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center gap-1 border border-amber-500/30 transition-all"
                 title="Auto-assign: 1st=Q, 2nd=Opt A, 3rd=Opt B, 4th=Opt C, 5th=Opt D, 6th=Sol"
               >
                 <Sparkles className="w-3 h-3" />
@@ -846,14 +846,14 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
                       alt={`Crop ${idx + 1}`}
                       className="max-h-full max-w-full object-contain"
                     />
-                    <span className="absolute bottom-0 right-0 px-1 rounded-tl bg-black/80 text-[9px] font-mono text-white font-extrabold">
+                    <span className="absolute bottom-0 right-0 px-1 rounded-tl bg-black/80 text-[11px] font-mono text-white font-semibold">
                       #{idx + 1}
                     </span>
                   </div>
 
                   {/* Target Field Selector Pills */}
                   <div className="flex-1 flex flex-col gap-1">
-                    <span className="text-[10px] text-slate-400 font-medium">Assign To:</span>
+                    <span className="text-[11px] text-slate-400 font-medium">Assign To:</span>
                     <div className="flex flex-wrap gap-1">
                       {[
                         { id: 'question', label: 'Q' },
@@ -867,9 +867,9 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
                           key={tgt.id}
                           type="button"
                           onClick={() => handleUpdateStagedCropField(crop.id, tgt.id as FigureTargetField)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-black transition-all ${
+                          className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
                             crop.targetField === tgt.id
-                              ? 'bg-[#FF6B2B] text-white shadow-sm'
+                              ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                               : 'bg-white/5 hover:bg-white/10 text-slate-300'
                           }`}
                         >
@@ -914,19 +914,19 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
               {/* Collapsible ImgBB Key Customization */}
               {showKeyInput && (
                 <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col gap-1">
-                  <span className="text-[10px] text-slate-400">ImgBB API Key (https://api.imgbb.com/):</span>
+                  <span className="text-[11px] text-slate-400">ImgBB API Key (https://api.imgbb.com/):</span>
                   <div className="flex items-center gap-1.5">
                     <input
                       type="text"
                       value={customKeyInput}
                       onChange={e => setCustomKeyInput(e.target.value)}
                       placeholder="892c1e1f1ac46345ab6252ee885858cd"
-                      className="flex-1 bg-black/60 border border-white/20 rounded px-2 py-1 text-[11px] text-white font-mono outline-none focus:border-amber-400"
+                      className="flex-1 bg-black/60 border border-white/20 rounded px-2 py-1 text-[11px] text-white font-mono outline-none focus:border-accent"
                     />
                     <button
                       type="button"
                       onClick={handleSaveCustomKey}
-                      className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] flex items-center gap-1"
+                      className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1"
                     >
                       {keySavedNotice ? <Check className="w-3 h-3 text-white" /> : 'Save'}
                     </button>
@@ -948,7 +948,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
                 type="button"
                 onClick={handleSaveAndAttachAllFigures}
                 disabled={isUploadingFigure || !selectedTargetQuestionId}
-                className="flex-1 px-4 py-2 rounded-xl bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] hover:shadow-lg hover:shadow-orange-500/25 text-white text-xs font-black flex items-center justify-center gap-1.5 transition-all disabled:opacity-40"
+                className="flex-1 px-4 py-2 rounded-xl bg-accent hover:shadow-lg text-on-accent text-xs font-bold flex items-center justify-center gap-1.5 transition-all disabled:opacity-40"
               >
                 {isUploadingFigure ? (
                   <>
@@ -991,14 +991,14 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
               onClick={() => handlePageSwitch(idx)}
               className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
                 idx === pageIndex
-                  ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30'
+                  ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                   : 'bg-white/[0.06] hover:bg-white/[0.12] text-slate-300 hover:text-white'
               }`}
             >
               <span>P.{p.pageNumber}</span>
               {(p.items && p.items.length > 0) && (
                 <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                  className={`text-[11px] px-1.5 py-px rounded-full font-mono font-bold ${
                     idx === pageIndex ? 'bg-black/20 text-black' : 'bg-emerald-500/20 text-emerald-300'
                   }`}
                 >

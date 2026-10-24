@@ -12,6 +12,7 @@ import {
   ListChecks,
   Crop,
   LayoutGrid,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface ToolsPageProps {
@@ -23,65 +24,74 @@ interface ToolsPageProps {
 
 const containerVariants = {
   hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.12, delayChildren: 0.1 } },
+  visible: { opacity: 1, transition: { staggerChildren: 0.06, delayChildren: 0.05 } },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 24 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.55, ease: 'easeOut' as const } },
+  hidden: { opacity: 0, y: 12 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' as const } },
 };
 
-const TOOLS = [
-  {
-    id: 'text-converter',
-    icon: <FileText className="w-7 h-7" />,
-    accent: '#FF6B2B',
-    accentSoft: 'from-[#FF6B2B]/20 to-[#FF884D]/5',
-    border: 'hover:border-[#FF6B2B]/60',
-    glow: 'group-hover:shadow-[#FF6B2B]/20',
-    badge: 'DOCX / Word',
-    title: 'Document / Text Extractor',
-    desc: 'Extract PDFs, books & question papers into clean, perfectly formatted editable Word (.docx) documents.',
-    tags: [
-      { icon: <Calculator className="w-3 h-3" />, label: 'Native Math (OMML)' },
-      { icon: <TableIcon className="w-3 h-3" />, label: 'Full Tables' },
-      { icon: <Languages className="w-3 h-3" />, label: 'Bilingual' },
-    ],
-    action: 'onStartTextConverter' as const,
-  },
+type ToolCard = {
+  id: string;
+  icon: React.ReactNode;
+  badge: string;
+  title: string;
+  desc: string;
+  tags: { icon: React.ReactNode; label: string }[];
+} & ({ action: 'onStartTextConverter' | 'onStartMcqExtractor' | 'onStartQaStitcher'; href?: never } | { href: string; action?: never });
+
+const TOOLS: ToolCard[] = [
   {
     id: 'mcq-extractor',
-    icon: <Zap className="w-7 h-7" />,
-    accent: '#F59E0B',
-    accentSoft: 'from-amber-500/20 to-orange-500/5',
-    border: 'hover:border-amber-400/60',
-    glow: 'group-hover:shadow-amber-500/20',
-    badge: '18-Col CSV',
-    title: 'MockTest MCQ Extractor',
-    desc: 'Digitize bilingual MCQs page-by-page with LaTeX math, deep AI solutions and ready-to-use 18-column CSV export.',
+    icon: <Zap />,
+    badge: '34-col CSV',
+    title: 'MCQ extractor',
+    desc: 'Digitize bilingual MCQs page by page with LaTeX math, AI solutions and a ready-to-upload CSV.',
     tags: [
-      { icon: <ListChecks className="w-3 h-3" />, label: 'Auto Answer Key' },
-      { icon: <Languages className="w-3 h-3" />, label: 'Hindi + English' },
-      { icon: <Zap className="w-3 h-3" />, label: 'Step-by-step AI' },
+      { icon: <ListChecks />, label: 'Auto answer key' },
+      { icon: <Languages />, label: 'Hindi + English' },
+      { icon: <Zap />, label: 'Step-by-step AI' },
     ],
-    action: 'onStartMcqExtractor' as const,
+    action: 'onStartMcqExtractor',
+  },
+  {
+    id: 'text-converter',
+    icon: <FileText />,
+    badge: 'DOCX / Word',
+    title: 'Document / text extractor',
+    desc: 'Turn PDFs, books and question papers into clean, editable Word (.docx) documents.',
+    tags: [
+      { icon: <Calculator />, label: 'Native math (OMML)' },
+      { icon: <TableIcon />, label: 'Full tables' },
+      { icon: <Languages />, label: 'Bilingual' },
+    ],
+    action: 'onStartTextConverter',
   },
   {
     id: 'qa-stitcher',
-    icon: <Split className="w-7 h-7" />,
-    accent: '#3B82F6',
-    accentSoft: 'from-blue-600/20 to-indigo-600/5',
-    border: 'hover:border-blue-400/60',
-    glow: 'group-hover:shadow-blue-500/20',
-    badge: 'Merge & N-Up Layout',
-    title: 'Q&A Page Stitcher & PDF Layout',
-    desc: 'Crop & merge Q&A pages, or re-layout PDFs with multiple pages per sheet (1-Up, 2-Up, 4-Up, 8-Up, custom margins & borders).',
+    icon: <Split />,
+    badge: 'Merge & N-up',
+    title: 'Q&A page stitcher',
+    desc: 'Crop and merge Q&A pages, or re-layout PDFs with several pages per sheet, margins and borders.',
     tags: [
-      { icon: <Crop className="w-3 h-3" />, label: 'Smart Crop' },
-      { icon: <LayoutGrid className="w-3 h-3" />, label: 'N-Up Multi-Page' },
-      { icon: <FileText className="w-3 h-3" />, label: 'Borders & Margins' },
+      { icon: <Crop />, label: 'Smart crop' },
+      { icon: <LayoutGrid />, label: 'N-up pages' },
+      { icon: <FileText />, label: 'Borders & margins' },
     ],
-    action: 'onStartQaStitcher' as const,
+    action: 'onStartQaStitcher',
+  },
+  {
+    id: 'csv-converter',
+    icon: <FileSpreadsheet />,
+    badge: '34-col CSV',
+    title: 'Universal CSV converter',
+    desc: 'Map ALP and GK question banks, keep bilingual passages and images, validate and export with a source audit.',
+    tags: [
+      { icon: <TableIcon />, label: 'Column mapping' },
+      { icon: <ListChecks />, label: 'Validation' },
+    ],
+    href: '/csv-converter',
   },
 ];
 
@@ -93,118 +103,75 @@ const ToolsPage: React.FC<ToolsPageProps> = ({
 }) => {
   const actions = { onStartTextConverter, onStartMcqExtractor, onStartQaStitcher };
 
-  return (
-    <div className="min-h-screen bg-[#0B0D13] text-slate-100 overflow-hidden relative selection:bg-[#FF6B2B]/30">
-      {/* Ambient animated glows */}
-      <motion.div
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-[480px] bg-gradient-to-b from-[#FF6B2B]/12 via-purple-600/8 to-transparent blur-[140px] pointer-events-none rounded-full"
-        animate={{ opacity: [0.5, 0.9, 0.5] }}
-        transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <motion.div
-        className="absolute bottom-0 left-0 w-96 h-96 bg-blue-600/10 blur-[130px] pointer-events-none rounded-full"
-        animate={{ x: [0, 30, 0], y: [0, -20, 0] }}
-        transition={{ duration: 11, repeat: Infinity, ease: 'easeInOut' }}
-      />
+  const cardBody = (tool: ToolCard) => (
+    <>
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <span className="w-11 h-11 rounded-xl flex items-center justify-center bg-accent/10text-accent-light border border-accent/25 [&>svg]:w-5 [&>svg]:h-5">
+          {tool.icon}
+        </span>
+        <span className="badge badge-neutral">{tool.badge}</span>
+      </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-20 lg:pt-28 relative z-10">
-        <motion.div
-          variants={containerVariants}
-          initial="hidden"
-          animate="visible"
-        >
+      <h3 className="text-lg font-bold text-ink mb-1.5 font-display">{tool.title}</h3>
+      <p className="text-sm text-ink-3 leading-relaxed mb-4 flex-1">{tool.desc}</p>
+
+      <div className="flex flex-wrap gap-1.5 mb-5">
+        {tool.tags.map((tag) => (
+          <span key={tag.label} className="badge badge-neutral rounded-md">
+            {tag.icon}
+            {tag.label}
+          </span>
+        ))}
+      </div>
+
+      <span className="flex items-center gap-1.5 text-sm font-semibold text-accent-light">
+        Open tool
+        <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+      </span>
+    </>
+  );
+
+  const cardClass = 'group card text-left p-5 flex flex-col h-full transition-colors hover:border-accent/45 hover:bg-surface-2';
+
+  return (
+    <div className="min-h-screen bg-canvas text-ink">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-20">
+        <motion.div variants={containerVariants} initial="hidden" animate="visible">
           <motion.button
             variants={itemVariants}
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white mb-8 transition-colors"
+            className="btn btn-ghost btn-sm -ml-2 mb-6"
           >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            Back to Home
+            <ArrowLeft />
+            Back to home
           </motion.button>
 
-          <motion.div variants={itemVariants} className="text-center max-w-2xl mx-auto mb-14">
-            <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-[#FF884D] text-xs uppercase tracking-wider font-bold mb-5">
-              <LayoutGrid className="w-3.5 h-3.5" />
-              All Tools
-            </span>
-            <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight font-display text-white mb-4">
-              Pick Your Tool
+          <motion.div variants={itemVariants} className="mb-8">
+            <p className="page-eyebrow mb-2">All tools</p>
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight font-display text-ink mb-2">
+              Pick a tool
             </h1>
-            <p className="text-sm sm:text-base text-slate-400">
-              Digitize documents, extract questions, and convert question banks. Choose a tool below to get started.
+            <p className="text-sm sm:text-base text-ink-3 max-w-xl">
+              Digitize documents, extract questions and convert question banks.
             </p>
           </motion.div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {TOOLS.map((tool) => (
-              <motion.button
-                key={tool.id}
-                type="button"
-                variants={itemVariants}
-                whileHover={{ y: -6 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => actions[tool.action]()}
-                className={`group relative text-left p-6 rounded-3xl bg-white/[0.03] border border-white/[0.08] ${tool.border} transition-all shadow-xl ${tool.glow} overflow-hidden flex flex-col`}
-              >
-                {/* Animated background blob */}
-                <motion.div
-                  className={`absolute -top-10 -right-10 w-40 h-40 rounded-full bg-gradient-to-br ${tool.accentSoft} blur-2xl pointer-events-none`}
-                  animate={{ scale: [1, 1.15, 1] }}
-                  transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-                />
-
-                <div className="relative z-10 flex flex-col h-full">
-                  <div className="flex items-center justify-between mb-5">
-                    <motion.div
-                      whileHover={{ rotate: 6, scale: 1.05 }}
-                      className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg"
-                      style={{
-                        backgroundColor: `${tool.accent}22`,
-                        color: tool.accent,
-                        border: `1px solid ${tool.accent}44`,
-                      }}
-                    >
-                      {tool.icon}
-                    </motion.div>
-                    <span
-                      className="text-[10px] font-extrabold px-2.5 py-1 rounded-full"
-                      style={{ backgroundColor: `${tool.accent}22`, color: tool.accent, border: `1px solid ${tool.accent}44` }}
-                    >
-                      {tool.badge}
-                    </span>
-                  </div>
-
-                  <h3 className="text-xl font-bold text-white mb-2 font-display">{tool.title}</h3>
-                  <p className="text-sm text-slate-400 leading-relaxed mb-5 flex-1">{tool.desc}</p>
-
-                  <div className="flex flex-wrap gap-1.5 mb-6">
-                    {tool.tags.map((tag, i) => (
-                      <span
-                        key={i}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[10px] font-semibold text-slate-300"
-                      >
-                        {tag.icon}
-                        {tag.label}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div
-                    className="flex items-center gap-2 text-sm font-bold group-hover:translate-x-1 transition-transform"
-                    style={{ color: tool.accent }}
-                  >
-                    <span>Launch Tool</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </div>
-                </div>
-              </motion.button>
+              <motion.div key={tool.id} variants={itemVariants}>
+                {tool.href ? (
+                  <a href={tool.href} className={cardClass}>
+                    {cardBody(tool)}
+                  </a>
+                ) : (
+                  <button type="button" onClick={() => actions[tool.action]()} className={`${cardClass} w-full`}>
+                    {cardBody(tool)}
+                  </button>
+                )}
+              </motion.div>
             ))}
           </div>
-          <a href="/csv-converter" className="mt-6 flex items-center justify-between gap-4 p-6 rounded-3xl bg-white/[0.03] border border-white/[0.08] hover:border-emerald-400/60 transition-colors">
-            <div><span className="text-xs font-bold uppercase tracking-wider text-emerald-300">34-column CSV</span><h3 className="mt-2 text-xl font-bold text-white">Universal CSV Converter</h3><p className="mt-2 text-sm text-slate-400">Map ALP and GK question banks, preserve bilingual passages and images, review validation, and export with a source audit.</p></div>
-            <ArrowRight className="w-5 h-5 text-emerald-300 shrink-0" />
-          </a>
         </motion.div>
       </main>
     </div>

@@ -273,7 +273,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-[#0B0D13]/75 backdrop-blur-md z-50"
+            className="fixed inset-0 bg-[rgb(4_5_8/0.6)] backdrop-blur-[2px] z-50"
           />
 
           <motion.div
@@ -281,18 +281,18 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-            className="fixed inset-y-0 right-0 w-full max-w-xl bg-[#111420] z-50 flex flex-col border-l border-white/[0.08] shadow-2xl"
+            className="fixed inset-y-0 right-0 w-full max-w-xl bg-surface z-50 flex flex-col border-l border-line-strong shadow-2xl"
           >
             {/* Header */}
             <div className="p-4 border-b border-white/[0.08] bg-white/[0.02]">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-[#FF6B2B]/20 text-[#FF884D] flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-xl bg-accent/20 text-accent-light flex items-center justify-center">
                     <Sparkles className="w-4 h-4" />
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white font-display">Account History</h3>
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
                       {user ? (
                         <span className="text-emerald-400 flex items-center gap-1 font-medium">
                           <Cloud className="w-3 h-3" />
@@ -315,7 +315,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                     title="Refresh history"
                     className="p-2 text-slate-400 hover:text-white hover:bg-white/[0.08] rounded-lg transition-all"
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-[#FF6B2B]' : ''}`} />
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-accent' : ''}`} />
                   </button>
                   {((activeTab === 'conversions' && conversionItems.length > 0) ||
                     (activeTab === 'mocktests' && mocktestItems.length > 0) ||
@@ -353,13 +353,13 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                   onClick={() => setActiveTab('conversions')}
                   className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-bold transition-all ${
                     activeTab === 'conversions'
-                      ? 'bg-[#FF6B2B] text-white shadow-md shadow-[#FF6B2B]/20'
+                      ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                       : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
                   }`}
                 >
                   <FileText className="w-3.5 h-3.5" />
                   <span>PDF / Docs</span>
-                  <span className="text-[10px] opacity-80">({conversionItems.length})</span>
+                  <span className="text-[11px] opacity-80">({conversionItems.length})</span>
                 </button>
 
                 <button
@@ -367,13 +367,13 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                   onClick={() => setActiveTab('mocktests')}
                   className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-bold transition-all ${
                     activeTab === 'mocktests'
-                      ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
+                      ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                       : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
                   }`}
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   <span>Mock Tests</span>
-                  <span className="text-[10px] opacity-80">({mocktestItems.length})</span>
+                  <span className="text-[11px] opacity-80">({mocktestItems.length})</span>
                 </button>
 
                 <button
@@ -381,13 +381,13 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                   onClick={() => setActiveTab('explanations')}
                   className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg font-bold transition-all ${
                     activeTab === 'explanations'
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                      ? 'bg-blue-600 text-white shadow-md '
                       : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
                   }`}
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>AI Explains</span>
-                  <span className="text-[10px] opacity-80">({conversations.length})</span>
+                  <span className="text-[11px] opacity-80">({conversations.length})</span>
                 </button>
               </div>
             </div>
@@ -401,7 +401,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={`Search ${activeTab === 'conversions' ? 'documents' : activeTab === 'mocktests' ? 'test papers' : 'explanations'}...`}
-                  className="w-full pl-9 pr-3 py-1.5 bg-white/[0.04] border border-white/[0.08] focus:border-[#FF6B2B] rounded-lg text-white text-xs placeholder:text-slate-500 outline-none transition-all"
+                  className="w-full pl-9 pr-3 py-1.5 bg-white/[0.04] border border-white/[0.08] focus:border-accent rounded-lg text-white text-xs placeholder:text-slate-500 outline-none transition-all"
                 />
               </div>
             </div>
@@ -429,12 +429,12 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                     return (
                       <div
                         key={item.id}
-                        className="p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-[#FF6B2B]/40 transition-all cursor-pointer group flex flex-col gap-2"
+                        className="p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-accent/40 transition-all cursor-pointer group flex flex-col gap-2"
                         onClick={(e) => handleLoadConversionIntoEditor(item, e)}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-center gap-3 overflow-hidden">
-                            <div className="w-9 h-9 rounded-xl bg-[#FF6B2B]/10 border border-[#FF6B2B]/30 flex-shrink-0 flex items-center justify-center text-[#FF884D]">
+                            <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/30 flex-shrink-0 flex items-center justify-center text-accent-light">
                               <FileText className="w-4 h-4" />
                             </div>
                             <div className="overflow-hidden">
@@ -450,7 +450,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                           <div className="flex items-center gap-1.5 shrink-0">
                             <button
                               onClick={(e) => handleLoadConversionIntoEditor(item, e)}
-                              className="flex items-center gap-1 px-2.5 py-1 bg-[#FF6B2B]/15 hover:bg-[#FF6B2B]/30 text-[#FF884D] border border-[#FF6B2B]/30 font-bold rounded-lg text-xs transition-all shadow-sm"
+                              className="flex items-center gap-1 px-2.5 py-1 bg-accent/15 hover:bg-accent/30 text-accent-light border border-accent/30 font-bold rounded-lg text-xs transition-all shadow-sm"
                               title="Open this document"
                             >
                               <FolderOpen className="w-3.5 h-3.5" />
@@ -473,7 +473,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-white/[0.04] pt-2">
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-white/[0.04] pt-2">
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
                             {new Date(item.timestamp || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -524,7 +524,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             onClick={(e) => handleLoadMocktestIntoEditor(item, e)}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-extrabold rounded-lg text-xs transition-all shadow-sm"
+                            className="flex items-center gap-1 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-black font-semibold rounded-lg text-xs transition-all shadow-sm"
                             title="Load this test set into MCQs Extractor Editor"
                           >
                             <FolderOpen className="w-3.5 h-3.5" />
@@ -548,12 +548,12 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-white/[0.04] pt-2">
+                      <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-white/[0.04] pt-2">
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           {new Date(item.timestamp || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
-                        <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                        <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
                           <Check className="w-3 h-3" /> Saved & Available
                         </span>
                       </div>
@@ -586,11 +586,11 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                         <p className="text-xs text-slate-200 line-clamp-2 font-medium">
                           {item.questionText}
                         </p>
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
                           <span className="text-emerald-400 font-bold">Ans: {item.correctAnswer || 'N/A'}</span>
                           <span>•</span>
                           <span className="flex items-center gap-1">
-                            <MessageSquare className="w-3 h-3 text-[#FF6B2B]" />
+                            <MessageSquare className="w-3 h-3 text-accent" />
                             {item.messages.length} messages
                           </span>
                         </div>

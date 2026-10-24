@@ -240,7 +240,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-[#0A0C14]/85 backdrop-blur-md z-50"
+            className="fixed inset-0 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px] z-50"
           />
 
           <div className="fixed inset-0 flex items-center justify-center p-4 z-50 pointer-events-none">
@@ -249,18 +249,18 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 15 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="w-full max-w-xl bg-[#121524] border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col max-h-[92vh] overflow-y-auto custom-scrollbar"
+              className="w-full max-w-xl bg-surface border border-line-strong rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col max-h-[92vh] overflow-y-auto custom-scrollbar"
             >
               {/* Header */}
               <div className="flex items-center justify-between p-5 border-b border-white/[0.08] bg-white/[0.02]">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] flex items-center justify-center text-white shadow-lg shadow-[#FF6B2B]/20">
+                  <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/25 flex items-center justify-center text-accent-light ">
                     <Sparkles className="w-5 h-5" />
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-white font-display flex items-center gap-2">
                       Connect AI Engine
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                      <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                         Zero Token Cost
                       </span>
                     </h3>
@@ -286,7 +286,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     <div>
                       <p className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
                         TextExtract Pro Bridge Active ({bridgeStatus.version || 'v2.0.0'})
-                        <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 rounded text-emerald-300 font-mono">
+                        <span className="text-[11px] px-1.5 py-px bg-emerald-500/20 rounded text-emerald-300 font-mono">
                           {selectedProvider.toUpperCase()}
                         </span>
                       </p>
@@ -334,7 +334,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     onClick={() => setActiveTab('extension')}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
                       activeTab === 'extension'
-                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white shadow'
+                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -346,7 +346,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     onClick={() => setActiveTab('chrome_key')}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
                       activeTab === 'chrome_key'
-                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white shadow'
+                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -358,7 +358,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     onClick={() => setActiveTab('oauth')}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
                       activeTab === 'oauth'
-                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white shadow'
+                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -370,13 +370,13 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                 {/* Tab 1: Extension Bridge (Free Unlimited) */}
                 {activeTab === 'extension' && (
                   <div className="space-y-4">
-                    <div className="p-3.5 bg-gradient-to-r from-white/[0.03] to-white/[0.01] border border-white/[0.08] rounded-xl space-y-3">
+                    <div className="p-3.5 bg-white/[0.04] border border-white/[0.08] rounded-xl space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-xs font-bold text-white">
-                          <Zap className="w-4 h-4 text-[#FF884D]" />
+                          <Zap className="w-4 h-4 text-accent-light" />
                           <span>Choose Your Browser AI Provider:</span>
                         </div>
-                        <span className="text-[10px] text-slate-400">Zero tokens consumed</span>
+                        <span className="text-[11px] text-slate-400">Zero tokens consumed</span>
                       </div>
 
                       {/* Providers grid */}
@@ -390,23 +390,23 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                               onClick={() => handleProviderSelect(p.id)}
                               className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
                                 isSelected
-                                  ? 'bg-[#FF6B2B]/10 border-[#FF6B2B] text-white shadow-lg ring-1 ring-[#FF6B2B]/40'
+                                  ? 'bg-accent/10 border-accent text-white shadow-lg ring-1 ring-accent/40'
                                   : 'bg-white/[0.02] border-white/[0.06] text-slate-300 hover:bg-white/[0.05] hover:border-white/[0.15]'
                               }`}
                             >
                               <div className="flex items-center justify-between mb-1.5">
                                 <span className="text-xs font-bold flex items-center gap-1.5">
-                                  <span className={`w-2.5 h-2.5 rounded-full ${isSelected ? 'bg-[#FF6B2B] shadow-sm shadow-[#FF6B2B]' : isOpenTab ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                                  <span className={`w-2.5 h-2.5 rounded-full ${isSelected ? 'bg-accent shadow-sm ' : isOpenTab ? 'bg-emerald-400' : 'bg-slate-500'}`} />
                                   {p.name}
                                 </span>
                                 <div className="flex items-center gap-1">
                                   {isOpenTab ? (
-                                    <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-bold flex items-center gap-1">
+                                    <span className="text-[11px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-bold flex items-center gap-1">
                                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                                       Tab Open ✓
                                     </span>
                                   ) : (
-                                    <span className="text-[9px] px-1.5 py-0.5 bg-white/10 rounded font-medium text-slate-400">
+                                    <span className="text-[11px] px-1.5 py-0.5 bg-white/10 rounded font-medium text-slate-400">
                                       {p.badge}
                                     </span>
                                   )}
@@ -421,7 +421,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                                   target="_blank"
                                   rel="noreferrer"
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-[#FF884D] hover:underline flex items-center gap-1 font-semibold"
+                                  className="text-accent-light hover:underline flex items-center gap-1 font-semibold"
                                 >
                                   Open {p.name}
                                   <ExternalLink className="w-3 h-3" />
@@ -431,7 +431,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                                     <CheckCircle2 className="w-3.5 h-3.5" /> Active Model
                                   </span>
                                 ) : (
-                                  <span className="text-slate-400 hover:text-white font-medium text-[10px]">
+                                  <span className="text-slate-400 hover:text-white font-medium text-[11px]">
                                     Click to Switch →
                                   </span>
                                 )}
@@ -443,10 +443,10 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     </div>
 
                     {/* Manual distribution notice (no public download) */}
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-gradient-to-r from-[#FF6B2B]/15 to-[#FF884D]/10 border border-[#FF6B2B]/30 rounded-xl gap-2">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 bg-accent/10 border border-accent/30 rounded-xl gap-2">
                       <div>
                         <p className="text-xs font-bold text-white flex items-center gap-1.5">
-                          <Bot className="w-4 h-4 text-[#FF884D]" />
+                          <Bot className="w-4 h-4 text-accent-light" />
                           TextExtract Pro Bridge Extension
                         </p>
                         <p className="text-[11px] text-slate-300">
@@ -462,7 +462,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                           <Bot className="w-4 h-4 text-emerald-400" />
                           How to load TextExtract Pro Bridge Extension:
                         </span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                        <span className={`text-[11px] px-2 py-0.5 rounded font-bold ${
                           bridgeStatus.connected 
                             ? 'bg-emerald-500/20 text-emerald-300' 
                             : 'bg-amber-500/20 text-amber-300'
@@ -476,13 +476,13 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                           Hamari team se mili <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge</code> extension file ko <strong>Extract / Unzip</strong> karein.
                         </li>
                         <li>
-                          Chrome me <code className="px-1.5 py-0.5 bg-white/10 rounded text-[#FF884D] font-mono">chrome://extensions</code> open karein aur top-right me <strong>Developer mode</strong> ON karein.
+                          Chrome me <code className="px-1.5 py-0.5 bg-white/10 rounded text-accent-light font-mono">chrome://extensions</code> open karein aur top-right me <strong>Developer mode</strong> ON karein.
                         </li>
                         <li>
                           <strong>Load unpacked</strong> par click karein aur <code className="px-1.5 py-0.5 bg-white/10 rounded text-white font-mono">textextract-pro-bridge</code> folder select karein.
                         </li>
                         <li>
-                          Browser me apne pasandeeda model ka tab logged-in open rakhein (<a href={PROVIDERS.find(p => p.id === selectedProvider)?.url} target="_blank" rel="noreferrer" className="text-[#FF884D] underline font-bold">{PROVIDERS.find(p => p.id === selectedProvider)?.name}</a>).
+                          Browser me apne pasandeeda model ka tab logged-in open rakhein (<a href={PROVIDERS.find(p => p.id === selectedProvider)?.url} target="_blank" rel="noreferrer" className="text-accent-light underline font-bold">{PROVIDERS.find(p => p.id === selectedProvider)?.name}</a>).
                         </li>
                       </ol>
 
@@ -512,9 +512,9 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                 {/* Tab 2: Chrome Google AI Studio Key */}
                 {activeTab === 'chrome_key' && (
                   <div className="space-y-3.5">
-                    <div className="p-3.5 bg-gradient-to-r from-white/[0.03] to-white/[0.01] border border-white/[0.08] rounded-xl space-y-2.5">
+                    <div className="p-3.5 bg-white/[0.04] border border-white/[0.08] rounded-xl space-y-2.5">
                       <div className="flex items-center gap-2 text-xs font-bold text-white">
-                        <Zap className="w-4 h-4 text-[#FF884D]" />
+                        <Zap className="w-4 h-4 text-accent-light" />
                         <span>Chrome me pehle se Google login hai?</span>
                       </div>
                       <p className="text-[11px] text-slate-300 leading-relaxed">
@@ -524,7 +524,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                         href="https://aistudio.google.com/apikey"
                         target="_blank"
                         rel="noreferrer"
-                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/[0.08] hover:bg-white/[0.12] border border-[#FF6B2B]/40 hover:border-[#FF6B2B] text-[#FF884D] hover:text-white rounded-xl text-xs font-bold transition-all shadow"
+                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/[0.08] hover:bg-white/[0.12] border border-accent/40 hover:border-accent text-accent-light hover:text-white rounded-xl text-xs font-bold transition-all shadow"
                       >
                         <span>🔗 Open in Chrome & Copy My Gemini Key</span>
                         <ExternalLink className="w-3.5 h-3.5" />
@@ -536,19 +536,19 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                         <label className="flex items-center gap-2">
                           <span>Paste Gemini API Key(s):</span>
                           {parseUserApiKeys(apiKeyInput).length > 1 && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 flex items-center gap-1">
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 flex items-center gap-1">
                               ⚡ {parseUserApiKeys(apiKeyInput).length} Keys (Auto-Rotating)
                             </span>
                           )}
                         </label>
-                        <span className="text-[10px] text-slate-400 font-normal">Comma or newline separated</span>
+                        <span className="text-[11px] text-slate-400 font-normal">Comma or newline separated</span>
                       </div>
                       <textarea
                         rows={3}
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
                         placeholder="Paste one or multiple Gemini API keys:&#10;AIzaSy..., AIzaSy..."
-                        className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all font-mono resize-y"
+                        className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.1] focus:border-accent rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all font-mono resize-y"
                       />
                       <p className="text-[11px] text-slate-400">
                         Aap ek se zyada keys paste kar sakte hain. Agar ek key par quota limit aayegi to system bina ruke turant agli key par switch kar lega!
@@ -559,7 +559,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                       type="button"
                       onClick={handleSaveApiKey}
                       disabled={isVerifying || !apiKeyInput.trim()}
-                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-xl text-xs font-bold hover:shadow-lg hover:shadow-[#FF6B2B]/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full flex items-center justify-center gap-2 py-2.5 bg-accent text-on-accent rounded-xl text-xs font-bold hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isVerifying ? (
                         <>
@@ -587,7 +587,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                           href="https://console.cloud.google.com/apis/credentials" 
                           target="_blank" 
                           rel="noreferrer"
-                          className="text-[10px] text-[#FF884D] hover:underline flex items-center gap-1 font-normal"
+                          className="text-[11px] text-accent-light hover:underline flex items-center gap-1 font-normal"
                         >
                           Google Cloud Console
                           <ExternalLink className="w-3 h-3" />
@@ -598,7 +598,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                         value={clientIdInput}
                         onChange={(e) => setClientIdInput(e.target.value)}
                         placeholder="e.g. 123456789-abc.apps.googleusercontent.com"
-                        className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all font-mono text-[11px]"
+                        className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.1] focus:border-accent rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all font-mono text-[11px]"
                       />
                     </div>
 
@@ -648,7 +648,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                 )}
 
                 {/* Privacy & Security Guarantee */}
-                <div className="pt-2 border-t border-white/[0.06] flex items-center gap-2 text-[10px] text-slate-400">
+                <div className="pt-2 border-t border-white/[0.06] flex items-center gap-2 text-[11px] text-slate-400">
                   <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>
                     <strong>100% Client-Side Privacy:</strong> Extension and credentials operate entirely within your local browser. Zero cost, zero server quota.

@@ -6,7 +6,7 @@ import {
   Layers, Plus, CheckCircle2, Split, ZoomIn, ZoomOut,
   Maximize2, RotateCw, CheckSquare, Square, Copy, RefreshCcw,
   GripVertical, ChevronUp, ChevronDown, Search, ArrowLeft, ArrowRight, X,
-  ChevronsLeft, ChevronsRight, Grid, Columns
+  ChevronsLeft, ChevronsRight, Grid, Columns, Loader2, SlidersHorizontal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { convertPdfToImages } from '../services/pdfUtils';
@@ -886,7 +886,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
     const endIdx = pageSize === -1 ? totalDisplayedCards : Math.min(safeCurrentPage * pageSize, totalDisplayedCards);
 
     return (
-      <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-[#141824]/90 border border-white/[0.08] text-xs shadow-lg backdrop-blur-md ${position === 'top' ? 'mb-5' : 'mt-6'}`}>
+      <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-surface/90 border border-white/[0.08] text-xs shadow-lg backdrop-blur-md ${position === 'top' ? 'mb-5' : 'mt-6'}`}>
         {/* Left: Card count summary */}
         <div className="flex items-center gap-2 font-medium text-slate-300">
           <span className="px-2 py-0.5 rounded-md bg-white/[0.06] text-amber-400 font-mono font-bold text-[11px]">
@@ -933,7 +933,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                     setCurrentPage(val);
                   }
                 }}
-                className="w-10 bg-transparent text-center font-bold text-white outline-none border-b border-[#FF6B2B]"
+                className="w-10 bg-transparent text-center font-bold text-white outline-none border-b border-accent"
               />
               <span className="text-slate-400 text-[11px]">of {totalPages}</span>
             </div>
@@ -977,12 +977,12 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
               max={cards.length}
               value={jumpCardInput}
               onChange={(e) => setJumpCardInput(e.target.value)}
-              className="w-28 px-2 py-1 rounded-lg bg-black/40 border border-white/[0.1] text-white text-[11px] placeholder-slate-500 outline-none focus:border-[#FF6B2B]"
+              className="w-28 px-2 py-1 rounded-lg bg-black/40 border border-white/[0.1] text-white text-[11px] placeholder-slate-500 outline-none focus:border-accent"
             />
             <button
               type="submit"
               disabled={!jumpCardInput}
-              className="px-2.5 py-1 bg-white/[0.08] hover:bg-[#FF6B2B] hover:text-white rounded-lg text-slate-300 text-[11px] font-bold transition-all disabled:opacity-30"
+              className="px-2.5 py-1 bg-white/[0.08] hover:bg-accent hover:text-white rounded-lg text-slate-300 text-[11px] font-bold transition-all disabled:opacity-30"
             >
               Go
             </button>
@@ -1001,7 +1001,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                 }}
                 className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
                   pageSize === size
-                    ? 'bg-[#FF6B2B] text-white shadow'
+                    ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                     : 'bg-white/[0.04] text-slate-400 hover:text-white'
                 }`}
               >
@@ -1046,198 +1046,174 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
   }, [cropTarget, currentTargetIndex, flatTargets, hasPrevPage, hasNextPage, activeCropBox, activeScale, expandedImageModal]);
 
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] bg-[#0B0D13] text-slate-100 flex flex-col select-none">
-      {/* 1. TOP HEADER & ACTION BAR (With Prominent Final Page Count Badge) */}
-      <header className="sticky top-14 z-30 border-b border-white/[0.08] bg-[#0E111A]/95 backdrop-blur-xl px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-lg">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] text-white shadow-md shadow-[#FF6B2B]/20">
-            <Split className="w-5 h-5" />
-          </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-base font-extrabold text-white tracking-tight">Q&A Page Merger & Cropper</h1>
-              
-              {/* FINAL PAGES COUNT BADGE & SELECTION CONTROLS */}
-              {cards.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-blue-600/25 to-indigo-600/25 border border-blue-400/40 text-blue-200 rounded-full text-xs font-bold shadow-sm shadow-blue-500/10">
-                    <span className="text-slate-300">Final PDF:</span>
-                    <span className="text-white text-sm font-black tracking-wide">{cards.length} Pages</span>
-                    {mergedCount > 0 && (
-                      <span className="text-emerald-400 font-bold border-l border-white/20 pl-2">
-                        {mergedCount} Merged
-                      </span>
-                    )}
-                  </div>
+    <div className="min-h-[calc(100vh-3.5rem)] bg-canvas text-ink flex flex-col select-none">
+      {/* 1. Header & action bar */}
+      <header className="sticky top-14 z-30 border-b border-line bg-canvas/95 backdrop-blur-xl">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="page-eyebrow">Page stitcher</p>
+            <div className="flex items-center gap-2 flex-wrap mt-0.5">
+              <h1 className="font-display text-lg font-bold text-ink tracking-tight">Q&A page merger & cropper</h1>
 
-                  {/* Select All / Deselect All Toggle */}
+              {/* Final page count & selection */}
+              {cards.length > 0 && (
+                <>
+                  <span className="badge badge-accent">
+                    {cards.length} pages in final PDF
+                    {mergedCount > 0 && <span className="text-emerald-300 border-l border-white/20 pl-1.5 ml-0.5">{mergedCount} merged</span>}
+                  </span>
                   <button
                     type="button"
                     onClick={toggleSelectAll}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold transition-all shadow-sm ${
-                      allSelected 
-                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300 hover:bg-emerald-500/30' 
-                        : selectedCount > 0 
-                        ? 'bg-amber-500/20 border-amber-400/50 text-amber-300 hover:bg-amber-500/30'
-                        : 'bg-white/[0.04] border-white/[0.1] text-slate-400 hover:bg-white/[0.08]'
-                    }`}
-                    title="Click to Select All or Deselect All"
+                    aria-pressed={allSelected}
+                    className="btn btn-ghost btn-xs"
+                    title="Select all or deselect all"
                   >
-                    {allSelected ? (
-                      <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Square className="w-3.5 h-3.5" />
-                    )}
-                    <span>Selected: {selectedCount}/{cards.length}</span>
+                    {allSelected ? <CheckSquare className="text-accent" /> : <Square />}
+                    <span>{selectedCount}/{cards.length} selected</span>
                   </button>
-
-                </div>
+                </>
               )}
             </div>
-            <p className="text-xs text-slate-400">
-              Select specific pages to download or send. Drag solutions onto questions with 0 unwanted tags!
+            <p className="text-xs text-ink-3 mt-0.5">
+              Select pages to download or send. Drag a solution card onto its question card to merge them.
             </p>
           </div>
-        </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {cards.length > 0 && (
-            <>
-              {/* Global Page Search Input */}
-              <div className="relative flex items-center">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Find Page # (e.g. 63)..."
-                  value={pageSearchQuery}
-                  onChange={(e) => setPageSearchQuery(e.target.value)}
-                  className="pl-8 pr-7 py-1.5 bg-white/[0.05] hover:bg-white/[0.08] focus:bg-black/60 border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-xs text-white placeholder-slate-500 outline-none w-36 sm:w-44 transition-all"
-                  title="Search cards containing this page number"
-                />
-                {pageSearchQuery && (
+          {/* Action controls */}
+          <div className="toolbar">
+            {cards.length > 0 && (
+              <>
+                <div className="input-group h-8 w-40 sm:w-44">
+                  <Search className="w-3.5 h-3.5 text-ink-3 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="Find page # (e.g. 63)"
+                    value={pageSearchQuery}
+                    onChange={(e) => setPageSearchQuery(e.target.value)}
+                    aria-label="Find page number"
+                    title="Search cards containing this page number"
+                  />
+                  {pageSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setPageSearchQuery('')}
+                      className="text-ink-3 hover:text-ink"
+                      aria-label="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {mergedCount > 0 && (
                   <button
                     type="button"
-                    onClick={() => setPageSearchQuery('')}
-                    className="absolute right-2 text-slate-400 hover:text-white"
+                    onClick={handleUnmergeAll}
+                    className="btn btn-ghost btn-sm"
+                    title="Split every merged card back into single pages"
                   >
-                    <X className="w-3 h-3" />
+                    <Undo2 />
+                    <span>Unmerge all ({mergedCount})</span>
                   </button>
                 )}
-              </div>
 
-              {mergedCount > 0 && (
-                <button
-                  type="button"
-                  onClick={handleUnmergeAll}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.06] hover:bg-rose-500/20 border border-white/10 text-slate-200 rounded-xl text-xs font-semibold transition-all"
-                  title="Split every merged card back into single pages"
-                >
-                  <Undo2 className="w-3.5 h-3.5" />
-                  <span>Unmerge All ({mergedCount})</span>
-                </button>
-              )}
+                <div className="seg" role="tablist" aria-label="View">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === 'output'}
+                    onClick={() => setViewMode('output')}
+                    className="seg-item"
+                    title="Exact preview of the PDF you will download"
+                  >
+                    <Eye />
+                    <span>Output preview</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={viewMode === 'cards'}
+                    onClick={() => setViewMode('cards')}
+                    className="seg-item"
+                    title="Edit source pages: crop, reorder, delete, merge"
+                  >
+                    <Grid />
+                    <span>Edit pages</span>
+                  </button>
+                </div>
 
-              {/* View Mode Toggle: exact output preview vs card editor */}
-              <div className="flex items-center bg-black/40 p-0.5 rounded-xl border border-white/[0.12] shadow-inner">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('output')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                    viewMode === 'output'
-                      ? 'bg-[#FF6B2B] text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                  title="Exact preview of the PDF you will download"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  <span>Output Preview</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode('cards')}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                    viewMode === 'cards'
-                      ? 'bg-[#FF6B2B] text-white shadow-md'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                  title="Edit source pages: crop, reorder, delete, merge"
-                >
-                  <Grid className="w-3.5 h-3.5" />
-                  <span>Edit Pages</span>
-                </button>
-              </div>
-            </>
-          )}
+                <div className="toolbar-divider hidden md:block" />
+              </>
+            )}
 
-          {/* Upload Button */}
-          <label className="flex items-center gap-1.5 px-3.5 py-1.5 bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-slate-200 rounded-xl text-xs font-semibold cursor-pointer transition-all">
-            <Upload className="w-3.5 h-3.5 text-[#FF884D]" />
-            <span>{cards.length > 0 ? 'Replace PDF' : 'Upload PDF'}</span>
-            <input 
-              type="file" 
-              accept="application/pdf" 
-              className="hidden" 
-              onChange={handlePdfUpload}
-            />
-          </label>
+            <label className="btn btn-secondary cursor-pointer">
+              <Upload />
+              <span>{cards.length > 0 ? 'Replace PDF' : 'Upload PDF'}</span>
+              <input
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={handlePdfUpload}
+              />
+            </label>
 
-          {/* Download PDF & Layout Config */}
-          <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={handleDownloadPdf}
+              onClick={handleSendToMcq}
               disabled={selectedCount === 0 || isExporting}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-blue-600/20 disabled:opacity-40"
-              title="Configure PDF layout (1-Up, 2-Up, 4-Up, margins, borders, paper size) and download"
+              className="btn btn-secondary"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>
-                {isExporting && exportProgress 
-                  ? `Compiling PDF (${exportProgress.current}/${exportProgress.total})...` 
-                  : `Download PDF (${selectedCount})`}
-              </span>
+              <FileSpreadsheet />
+              <span>Send to MCQ tool ({selectedCount})</span>
             </button>
-            <button
-              type="button"
-              onClick={() => setShowLayoutModal(true)}
-              disabled={selectedCount === 0 || isExporting}
-              className="p-1.5 bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 text-blue-300 rounded-xl transition-all disabled:opacity-40"
-              title="PDF Page Layout Settings (N-Up, Margins, Borders)"
-            >
-              <Grid className="w-3.5 h-3.5" />
-            </button>
+
+            <div className="btn-group">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={selectedCount === 0 || isExporting}
+                className="btn btn-primary"
+                title="Configure PDF layout (1-Up, 2-Up, 4-Up, margins, borders, paper size) and download"
+              >
+                {isExporting ? <Loader2 className="animate-spin" /> : <Download />}
+                <span>
+                  {isExporting && exportProgress
+                    ? `Compiling PDF (${exportProgress.current}/${exportProgress.total})…`
+                    : `Download PDF (${selectedCount})`}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLayoutModal(true)}
+                disabled={selectedCount === 0 || isExporting}
+                className="btn btn-primary btn-icon"
+                title="PDF page layout settings (N-up, margins, borders)"
+                aria-label="PDF page layout settings"
+              >
+                <SlidersHorizontal />
+              </button>
+            </div>
           </div>
-
-          {/* Send to MCQ Extractor */}
-          <button
-            type="button"
-            onClick={handleSendToMcq}
-            disabled={selectedCount === 0 || isExporting}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-xl text-xs transition-all shadow-md shadow-amber-500/20 disabled:opacity-40"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Send to MCQ Tool ({selectedCount})</span>
-          </button>
         </div>
       </header>
 
       {/* High-Performance Loading Modal Overlay */}
       <AnimatePresence>
         {isLoadingPdf && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px]">
             <motion.div
               initial={{ opacity: 0, scale: 0.92 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.92 }}
-              className="w-full max-w-md bg-[#141824] border border-orange-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-5"
+              className="w-full max-w-md bg-surface border border-line-strong rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-5"
             >
-              <div className="w-16 h-16 rounded-2xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center mx-auto text-[#FF6B2B] shadow-lg shadow-orange-500/10">
+              <div className="w-16 h-16 rounded-2xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center mx-auto text-accent shadow-lg ">
                 <RefreshCw className="w-8 h-8 animate-spin" />
               </div>
 
               <div>
-                <h3 className="text-lg font-black text-white tracking-tight">Optimizing & Loading PDF</h3>
+                <h3 className="text-lg font-bold text-white tracking-tight">Optimizing & Loading PDF</h3>
                 <p className="text-xs text-slate-400 mt-1 truncate max-w-xs mx-auto font-mono">
                   {fileName}
                 </p>
@@ -1258,7 +1234,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
                 <div className="w-full h-2.5 rounded-full bg-white/[0.08] overflow-hidden p-0.5 border border-white/[0.06]">
                   <div 
-                    className="h-full rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-[#FF6B2B] transition-all duration-150 shadow-sm"
+                    className="h-full rounded-full bg-accent transition-all duration-150 shadow-sm"
                     style={{
                       width: `${loadingProgress?.total ? Math.min(100, Math.round(((loadingProgress.current || 0) / loadingProgress.total) * 100)) : 5}%`
                     }}
@@ -1276,9 +1252,9 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
       {/* Active Search Filter Banner */}
       {pageSearchQuery.trim() && (
-        <div className="bg-blue-600/20 border-b border-blue-500/30 px-6 py-2 flex items-center justify-between text-xs font-semibold text-blue-200">
+        <div className="bg-accent/10 border-b border-accent/40 px-6 py-2 flex items-center justify-between text-xs font-semibold text-accent-light">
           <div className="flex items-center gap-2">
-            <Search className="w-3.5 h-3.5 text-blue-400" />
+            <Search className="w-3.5 h-3.5 text-accent" />
             <span>
               Showing cards matching Page <strong>&ldquo;{pageSearchQuery}&rdquo;</strong> ({displayedCards.length} found)
             </span>
@@ -1295,7 +1271,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
       {/* Manual Selection Notification Bar */}
       {manualMergeSourceId && (
-        <div className="bg-[#FF6B2B]/20 border-b border-[#FF6B2B]/40 px-6 py-2 flex items-center justify-between text-xs font-semibold text-orange-200 animate-in fade-in">
+        <div className="bg-accent/20 border-b border-accent/40 px-6 py-2 flex items-center justify-between text-xs font-semibold text-orange-200 animate-in fade-in">
           <span>
             Selected <strong>Page {cards.find(c => c.id === manualMergeSourceId)?.originalPageNum}</strong> as Solution. Now click on any Question card below to merge!
           </span>
@@ -1356,14 +1332,14 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                     card.isSelected === false ? 'opacity-40 grayscale-[0.4] hover:opacity-85' : 'opacity-100'
                   } ${
                     isReorderHovered
-                      ? 'border-blue-400 ring-4 ring-blue-500/40 bg-blue-950/40 scale-[1.02]'
+                      ? 'border-accent/40 ring-4 ring-accent/40 bg-accent/10 scale-[1.02]'
                       : isTargetHovered
                       ? 'border-emerald-400 ring-4 ring-emerald-500/30 bg-emerald-950/40 scale-[1.02]'
                       : isMulti
                       ? (card.isSelected !== false ? 'border-orange-500/50 bg-[#121622] hover:border-orange-500/80' : 'border-orange-500/20 bg-[#121622]/60')
                       : isManualSource
-                      ? 'border-[#FF6B2B] ring-2 ring-[#FF6B2B] bg-[#FF6B2B]/10'
-                      : (card.isSelected !== false ? 'border-white/[0.12] bg-[#0E111A] hover:border-white/[0.25] hover:shadow-2xl' : 'border-white/[0.04] bg-[#0E111A]/60')
+                      ? 'border-accent ring-2 ring-accent bg-accent/10'
+                      : (card.isSelected !== false ? 'border-white/[0.12] bg-surface hover:border-white/[0.25] hover:shadow-2xl' : 'border-white/[0.04] bg-surface/60')
                   } ${isSourceBeingDragged ? 'opacity-40' : ''} ${
                     manualMergeSourceId && manualMergeSourceId !== card.id ? 'cursor-pointer hover:ring-2 hover:ring-emerald-400' : ''
                   }`}
@@ -1371,10 +1347,10 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   {/* Drop Merge Indicator Overlay */}
                   {isTargetHovered && (
                     <div className="absolute inset-0 z-30 bg-emerald-600/30 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center pointer-events-none">
-                      <div className="p-3 rounded-full bg-emerald-500 text-black mb-2 animate-bounce">
+                      <div className="p-3 rounded-full bg-emerald-500 text-black mb-2 ">
                         <ArrowDownUp className="w-6 h-6" />
                       </div>
-                      <span className="text-sm font-extrabold text-white">
+                      <span className="text-sm font-semibold text-white">
                         Drop to Merge All Pages Here!
                       </span>
                     </div>
@@ -1382,11 +1358,11 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
                   {/* Drop Reorder Indicator Overlay */}
                   {isReorderHovered && (
-                    <div className="absolute inset-0 z-30 bg-blue-600/30 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center pointer-events-none">
-                      <div className="p-3 rounded-full bg-blue-500 text-white mb-2 animate-pulse">
+                    <div className="absolute inset-0 z-30 bg-accent/10 backdrop-blur-xs flex flex-col items-center justify-center p-4 text-center pointer-events-none">
+                      <div className="p-3 rounded-full bg-accent text-on-accent mb-2 animate-pulse">
                         <ArrowLeftRight className="w-6 h-6" />
                       </div>
-                      <span className="text-sm font-extrabold text-white">
+                      <span className="text-sm font-semibold text-white">
                         Move Card to Position #{cardIdx + 1}
                       </span>
                     </div>
@@ -1417,7 +1393,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                           setPositionDialogCardId(card.id);
                           setTargetPositionInput(String(cardIdx + 1));
                         }}
-                        className="px-1.5 py-0.5 rounded bg-white/[0.07] hover:bg-[#FF6B2B]/20 text-[10px] font-mono font-black text-slate-300 hover:text-orange-300 border border-white/[0.1] transition-all shrink-0"
+                        className="px-1.5 py-0.5 rounded bg-white/[0.07] hover:bg-accent/20 text-[11px] font-mono font-bold text-slate-300 hover:text-orange-300 border border-white/[0.1] transition-all shrink-0"
                         title="Click to jump to a specific page position"
                       >
                         #{cardIdx + 1}
@@ -1451,13 +1427,13 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                         onClick={(e) => { e.stopPropagation(); toggleSelectCard(card.id); }}
                         className={`p-1 rounded-md transition-all flex items-center justify-center shrink-0 ${
                           card.isSelected !== false 
-                            ? 'text-[#FF884D] bg-[#FF884D]/15 hover:bg-[#FF884D]/25 ring-1 ring-[#FF884D]/30' 
+                            ? 'text-accent-light bg-accent-hover/15 hover:bg-accent-hover/25 ring-1 ring-accent-hover/30' 
                             : 'text-slate-500 bg-white/[0.04] hover:bg-white/[0.08] hover:text-slate-300'
                         }`}
                         title={card.isSelected !== false ? "Click to Deselect from Export" : "Click to Select for Export"}
                       >
                         {card.isSelected !== false ? (
-                          <CheckSquare className="w-3.5 h-3.5 text-[#FF884D]" />
+                          <CheckSquare className="w-3.5 h-3.5 text-accent-light" />
                         ) : (
                           <Square className="w-3.5 h-3.5 text-slate-500" />
                         )}
@@ -1465,17 +1441,17 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
 
                       {/* Card Title & Badges */}
                       <div className="flex items-center gap-1 min-w-0 truncate">
-                        <span className="text-[11px] font-extrabold text-white truncate" title={items.map(it => `P.${it.pageNum}`).join(' + ')}>
+                        <span className="text-[11px] font-semibold text-white truncate" title={items.map(it => `P.${it.pageNum}`).join(' + ')}>
                           {items.length > 1
                             ? `Set: P.${items.map(it => it.pageNum).join('+')}`
                             : `Page ${items[0]?.pageNum || card.originalPageNum}`}
                         </span>
                         {items.length > 1 ? (
-                          <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+                          <span className="text-[11px] font-bold px-1 py-px rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                             {items.length}P
                           </span>
                         ) : (
-                          <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-white/[0.06] text-slate-400 shrink-0">
+                          <span className="text-[11px] font-bold px-1 py-px rounded bg-white/[0.06] text-slate-400 shrink-0">
                             1P
                           </span>
                         )}
@@ -1492,7 +1468,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                           setActiveAddModalCardId(card.id);
                           setSearchModalPageQuery('');
                         }}
-                        className="px-1.5 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-0.5 transition-all"
+                        className="px-1.5 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold flex items-center gap-0.5 transition-all"
                         title="Search & attach another page number to this card"
                       >
                         <span>+ Page</span>
@@ -1535,14 +1511,14 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                           }}
                           className={`flex flex-col rounded-xl border p-1.5 transition-all ${
                             items.length >= 3
-                              ? 'bg-white/[0.03] border-white/10 hover:border-blue-400/40 hover:bg-white/[0.05]'
+                              ? 'bg-white/[0.03] border-white/10 hover:border-accent/40 hover:bg-white/[0.05]'
                               : 'border-transparent'
                           }`}
                         >
                           {/* Mini header for item in card */}
-                          <div className="flex items-center justify-between pb-1 px-0.5 text-[10px] text-slate-400 font-semibold gap-1">
+                          <div className="flex items-center justify-between pb-1 px-0.5 text-[11px] text-slate-400 font-semibold gap-1">
                             <span className="flex items-center gap-1 font-bold text-slate-300 truncate" title={`Page ${item.pageNum}`}>
-                              <span className="px-1 rounded bg-white/[0.08] text-[9px] text-amber-400 font-mono">#{itemIdx + 1}</span>
+                              <span className="px-1 rounded bg-white/[0.08] text-[11px] text-amber-400 font-mono">#{itemIdx + 1}</span>
                               <span className="truncate">P.{item.pageNum}</span>
                             </span>
 
@@ -1611,10 +1587,10 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                                     pageNum: item.pageNum
                                   });
                                 }}
-                                className="px-1.5 py-0.5 rounded bg-black/85 hover:bg-cyan-600 text-white text-[9px] font-bold flex items-center gap-0.5 shadow-md transition-all"
+                                className="px-1.5 py-0.5 rounded bg-black/85 hover:bg-accent-hover text-white text-[11px] font-bold flex items-center gap-0.5 shadow-md transition-all"
                                 title="Expand and Zoom in High Resolution"
                               >
-                                <Maximize2 className="w-2.5 h-2.5 text-cyan-300" />
+                                <Maximize2 className="w-2.5 h-2.5 text-accent-light" />
                                 <span>Expand</span>
                               </button>
 
@@ -1628,7 +1604,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                                     type: itemIdx === 0 ? 'question' : 'solution'
                                   });
                                 }}
-                                className="px-1.5 py-0.5 rounded bg-black/85 hover:bg-[#FF6B2B] text-white text-[9px] font-bold flex items-center gap-0.5 shadow-md transition-all"
+                                className="px-1.5 py-0.5 rounded bg-black/85 hover:bg-accent text-white text-[11px] font-bold flex items-center gap-0.5 shadow-md transition-all"
                               >
                                 <Scissors className="w-2.5 h-2.5 text-amber-400" />
                                 <span>{isCropped ? 'Re-Crop' : 'Crop'}</span>
@@ -1641,7 +1617,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                                     e.stopPropagation();
                                     handleResetCropOnCard(card.id, itemIdx);
                                   }}
-                                  className="p-1 rounded bg-black/85 hover:bg-rose-600 text-rose-300 hover:text-white text-[9px] font-bold shadow-md transition-all"
+                                  className="p-1 rounded bg-black/85 hover:bg-rose-600 text-rose-300 hover:text-white text-[11px] font-bold shadow-md transition-all"
                                   title="Reset Crop to Full Page"
                                 >
                                   <RotateCw className="w-2.5 h-2.5" />
@@ -1701,7 +1677,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                           onClick={() => setManualMergeSourceId(isManualSource ? null : card.id)}
                           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
                             isManualSource 
-                              ? 'bg-[#FF6B2B] text-white' 
+                              ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' 
                               : 'bg-white/[0.06] hover:bg-white/[0.1] text-slate-300'
                           }`}
                         >
@@ -1735,14 +1711,14 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
         ) : (
           /* EMPTY STATE */
           <div className="py-20 flex flex-col items-center justify-center text-center max-w-md mx-auto">
-            <div className="p-5 rounded-3xl bg-white/[0.03] border border-white/[0.08] text-[#FF6B2B] mb-5 shadow-2xl">
+            <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/[0.08] text-accent mb-5 shadow-2xl">
               <Upload className="w-12 h-12" />
             </div>
             <h2 className="text-xl font-bold text-white mb-2">Upload Question Paper & Solutions</h2>
             <p className="text-xs text-slate-400 mb-6 leading-relaxed">
               Upload your PDF to display all pages as interactive cards. You can then simply drag any solution card onto its question card to merge them into 1 page!
             </p>
-            <label className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] hover:shadow-xl hover:shadow-[#FF6B2B]/25 text-white font-bold rounded-2xl text-sm cursor-pointer transition-all shadow-lg">
+            <label className="flex items-center gap-2 px-6 py-3 bg-accent hover:shadow-xl text-on-accent font-bold rounded-2xl text-sm cursor-pointer transition-all shadow-lg">
               <Upload className="w-4 h-4" />
               <span>Select PDF File</span>
               <input 
@@ -1759,15 +1735,15 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       {/* 3. INTERACTIVE VISUAL CROP & SCALE MODAL */}
       <AnimatePresence>
         {cropTarget && currentCroppingCard && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px]">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-5xl bg-[#141824] border border-white/[0.1] rounded-2xl flex flex-col max-h-[94vh] shadow-2xl overflow-hidden"
+              className="w-full max-w-5xl bg-surface border border-line-strong rounded-2xl flex flex-col max-h-[94vh] shadow-2xl overflow-hidden"
             >
               {/* Modal Header */}
-              <div className="p-3 sm:p-4 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3 bg-[#0E111A]">
+              <div className="p-3 sm:p-4 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3 bg-surface">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-2 rounded-xl bg-orange-500/20 text-orange-400 shrink-0">
                     <Scissors className="w-5 h-5" />
@@ -1777,7 +1753,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                       <h3 className="text-sm font-bold text-white">
                         Crop {currentCroppingItem?.label || (currentItemIndex === 0 ? 'Question' : `Part ${currentItemIndex + 1}`)} (Page {currentDisplayedPageNum})
                       </h3>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-[#FF6B2B]/15 text-[#FF884D] border border-[#FF6B2B]/30 uppercase tracking-wider">
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-accent/15 text-accent-light border border-accent/30 uppercase tracking-wider">
                         {currentCroppingItem?.label || (currentItemIndex === 0 ? 'Question' : `Part ${currentItemIndex + 1}`)}
                       </span>
                     </div>
@@ -1802,7 +1778,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                       <span>Prev</span>
                     </button>
 
-                    <div className="px-2.5 py-1 text-xs font-mono font-extrabold text-amber-400 bg-white/[0.05] rounded-md border border-white/[0.06] flex items-center gap-1">
+                    <div className="px-2.5 py-1 text-xs font-mono font-semibold text-amber-400 bg-white/[0.05] rounded-md border border-white/[0.06] flex items-center gap-1">
                       <span>{currentTargetIndex >= 0 ? `${currentTargetIndex + 1}/${flatTargets.length}` : ''}</span>
                     </div>
 
@@ -1831,7 +1807,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                             setCropTarget({ cardId: currentCroppingCard.id, itemIndex: idx });
                           }}
                           className={`px-2.5 py-1 rounded text-xs font-bold transition-all shrink-0 ${
-                            isActive ? 'bg-[#FF6B2B] text-white shadow' : 'text-slate-400 hover:text-white'
+                            isActive ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-400 hover:text-white'
                           }`}
                         >
                           {item.label || (idx === 0 ? 'Question' : `Part ${idx + 1}`)} (P.{item.pageNum})
@@ -1872,7 +1848,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                         title="Change source PDF page for this crop"
                       >
                         {allPdfPages.map((p) => (
-                          <option key={p.pageNum} value={p.pageNum} className="bg-[#141824] text-white">
+                          <option key={p.pageNum} value={p.pageNum} className="bg-surface text-white">
                             Page {p.pageNum}
                           </option>
                         ))}
@@ -1907,7 +1883,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   <button
                     type="button"
                     onClick={() => handleNavigateCrop('prev')}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/80 hover:bg-[#FF6B2B] text-white/80 hover:text-white border border-white/10 hover:border-transparent shadow-2xl backdrop-blur-md transition-all active:scale-90"
+                    className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/80 hover:bg-accent text-white/80 hover:text-white border border-white/10 hover:border-transparent shadow-2xl backdrop-blur-md transition-all active:scale-90"
                     title={prevTarget ? `Previous: ${prevTarget.label} (Arrow Left)` : 'Previous'}
                   >
                     <ChevronLeft className="w-5 h-5" />
@@ -1919,7 +1895,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   <button
                     type="button"
                     onClick={() => handleNavigateCrop('next')}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/80 hover:bg-[#FF6B2B] text-white/80 hover:text-white border border-white/10 hover:border-transparent shadow-2xl backdrop-blur-md transition-all active:scale-90"
+                    className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/80 hover:bg-accent text-white/80 hover:text-white border border-white/10 hover:border-transparent shadow-2xl backdrop-blur-md transition-all active:scale-90"
                     title={nextTarget ? `Next: ${nextTarget.label} (Arrow Right)` : 'Next'}
                   >
                     <ChevronRight className="w-5 h-5" />
@@ -1940,7 +1916,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   {/* Active Selection Box */}
                   {activeCropBox && activeCropBox.width > 0 && activeCropBox.height > 0 && (
                     <div
-                      className="absolute border-2 border-[#FF6B2B] bg-[#FF6B2B]/20 pointer-events-none transition-none shadow-sm"
+                      className="absolute border-2 border-accent bg-accent/20 pointer-events-none transition-none shadow-sm"
                       style={{
                         left: `${activeCropBox.x}%`,
                         top: `${activeCropBox.y}%`,
@@ -1948,7 +1924,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                         height: `${activeCropBox.height}%`,
                       }}
                     >
-                      <div className="absolute top-0 left-0 -translate-y-full bg-[#FF6B2B] text-black font-extrabold text-[9px] px-1.5 py-0.5 rounded-t tracking-wider uppercase">
+                      <div className="absolute top-0 left-0 -translate-y-full bg-accent text-on-accent font-semibold text-[11px] px-1.5 py-0.5 rounded-t tracking-wider uppercase">
                         Selected Region
                       </div>
                     </div>
@@ -1957,7 +1933,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
               </div>
 
               {/* Modal Footer Controls */}
-              <div className="p-3 sm:p-4 border-t border-white/[0.08] bg-[#0E111A] flex flex-wrap items-center justify-between gap-3">
+              <div className="p-3 sm:p-4 border-t border-white/[0.08] bg-surface flex flex-wrap items-center justify-between gap-3">
                 {/* Scale / Zoom Slider */}
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2 text-xs text-slate-300">
@@ -1970,7 +1946,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                       step={0.05}
                       value={activeScale}
                       onChange={(e) => setActiveScale(Number(e.target.value))}
-                      className="w-28 sm:w-32 accent-[#FF6B2B]"
+                      className="w-28 sm:w-32 accent-accent"
                     />
                     <span className="font-mono text-white font-bold w-10 text-right">
                       {Math.round(activeScale * 100)}%
@@ -2024,7 +2000,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   <button
                     type="button"
                     onClick={handleApplyCrop}
-                    className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#FF6B2B]/25 hover:shadow-[#FF6B2B]/40 active:scale-95 transition-all"
+                    className="flex items-center gap-1.5 px-5 py-2 bg-accent text-on-accent rounded-xl text-xs font-bold shadow-lg active:scale-95 transition-all"
                   >
                     <Check className="w-4 h-4" />
                     <span>Apply & Save Crop</span>
@@ -2039,12 +2015,12 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       {/* 5. SEARCH & ADD PAGE TO CARD MODAL */}
       <AnimatePresence>
         {activeAddModalCardId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px]">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-2xl bg-[#141824] border border-white/[0.1] rounded-2xl p-5 shadow-2xl flex flex-col max-h-[88vh] space-y-4 overflow-hidden"
+              className="w-full max-w-2xl bg-surface border border-line-strong rounded-2xl p-5 shadow-2xl flex flex-col max-h-[88vh] space-y-4 overflow-hidden"
             >
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-white/[0.08] pb-3 shrink-0">
@@ -2095,7 +2071,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                 <button
                   type="submit"
                   disabled={!directPageNumberInput}
-                  className="px-4 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
+                  className="px-4 py-1.5 bg-accent hover:bg-accent-hover text-on-accent rounded-lg text-xs font-bold transition-all disabled:opacity-40 shadow-sm"
                 >
                   + Add to Card
                 </button>
@@ -2109,7 +2085,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   placeholder="Filter PDF pages (e.g. 219, 63)..."
                   value={searchModalPageQuery}
                   onChange={(e) => setSearchModalPageQuery(e.target.value)}
-                  className="w-full pl-9 pr-8 py-2 bg-black/40 border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-xs text-white placeholder-slate-500 outline-none"
+                  className="w-full pl-9 pr-8 py-2 bg-black/40 border border-white/[0.1] focus:border-accent rounded-xl text-xs text-white placeholder-slate-500 outline-none"
                 />
                 {searchModalPageQuery && (
                   <button
@@ -2148,7 +2124,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                               <span className="text-xs font-mono font-bold text-slate-300 group-hover:text-white">
                                 Page {p.pageNum}
                               </span>
-                              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                              <span className="text-[11px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-1.5 py-0.5 rounded">
                                 + Add
                               </span>
                             </div>
@@ -2214,16 +2190,16 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
       {/* 6. MOVE CARD POSITION DIALOG */}
       <AnimatePresence>
         {positionDialogCardId && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px]">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-[#141824] border border-white/[0.1] rounded-2xl p-5 shadow-2xl space-y-4"
+              className="w-full max-w-sm bg-surface border border-white/[0.1] rounded-2xl p-5 shadow-2xl space-y-4"
             >
               <div className="flex items-center justify-between border-b border-white/[0.08] pb-2.5">
                 <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
-                  <ArrowLeftRight className="w-4 h-4 text-[#FF6B2B]" />
+                  <ArrowLeftRight className="w-4 h-4 text-accent" />
                   <span>Move Card Position</span>
                 </h3>
                 <button
@@ -2257,7 +2233,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                     max={cards.length}
                     value={targetPositionInput}
                     onChange={(e) => setTargetPositionInput(e.target.value)}
-                    className="w-24 px-3 py-1.5 bg-black/50 border border-white/[0.15] focus:border-[#FF6B2B] rounded-xl text-center text-white font-mono font-bold text-base outline-none"
+                    className="w-24 px-3 py-1.5 bg-black/50 border border-white/[0.15] focus:border-accent rounded-xl text-center text-white font-mono font-bold text-base outline-none"
                     autoFocus
                   />
                   <span className="text-xs text-slate-500 font-mono">/ {cards.length}</span>
@@ -2273,7 +2249,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-xl text-xs font-bold shadow-md hover:shadow-orange-500/20 active:scale-95 transition-all"
+                    className="px-4 py-1.5 bg-accent text-on-accent rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all"
                   >
                     Move Position
                   </button>
@@ -2315,7 +2291,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-3">
-                <span className="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-xs font-bold flex items-center gap-1.5">
+                <span className="px-2.5 py-1 rounded-lg bg-accent/10 text-accent-light border border-accent/40 text-xs font-bold flex items-center gap-1.5">
                   <Maximize2 className="w-3.5 h-3.5" />
                   <span>High-Res Lightbox</span>
                 </span>
@@ -2356,7 +2332,7 @@ export const QaPageStitcher: React.FC<QaPageStitcherProps> = ({
                   <button
                     type="button"
                     onClick={() => setLightboxZoom(1.5)}
-                    className="text-[11px] font-bold text-cyan-300 hover:text-white px-1"
+                    className="text-[11px] font-bold text-accent-light hover:text-white px-1"
                   >
                     150%
                   </button>

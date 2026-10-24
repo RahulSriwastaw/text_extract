@@ -78,7 +78,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-[#0A0C14]/80 backdrop-blur-md z-50"
+            className="fixed inset-0 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px] z-50"
           />
 
           <div className="fixed inset-0 flex items-center justify-center p-4 z-50 pointer-events-none">
@@ -87,7 +87,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 15 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="w-full max-w-md bg-[#121524] border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col"
+              className="w-full max-w-md bg-surface border border-line-strong rounded-2xl shadow-2xl overflow-hidden pointer-events-auto flex flex-col"
             >
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-white/[0.08] bg-white/[0.02]">
@@ -166,7 +166,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                     ) : (
                       <button
                         onClick={() => setShowConnectModal(true)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-lg text-xs font-bold hover:shadow-lg transition-all"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-accent text-on-accent rounded-lg text-xs font-bold hover:shadow-lg transition-all"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
                         Connect Gemini (Free)
@@ -178,7 +178,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                 {/* Preferred Language */}
                 <div className="p-3.5 bg-white/[0.02] border border-white/[0.06] rounded-xl space-y-2">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-white">
-                    <Languages className="w-3.5 h-3.5 text-[#FF884D]" />
+                    <Languages className="w-3.5 h-3.5 text-accent-light" />
                     <span>Default Explanation Language</span>
                   </div>
                   <div className="grid grid-cols-3 gap-1.5 pt-1">
@@ -188,7 +188,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                         onClick={() => handleLanguageSelect(lang)}
                         className={`py-1.5 rounded-lg text-xs font-bold transition-all border ${
                           settings?.preferredLanguage === lang
-                            ? 'bg-[#FF6B2B] border-[#FF6B2B] text-white shadow'
+                            ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                             : 'bg-white/[0.03] border-white/[0.06] text-slate-400 hover:text-white'
                         }`}
                       >
@@ -210,7 +210,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                     </span>
                   </div>
 
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
                     All AI interactions stay 100% on this computer. They do not sync to mobile or upload to any central server.
                   </p>
 

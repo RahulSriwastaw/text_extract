@@ -207,23 +207,23 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px] animate-fade-in">
       <div 
-        className="relative w-full max-w-5xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-100"
+        className="relative w-full max-w-5xl max-h-[92vh] flex flex-col bg-surface border border-line-strong rounded-2xl shadow-2xl overflow-hidden text-ink"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Bar */}
         <div className="flex items-center justify-between px-5 py-3.5 bg-slate-950/90 border-b border-white/[0.08]">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 shadow-md shadow-amber-500/20 text-black font-extrabold">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent/10 border border-accent/25 text-accent-light font-semibold">
               <Plus className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-extrabold text-sm text-white">
+                <span className="font-semibold text-sm text-white">
                   Add New Question via AI / Paste Screenshot
                 </span>
-                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-[10px] border border-amber-500/30">
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold text-[11px] border border-amber-500/30">
                   Ctrl+V Paste Support
                 </span>
               </div>
@@ -269,7 +269,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                 value={qNumber}
                 onChange={(e) => setQNumber(Number(e.target.value))}
                 min={1}
-                className="w-16 bg-black/60 border border-white/[0.12] rounded-lg px-2 py-1 text-xs text-white font-extrabold text-center focus:outline-none"
+                className="w-16 bg-black/60 border border-white/[0.12] rounded-lg px-2 py-1 text-xs text-white font-semibold text-center focus:outline-none"
               />
             </div>
 
@@ -293,7 +293,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                 type="button"
                 onClick={() => setOptionCount(4)}
                 className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
-                  optionCount === 4 ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                  optionCount === 4 ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 4 Opts
@@ -302,7 +302,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                 type="button"
                 onClick={() => setOptionCount(5)}
                 className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
-                  optionCount === 5 ? 'bg-amber-500 text-black shadow-sm font-extrabold' : 'text-slate-400 hover:text-white'
+                  optionCount === 5 ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 5 Opts (A-E)
@@ -318,11 +318,11 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
         {/* Modal Main Content Area */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
           {/* Top Banner: Clipboard Paste Guide */}
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-violet-500/10 to-transparent border border-white/[0.08] text-xs">
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-500/10 border border-white/[0.08] text-xs">
             <div className="flex items-center gap-2 text-slate-300">
               <ClipboardPaste className="w-4 h-4 text-amber-400 shrink-0" />
               <span>
-                <strong>Quick Paste Tip:</strong> Take any screenshot using Windows Snip tool, then press <kbd className="px-1.5 py-0.5 rounded bg-black/50 border border-white/20 font-mono text-[10px] text-amber-300">Ctrl + V</kbd> to paste it here instantly!
+                <strong>Quick Paste Tip:</strong> Take any screenshot using Windows Snip tool, then press <kbd className="px-1.5 py-0.5 rounded bg-black/50 border border-white/20 font-mono text-[11px] text-amber-300">Ctrl + V</kbd> to paste it here instantly!
               </span>
             </div>
             <button
@@ -379,7 +379,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
               <label className="font-bold text-slate-300">
                 Question Text, Raw Question Content, or Generation Instruction:
               </label>
-              <span className="text-[10px] text-slate-500">Bilingual translation & YCT proof generated automatically</span>
+              <span className="text-[11px] text-slate-500">Bilingual translation & YCT proof generated automatically</span>
             </div>
             <textarea
               ref={textareaRef}
@@ -387,7 +387,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
               onChange={(e) => setInputText(e.target.value)}
               placeholder="उदा: यहाँ किसी भी प्रश्न का कच्चा टेक्स्ट पेस्ट करें, या लिखें: 'बजट 2026 में खेल विकास योजना पर 4 ऑप्शन वाला नया प्रश्न तैयार करो'..."
               rows={3}
-              className="w-full bg-slate-950/80 border border-white/[0.1] focus:border-amber-500/60 rounded-xl p-3 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none resize-none shadow-inner"
+              className="w-full bg-slate-950/80 border border-white/[0.1] focus:border-accent rounded-xl p-3 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none resize-none shadow-inner"
             />
           </div>
 
@@ -415,7 +415,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
               type="button"
               onClick={() => handleGenerate()}
               disabled={(!inputText.trim() && !attachedImage) || isProcessing}
-              className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-xl text-xs transition-all disabled:opacity-40 shadow-lg shadow-amber-500/20"
+              className="flex items-center gap-2 px-5 py-2 bg-accent hover:bg-accent-hover text-on-accent font-semibold rounded-xl text-xs transition-all disabled:opacity-40 shadow-lg "
             >
               {isProcessing ? (
                 <>
@@ -436,10 +436,10 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
             <div className="p-4 rounded-xl bg-slate-950/80 border border-amber-500/40 space-y-3.5 shadow-xl animate-fade-in">
               <div className="flex items-center justify-between pb-2 border-b border-white/[0.08]">
                 <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded bg-amber-500 text-black font-extrabold text-xs">
+                  <span className="px-2 py-0.5 rounded bg-accent text-on-accent font-semibold text-xs">
                     Q#{generatedItem.question_r}
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-violet-500/20 text-violet-300 font-bold text-[10px] border border-violet-500/30">
+                  <span className="px-2 py-0.5 rounded bg-white/[0.04] text-ink-2 font-bold text-[11px] border border-line-strong">
                     {generatedItem.subject}
                   </span>
                   <span className="text-[11px] text-emerald-400 font-bold">
@@ -453,7 +453,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                     type="button"
                     onClick={() => setActiveLang('hi')}
                     className={`px-2 py-0.5 font-bold rounded transition-all ${
-                      activeLang === 'hi' ? 'bg-amber-500 text-black' : 'text-slate-400 hover:text-white'
+                      activeLang === 'hi' ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-400 hover:text-white'
                     }`}
                   >
                     हिन्दी
@@ -501,7 +501,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                         : 'border-white/[0.06] bg-slate-900/60 text-slate-300'
                     }`}
                   >
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center font-extrabold text-[10px] shrink-0 ${
+                    <span className={`w-5 h-5 rounded-full flex items-center justify-center font-semibold text-[11px] shrink-0 ${
                       opt.isAns ? 'bg-emerald-500 text-black' : 'bg-white/[0.08] text-slate-400'
                     }`}>
                       {opt.label}
@@ -514,9 +514,9 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
               </div>
 
               {/* Solution Preview */}
-              <div className="p-3 rounded-lg bg-slate-900 border border-indigo-500/30 space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-indigo-400" />
+              <div className="p-3 rounded-lg bg-slate-900 border border-line-strong space-y-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-ink-3 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-ink-3" />
                   <span>Step-by-Step Solution ({activeLang.toUpperCase()} - Shuffle Safe):</span>
                 </span>
                 <LatexContent 
@@ -545,7 +545,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
                   type="button"
                   onClick={handleRefine}
                   disabled={!refinePrompt.trim() || isRefining}
-                  className="px-3 py-1 bg-violet-600 hover:bg-violet-500 text-white font-bold rounded-lg text-xs flex items-center gap-1 transition-all disabled:opacity-40 shrink-0"
+                  className="px-3 py-1 bg-accent hover:bg-accent-hover text-on-accent font-bold rounded-lg text-xs flex items-center gap-1 transition-all disabled:opacity-40 shrink-0"
                 >
                   {isRefining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
                   <span>Refine</span>
@@ -589,7 +589,7 @@ export const MocktestAddQuestionModal: React.FC<MocktestAddQuestionModalProps> =
               <button
                 type="button"
                 onClick={handleCommitQuestion}
-                className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold rounded-lg text-xs transition-all shadow-md shadow-emerald-600/20"
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-accent hover:bg-accent-hover text-on-accent font-semibold rounded-lg text-xs transition-all shadow-md "
               >
                 <Plus className="w-4 h-4" />
                 <span>Insert into Test Paper (Q#{generatedItem.question_r})</span>

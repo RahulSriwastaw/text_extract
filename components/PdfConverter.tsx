@@ -1098,7 +1098,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const selectedPendingCount = pages.filter(p => p.isSelected && p.status !== 'done').length;
 
   return (
-    <div className="min-h-screen bg-[#0F0F0F] font-sans selection:bg-[#FF6B2B]/20 selection:text-[#FF6B2B] relative">
+    <div className="min-h-screen bg-canvas font-sans selection:bg-accent/20 selection:text-accent relative">
       {/* Floating Top Upload Progress Bar */}
       <AnimatePresence>
         {uploadProgress && (
@@ -1131,7 +1131,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             ) : (
               <button 
                 onClick={() => setShowGeminiConnect(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-[#FF6B2B]/15 hover:bg-[#FF6B2B]/25 border border-[#FF6B2B]/30 text-[#FF884D] rounded-[6px] transition-colors shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-accent/15 hover:bg-accent/25 border border-accent/30 text-accent-light rounded-[6px] transition-colors shadow-sm"
                 title="Connect AI Bridge or Gemini account"
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -1144,7 +1144,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             {pages.length > 0 && (
               <button 
                 onClick={reset}
-                className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium text-[#555555] hover:text-[#F44336] hover:bg-[#3A1A1A] rounded-[6px] transition-colors border border-[#252525]"
+                className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium text-ink-3 hover:text-rose-400 hover:bg-[#3A1A1A] rounded-[6px] transition-colors border border-line"
                 title="Reset All"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -1165,13 +1165,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                   transition={{ duration: 0.5 }}
                   className="text-center mb-8 space-y-4"
                 >
-                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-[#FF884D] text-xs uppercase tracking-wider font-bold mb-2 shadow-inner">
-                        <Sparkles className="w-3.5 h-3.5 text-[#FF6B2B]" />
+                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-accent-light text-xs uppercase tracking-wider font-bold mb-2 shadow-inner">
+                        <Sparkles className="w-3.5 h-3.5 text-accent" />
                         <span>AI-Powered Layout & Math OCR</span>
                     </div>
 
-                    <h2 className="text-3xl sm:text-5xl md:text-6xl font-extrabold text-white tracking-tight leading-tight font-display">
-                        Convert <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#FF6B2B] via-[#FFA477] to-amber-300">PDF to Text</span> <br className="hidden md:block" /> with Human-Like Accuracy
+                    <h2 className="text-3xl sm:text-5xl md:text-6xl font-semibold text-white tracking-tight leading-tight font-display">
+                        Convert <span className="text-accent-light">PDF to Text</span> <br className="hidden md:block" /> with Human-Like Accuracy
                     </h2>
                     <p className="text-slate-400 text-sm sm:text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
                         The ultimate AI OCR engine designed for exam papers, formulas, tables, and bilingual documents. 
@@ -1188,7 +1188,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             <span>Real Word Math (OMML)</span>
                         </div>
                         <div className="flex items-center gap-2 bg-white/[0.03] px-3.5 py-1.5 rounded-full border border-white/[0.06] text-xs font-semibold text-slate-200">
-                            <Check className="w-3.5 h-3.5 text-purple-400" />
+                            <Check className="w-3.5 h-3.5 text-ink-3" />
                             <span>Full Table Extraction</span>
                         </div>
                     </div>
@@ -1197,7 +1197,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                 {/* User-Owned Gemini Engine Callout Banner */}
                 <div className="mb-8 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.08] backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] flex items-center justify-center text-white shrink-0 shadow-lg shadow-[#FF6B2B]/20">
+                    <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/25 flex items-center justify-center text-accent-light shrink-0 ">
                       <Sparkles className="w-5 h-5" />
                     </div>
                     <div className="text-left">
@@ -1206,7 +1206,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                           {userGeminiAuth.isAuthenticated ? 'Your Personal Gemini Engine is Active' : 'Use Your Own Gemini for Unlimited Text Extraction'}
                         </h4>
                         {userGeminiAuth.isAuthenticated && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+                          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
                             Connected ✓
                           </span>
                         )}
@@ -1233,7 +1233,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                       <button
                         type="button"
                         onClick={() => setShowGeminiConnect(true)}
-                        className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] hover:shadow-lg hover:shadow-[#FF6B2B]/25 text-xs font-bold text-white transition-all flex items-center justify-center gap-2"
+                        className="w-full sm:w-auto px-4 py-2 rounded-xl bg-accent hover:shadow-lg text-xs font-bold text-on-accent transition-all flex items-center justify-center gap-2"
                       >
                         <Zap className="w-3.5 h-3.5" />
                         <span>Connect Your Gemini (Free)</span>
@@ -1255,10 +1255,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         { step: "03", title: "Instant Word Export", desc: "Download refined, layout-preserved .docx documents with editable math and clean tables." }
                     ].map((item, i) => (
                         <div key={i} className="glass-panel glass-panel-hover p-6 rounded-2xl relative overflow-hidden group">
-                            <div className="text-4xl font-black text-white/[0.04] absolute -right-2 -bottom-2 group-hover:text-[#FF6B2B]/15 transition-colors font-mono">
+                            <div className="text-4xl font-bold text-white/[0.04] absolute -right-2 -bottom-2 group-hover:text-accent/15 transition-colors font-mono">
                                 {item.step}
                             </div>
-                            <div className="text-xs font-bold text-[#FF884D] font-mono mb-2 uppercase tracking-wider">Step {item.step}</div>
+                            <div className="text-xs font-bold text-accent-light font-mono mb-2 uppercase tracking-wider">Step {item.step}</div>
                             <h3 className="text-base font-bold text-white mb-2 relative z-10 font-display">{item.title}</h3>
                             <p className="text-slate-400 text-xs sm:text-sm leading-relaxed relative z-10">{item.desc}</p>
                         </div>
@@ -1280,22 +1280,22 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="fixed inset-0 bg-[#0F0F0F]/50 z-[100] flex items-center justify-center p-3"
+                      className="fixed inset-0 bg-canvas/50 z-[100] flex items-center justify-center p-3"
                       onClick={() => setSelectedError(null)}
                     >
                       <motion.div 
                         initial={{ scale: 0.9 }}
                         animate={{ scale: 1 }}
-                        className="bg-[#1A1A1A] p-3 rounded-[8px] max-w-lg w-full"
+                        className="bg-surface-2 p-3 rounded-[8px] max-w-lg w-full"
                         onClick={e => e.stopPropagation()}
                       >
-                        <h3 className="text-[16px] font-bold text-[#EFEFEF] mb-4">Error Details</h3>
-                        <pre className="bg-[#141414] p-3 rounded-[8px] text-[11px] text-[#EFEFEF] overflow-auto max-h-60 whitespace-pre-wrap">
+                        <h3 className="text-[16px] font-bold text-ink mb-4">Error Details</h3>
+                        <pre className="bg-[#141414] p-3 rounded-[8px] text-[11px] text-ink overflow-auto max-h-60 whitespace-pre-wrap">
                           {selectedError}
                         </pre>
                         <button 
                           onClick={() => setSelectedError(null)}
-                          className="mt-4 w-full bg-transparent border border-[#2A2A2A] text-[#EFEFEF] py-2 rounded-[6px] hover:bg-[#1A1A1A] transition-colors font-medium text-[13px]"
+                          className="mt-4 w-full bg-transparent border border-[#2A2A2A] text-ink py-2 rounded-[6px] hover:bg-surface-2 transition-colors font-medium text-[13px]"
                         >
                           Close
                         </button>
@@ -1305,7 +1305,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                 </AnimatePresence>
 
                 {/* Main Tool Header - Combined Progress & Actions */}
-                <div className="bg-[#11141F]/90 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl sticky top-16 z-40 overflow-hidden">
+                <div className="bg-surface/90 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl sticky top-16 z-40 overflow-hidden">
                    {/* Integrated Progress Bar (Top edge) */}
                    <AnimatePresence>
                         {appState === AppState.ANALYZING && (
@@ -1316,7 +1316,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                 className="w-full bg-white/[0.05] relative overflow-hidden"
                             >
                                 <motion.div 
-                                    className="h-full bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] shadow-[0_0_12px_#FF6B2B]"
+                                    className="h-full bg-accent shadow-[0_0_12px_#FF6B2B]"
                                     initial={{ width: 0 }}
                                     animate={{ width: `${Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%` }}
                                     transition={{ type: "spring", bounce: 0, duration: 0.5 }}
@@ -1331,27 +1331,27 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-1 min-w-0">
                                 {appState === AppState.ANALYZING ? (
                                     <div className="flex items-center gap-3 bg-white/[0.04] px-3 py-1.5 rounded-xl border border-white/[0.08] min-w-0 max-w-md">
-                                        <RefreshCw className="w-4 h-4 text-[#FF6B2B] animate-spin flex-shrink-0" />
+                                        <RefreshCw className="w-4 h-4 text-accent animate-spin flex-shrink-0" />
                                         <div className="flex flex-col min-w-0">
                                             <span className="text-xs font-bold text-white truncate">Processing: {fileName}</span>
                                             {bridgeProgressMsg && (
-                                              <span className="text-[10px] text-[#FF884D] font-medium truncate">
+                                              <span className="text-[11px] text-accent-light font-medium truncate">
                                                 {bridgeProgressMsg}
                                               </span>
                                             )}
                                             <div className="flex items-center gap-2 mt-0.5">
-                                                <span className="text-[10px] text-[#FF884D] font-bold tabular-nums">
+                                                <span className="text-[11px] text-accent-light font-bold tabular-nums">
                                                     {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
                                                 </span>
-                                                <span className="text-[10px] text-slate-400 font-medium">
+                                                <span className="text-[11px] text-slate-400 font-medium">
                                                     {pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages
                                                 </span>
                                                 {isUsingBridge ? (
-                                                  <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black rounded uppercase tracking-wider border border-blue-500/20">
+                                                  <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-[11px] font-bold rounded uppercase tracking-wider border border-blue-500/20">
                                                     Free Bridge
                                                   </span>
                                                 ) : totalKeys > 1 ? (
-                                                  <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[9px] font-black rounded uppercase tracking-wider border border-emerald-500/20">
+                                                  <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold rounded uppercase tracking-wider border border-emerald-500/20">
                                                     Turbo: {totalKeys} Keys
                                                   </span>
                                                 ) : null}
@@ -1359,13 +1359,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                                     <div className="flex items-center gap-2">
                                                         <button 
                                                             onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
-                                                            className="text-[10px] text-rose-400 font-bold hover:underline"
+                                                            className="text-[11px] text-rose-400 font-bold hover:underline"
                                                         >
                                                             {pages.filter(p => p.isSelected && p.status === 'error').length} errors
                                                         </button>
                                                         <button 
                                                             onClick={retryAllErrors}
-                                                            className="flex items-center gap-1 px-2 py-0.5 bg-rose-500/15 border border-rose-500/30 text-rose-400 rounded-lg hover:bg-rose-500/25 transition-all text-[10px] font-bold"
+                                                            className="flex items-center gap-1 px-2 py-0.5 bg-rose-500/15 border border-rose-500/30 text-rose-400 rounded-lg hover:bg-rose-500/25 transition-all text-[11px] font-bold"
                                                         >
                                                             <RefreshCw className="w-2.5 h-2.5" />
                                                             Retry All
@@ -1381,13 +1381,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                         <div className="flex gap-1">
                                             <button 
                                                 onClick={() => toggleAllSelection(true)}
-                                                className="text-[10px] font-bold text-white hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
+                                                className="text-[11px] font-bold text-white hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
                                             >
                                                 ALL
                                             </button>
                                             <button 
                                                 onClick={() => toggleAllSelection(false)}
-                                                className="text-[10px] font-bold text-slate-400 hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
+                                                className="text-[11px] font-bold text-slate-400 hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
                                             >
                                                 NONE
                                             </button>
@@ -1399,11 +1399,11 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                 <div className="flex items-center gap-2">
                                     <div className="flex items-center gap-1.5 bg-white/[0.03] px-2.5 py-1 rounded-xl border border-white/[0.05]">
                                         <Type className="w-3.5 h-3.5 text-blue-400" />
-                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[9px] text-slate-500 uppercase">Words</span></span>
+                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[11px] text-slate-500 uppercase">Words</span></span>
                                     </div>
                                     <div className="flex items-center gap-1.5 bg-white/[0.03] px-2.5 py-1 rounded-xl border border-white/[0.05]">
                                         <Zap className="w-3.5 h-3.5 text-amber-400" />
-                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{pointsConsumed} <span className="text-[9px] text-slate-500 uppercase">Points</span></span>
+                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{pointsConsumed} <span className="text-[11px] text-slate-500 uppercase">Points</span></span>
                                     </div>
                                 </div>
 
@@ -1412,7 +1412,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                     <input 
                                         type="text" 
                                         placeholder="Range (e.g. 1-5)" 
-                                        className="pl-7 pr-2.5 py-1 text-xs bg-white/[0.03] border border-white/[0.08] rounded-xl focus:outline-none focus:border-[#FF6B2B] focus:ring-1 focus:ring-[#FF6B2B]/50 transition-all w-28 text-white placeholder:text-slate-500"
+                                        className="pl-7 pr-2.5 py-1 text-xs bg-white/[0.03] border border-white/[0.08] rounded-xl focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/50 transition-all w-28 text-white placeholder:text-slate-500"
                                         value={rangeInput}
                                         onChange={(e) => setRangeInput(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
@@ -1431,10 +1431,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                             {copySuccess ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                                         </button>
                                         <div 
-                                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] border border-white/[0.08] hover:border-[#FF6B2B]/40 focus-within:border-[#FF6B2B] rounded-xl transition-all"
+                                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] border border-white/[0.08] hover:border-accent/40 focus-within:border-accent rounded-xl transition-all"
                                             title="Output file name. Rename here before download!"
                                         >
-                                            <FileText className="w-3.5 h-3.5 text-[#FF884D] shrink-0" />
+                                            <FileText className="w-3.5 h-3.5 text-accent-light shrink-0" />
                                             <input 
                                                 type="text"
                                                 value={fileName}
@@ -1442,11 +1442,11 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                                 placeholder="Rename file..."
                                                 className="w-24 sm:w-44 bg-transparent text-xs text-white placeholder:text-slate-500 font-medium focus:outline-none"
                                             />
-                                            <span className="text-[10px] text-slate-500 font-bold shrink-0">.docx</span>
+                                            <span className="text-[11px] text-slate-500 font-bold shrink-0">.docx</span>
                                         </div>
                                         <button 
                                             onClick={downloadDocx}
-                                            className="px-3.5 py-2 text-white bg-gradient-to-r from-blue-600/20 to-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm"
+                                            className="px-3.5 py-2 text-white bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm"
                                         >
                                             <FileDown className="w-4 h-4 text-blue-400" />
                                             DOCX
@@ -1477,7 +1477,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                             >
                                                 <Bot className="w-3.5 h-3.5" />
                                                 <span className="hidden sm:inline">Free Bridge</span>
-                                                <span className={`text-[9px] px-1 py-0.2 rounded font-bold ${bridgeStatus.connected ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                                                <span className={`text-[11px] px-1 py-px rounded font-bold ${bridgeStatus.connected ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
                                                     {bridgeStatus.connected ? '0 Tokens' : 'Connect'}
                                                 </span>
                                             </button>
@@ -1486,7 +1486,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                                 onClick={() => setAiEngine('api')}
                                                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
                                                     aiEngine === 'api'
-                                                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white shadow'
+                                                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                                                         : 'text-slate-400 hover:text-white'
                                                 }`}
                                                 title="Direct Gemini API (Uses API Keys)"
@@ -1499,7 +1499,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                         {/* AI Model Selector for Free Bridge */}
                                         {aiEngine === 'extension' && (
                                             <div className="flex items-center gap-1.5 px-2 py-1 bg-white/[0.03] border border-white/[0.08] rounded-xl">
-                                                <span className="text-[10px] text-slate-400 font-bold uppercase hidden md:inline">Model:</span>
+                                                <span className="text-[11px] text-slate-400 font-bold uppercase hidden md:inline">Model:</span>
                                                 <select
                                                     value={getStoredAiProvider()}
                                                     onChange={(e) => {
@@ -1507,19 +1507,19 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                                         setStoredAiProvider(newModel);
                                                         setBridgeStatus(prev => ({ ...prev, provider: newModel }));
                                                     }}
-                                                    className="bg-[#0B0D13] border border-emerald-500/30 text-emerald-300 text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-400 cursor-pointer"
+                                                    className="bg-canvas border border-emerald-500/30 text-emerald-300 text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-400 cursor-pointer"
                                                     title="Select AI Model (Gemini, DeepSeek, ChatGPT, Claude)"
                                                 >
-                                                    <option value="gemini" className="bg-[#121524] text-white">⚡ Gemini Web</option>
-                                                    <option value="deepseek" className="bg-[#121524] text-white">🧠 DeepSeek Web</option>
-                                                    <option value="chatgpt" className="bg-[#121524] text-white">💬 ChatGPT Web</option>
-                                                    <option value="claude" className="bg-[#121524] text-white">🎭 Claude Web</option>
+                                                    <option value="gemini" className="bg-surface text-white">⚡ Gemini Web</option>
+                                                    <option value="deepseek" className="bg-surface text-white">🧠 DeepSeek Web</option>
+                                                    <option value="chatgpt" className="bg-surface text-white">💬 ChatGPT Web</option>
+                                                    <option value="claude" className="bg-surface text-white">🎭 Claude Web</option>
                                                 </select>
                                             </div>
                                         )}
 
                                         <label className="px-3.5 py-2 text-slate-200 bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all">
-                                            <Plus className="w-4 h-4 text-[#FF6B2B]" />
+                                            <Plus className="w-4 h-4 text-accent" />
                                             ADD
                                             <input 
                                                 type="file" 
@@ -1535,7 +1535,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                             className={`px-4 py-2 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-md ${
                                                 selectedPendingCount === 0 && !hasErrorPages
                                                     ? 'bg-white/[0.05] text-slate-500 border border-white/[0.04] cursor-not-allowed'
-                                                    : 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white hover:shadow-lg hover:shadow-[#FF6B2B]/25 hover:scale-[1.02] active:scale-[0.98]'
+                                                    : 'bg-accent text-on-accent hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]'
                                             }`}
                                         >
                                             <Wand2 className="w-4 h-4" /> 
@@ -1558,7 +1558,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                                 Retry Failed
                                             </button>
                                         )}
-                                        <div className="px-4 py-2 bg-[#FF6B2B]/15 border border-[#FF6B2B]/30 text-[#FF884D] rounded-xl text-xs font-bold flex items-center justify-center gap-2">
+                                        <div className="px-4 py-2 bg-accent/15 border border-accent/30 text-accent-light rounded-xl text-xs font-bold flex items-center justify-center gap-2">
                                             <RefreshCw className="w-4 h-4 animate-spin" />
                                             PROCESSING...
                                         </div>
@@ -1571,9 +1571,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-2 pt-2.5 border-t border-white/[0.06]">
                             {/* Extraction Mode Toggle */}
                             <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-amber-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Mode</span>
+                                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">Mode</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-300 font-bold">{mcqMode ? 'MCQ Only' : 'Full Text'}</span>
+                                    <span className="text-[11px] text-slate-300 font-bold">{mcqMode ? 'MCQ Only' : 'Full Text'}</span>
                                     <button
                                         onClick={() => setMcqMode(!mcqMode)}
                                         className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${mcqMode ? 'bg-amber-500' : 'bg-white/[0.1]'}`}
@@ -1585,13 +1585,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             </div>
 
                             {/* Numbers Toggle */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-[#FF6B2B]/30 transition-all">
-                                <span className="text-[10px] font-bold text-[#FF884D] uppercase tracking-wider">Numbers</span>
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-accent/30 transition-all">
+                                <span className="text-[11px] font-bold text-accent-light uppercase tracking-wider">Numbers</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{showMcqNumbers ? 'On' : 'Off'}</span>
+                                    <span className="text-[11px] text-slate-400 font-medium">{showMcqNumbers ? 'On' : 'Off'}</span>
                                     <button
                                         onClick={() => setShowMcqNumbers(!showMcqNumbers)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showMcqNumbers ? 'bg-[#FF6B2B]' : 'bg-white/[0.1]'}`}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showMcqNumbers ? 'bg-accent' : 'bg-white/[0.1]'}`}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${showMcqNumbers ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
@@ -1599,13 +1599,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             </div>
 
                             {/* Auto Proofread */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-purple-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider">Proofread</span>
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
+                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Proofread</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
+                                    <span className="text-[11px] text-slate-400 font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
                                     <button
                                         onClick={() => setAutoProofread(!autoProofread)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoProofread ? 'bg-purple-500' : 'bg-white/[0.1]'}`}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoProofread ? 'bg-accent' : 'bg-white/[0.1]'}`}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${autoProofread ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
@@ -1614,39 +1614,39 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
                             {/* Numbering Style */}
                             <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-blue-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Pattern</span>
+                                <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider">Pattern</span>
                                 <select 
                                     value={numberingStyle}
                                     onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
-                                    className="text-[10px] font-bold bg-[#0B0D13] border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
+                                    className="text-[11px] font-bold bg-canvas border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
                                 >
-                                    <option value={NumberingStyle.Q_DOT} className="bg-[#11141F] text-slate-200">Q1.</option>
-                                    <option value={NumberingStyle.HASH} className="bg-[#11141F] text-slate-200">#1.</option>
-                                    <option value={NumberingStyle.QUESTION_DOT} className="bg-[#11141F] text-slate-200">Question 1.</option>
-                                    <option value={NumberingStyle.NUMBER_DOT} className="bg-[#11141F] text-slate-200">1.</option>
+                                    <option value={NumberingStyle.Q_DOT} className="bg-surface text-slate-200">Q1.</option>
+                                    <option value={NumberingStyle.HASH} className="bg-surface text-slate-200">#1.</option>
+                                    <option value={NumberingStyle.QUESTION_DOT} className="bg-surface text-slate-200">Question 1.</option>
+                                    <option value={NumberingStyle.NUMBER_DOT} className="bg-surface text-slate-200">1.</option>
                                 </select>
                             </div>
 
                             {/* Option Arrangement */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-indigo-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Options Layout</span>
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
+                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Options Layout</span>
                                 <select 
                                     value={optionArrangement}
                                     onChange={(e) => setOptionArrangement(e.target.value as OptionArrangement)}
-                                    className="text-[10px] font-bold bg-[#0B0D13] border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-indigo-500"
+                                    className="text-[11px] font-bold bg-canvas border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-accent"
                                     title="Choose option arrangement for layout and DOCX export"
                                 >
-                                    <option value={OptionArrangement.VERTICAL} className="bg-[#11141F] text-slate-200">Vertical (A-D)</option>
-                                    <option value={OptionArrangement.HORIZONTAL} className="bg-[#11141F] text-slate-200">Horizontal (Inline)</option>
-                                    <option value={OptionArrangement.GRID} className="bg-[#11141F] text-slate-200">2x2 Grid</option>
+                                    <option value={OptionArrangement.VERTICAL} className="bg-surface text-slate-200">Vertical (A-D)</option>
+                                    <option value={OptionArrangement.HORIZONTAL} className="bg-surface text-slate-200">Horizontal (Inline)</option>
+                                    <option value={OptionArrangement.GRID} className="bg-surface text-slate-200">2x2 Grid</option>
                                 </select>
                             </div>
 
                             {/* Bilingual */}
                             <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-emerald-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Bilingual</span>
+                                <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Bilingual</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{isBilingual ? 'On' : 'Off'}</span>
+                                    <span className="text-[11px] text-slate-400 font-medium">{isBilingual ? 'On' : 'Off'}</span>
                                     <button
                                         onClick={() => setIsBilingual(!isBilingual)}
                                         className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${isBilingual ? 'bg-emerald-500' : 'bg-white/[0.1]'}`}
@@ -1657,13 +1657,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             </div>
 
                             {/* Images */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-cyan-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">Images</span>
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
+                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Images</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
+                                    <span className="text-[11px] text-slate-400 font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
                                     <button
                                         onClick={() => setIncludeImages(!includeImages)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${includeImages ? 'bg-cyan-500' : 'bg-white/[0.1]'}`}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${includeImages ? 'bg-accent' : 'bg-white/[0.1]'}`}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${includeImages ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
@@ -1671,13 +1671,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             </div>
 
                             {/* Auto Save */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-teal-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-teal-400 uppercase tracking-wider">Auto Save</span>
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
+                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Auto Save</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{autoDownload ? 'On' : 'Off'}</span>
+                                    <span className="text-[11px] text-slate-400 font-medium">{autoDownload ? 'On' : 'Off'}</span>
                                     <button
                                         onClick={() => setAutoDownload(!autoDownload)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoDownload ? 'bg-teal-500' : 'bg-white/[0.1]'}`}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoDownload ? 'bg-accent' : 'bg-white/[0.1]'}`}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${autoDownload ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
@@ -1686,9 +1686,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
                             {/* Refine Mode */}
                             <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-rose-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-rose-400 uppercase tracking-wider">Refine</span>
+                                <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Refine</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{refineMode ? 'Active' : 'A-Z'}</span>
+                                    <span className="text-[11px] text-slate-400 font-medium">{refineMode ? 'Active' : 'A-Z'}</span>
                                     <button
                                         onClick={() => setRefineMode(!refineMode)}
                                         className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${refineMode ? 'bg-rose-500' : 'bg-white/[0.1]'}`}
@@ -1699,13 +1699,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             </div>
 
                             {/* Answers Toggle */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-violet-500/30 transition-all">
-                                <span className="text-[10px] font-bold text-violet-400 uppercase tracking-wider">Answers</span>
+                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
+                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Answers</span>
                                 <div className="flex items-center justify-between">
-                                    <span className="text-[10px] text-slate-400 font-medium">{showAnswers ? 'On' : 'Off'}</span>
+                                    <span className="text-[11px] text-slate-400 font-medium">{showAnswers ? 'On' : 'Off'}</span>
                                     <button
                                         onClick={() => setShowAnswers(!showAnswers)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showAnswers ? 'bg-violet-500' : 'bg-white/[0.1]'}`}
+                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showAnswers ? 'bg-accent' : 'bg-white/[0.1]'}`}
                                     >
                                         <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${showAnswers ? 'translate-x-4' : 'translate-x-0'}`} />
                                     </button>
@@ -1726,12 +1726,12 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                 onClick={() => setIsMcqSidebarOpen(true)}
                                 className="flex items-center gap-1.5 px-3 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/[0.06] transition-all"
                             >
-                                <ListChecks className="w-3.5 h-3.5 text-[#FF6B2B]" />
+                                <ListChecks className="w-3.5 h-3.5 text-accent" />
                                 <span>MCQ Bank</span>
                             </button>
                             <button
                                 onClick={handleOpenMocktestStudio}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 hover:text-white rounded-lg text-xs font-bold border border-emerald-500/30 transition-all shadow-sm"
+                                className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-300 hover:text-white rounded-lg text-xs font-bold border border-emerald-500/30 transition-all shadow-sm"
                                 title="Open in 18-Field MockTest CSV Studio"
                             >
                                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
@@ -1748,26 +1748,26 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.95 }}
-                            className="p-4 bg-[#3A1A1A] text-[#F44336] rounded-[12px] border border-[#F44336]/30 flex flex-col gap-3 mt-4 shadow-xl"
+                            className="p-4 bg-[#3A1A1A] text-rose-400 rounded-[12px] border border-rose-500/30 flex flex-col gap-3 mt-4 shadow-xl"
                         >
                             <div className="flex items-start gap-3">
-                                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-[#F44336]" />
+                                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-rose-400" />
                                 <div>
-                                    <h4 className="font-bold text-[14px] uppercase tracking-wider text-[#F44336]">Processing Interrupted</h4>
-                                    <p className="text-[13px] mt-1 text-[#EFEFEF] leading-relaxed">{errorMsg}</p>
+                                    <h4 className="font-bold text-[14px] uppercase tracking-wider text-rose-400">Processing Interrupted</h4>
+                                    <p className="text-[13px] mt-1 text-ink leading-relaxed">{errorMsg}</p>
                                 </div>
                             </div>
                             <div className="flex gap-2 pl-8">
                                 <button 
                                     onClick={retryAllErrors}
-                                    className="px-4 py-2 bg-[#F44336] text-white rounded-[8px] text-[12px] font-bold flex items-center gap-2 hover:bg-[#d32f2f] transition-all shadow-lg active:scale-95"
+                                    className="px-4 py-2 bg-rose-600 text-white rounded-[8px] text-[12px] font-bold flex items-center gap-2 hover:bg-rose-500 transition-all shadow-lg active:scale-95"
                                 >
                                     <RefreshCw className="w-3.5 h-3.5" />
                                     Retry All Failed Pages
                                 </button>
                                 <button 
                                     onClick={() => setErrorMsg(null)}
-                                    className="px-4 py-2 bg-transparent border border-[#F44336]/30 text-[#F44336] rounded-[8px] text-[12px] font-bold hover:bg-[#F44336]/10 transition-all active:scale-95"
+                                    className="px-4 py-2 bg-transparent border border-rose-500/30 text-rose-400 rounded-[8px] text-[12px] font-bold hover:bg-rose-600/10 transition-all active:scale-95"
                                 >
                                     Dismiss
                                 </button>
@@ -1780,20 +1780,20 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                     <motion.div 
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-[#1A1111] border border-[#F44336]/20 rounded-[12px]"
+                        className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-[#1A1111] border border-rose-500/20 rounded-[12px]"
                     >
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-[#3A1A1A] flex items-center justify-center">
-                                <AlertCircle className="w-4 h-4 text-[#F44336]" />
+                                <AlertCircle className="w-4 h-4 text-rose-400" />
                             </div>
                             <div>
-                                <h5 className="text-[12px] font-bold text-[#EFEFEF]">Some pages failed to process</h5>
-                                <p className="text-[11px] text-[#888888]">You can retry them all at once or individually.</p>
+                                <h5 className="text-[12px] font-bold text-ink">Some pages failed to process</h5>
+                                <p className="text-[11px] text-ink-3">You can retry them all at once or individually.</p>
                             </div>
                         </div>
                         <button 
                             onClick={retryAllErrors}
-                            className="w-full sm:w-auto px-4 py-2 bg-[#F44336] text-white rounded-[8px] text-[12px] font-bold flex items-center justify-center gap-2 hover:bg-[#d32f2f] transition-all shadow-md active:scale-95"
+                            className="w-full sm:w-auto px-4 py-2 bg-rose-600 text-white rounded-[8px] text-[12px] font-bold flex items-center justify-center gap-2 hover:bg-rose-500 transition-all shadow-md active:scale-95"
                         >
                             <RefreshCw className="w-3.5 h-3.5" />
                             Retry {pages.filter(p => p.status === 'error').length} Failed Pages
@@ -1848,13 +1848,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                     viewport={{ once: true }}
                     className="text-center mb-16"
                 >
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs font-bold text-[#FF884D] uppercase tracking-wider mb-4">
-                        <Layers className="w-3.5 h-3.5 text-[#FF6B2B]" />
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs font-bold text-accent-light uppercase tracking-wider mb-4">
+                        <Layers className="w-3.5 h-3.5 text-accent" />
                         <span>Why Choose Our AI Digitizer?</span>
                     </div>
-                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-extrabold text-white mb-4 tracking-tight font-display">
+                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold text-white mb-4 tracking-tight font-display">
                         Engineered specifically for <br className="hidden sm:block" />
-                        <span className="bg-clip-text text-transparent bg-gradient-to-r from-[#FF6B2B] via-[#FFA477] to-amber-300">
+                        <span className="text-accent-light">
                             Exams, Formulas & Structured Books
                         </span>
                     </h2>
@@ -1869,7 +1869,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         { 
                             title: "Human-Quality OCR", 
                             desc: "Deciphers blurry scans, handwritten notes, shaded backgrounds, and low-contrast test prints without mangling words.",
-                            icon: <Wand2 className="w-6 h-6 text-[#FF6B2B]" />,
+                            icon: <Wand2 className="w-6 h-6 text-accent" />,
                             color: "from-orange-500/20 to-transparent"
                         },
                         { 
@@ -1912,8 +1912,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-bold text-blue-400 mb-4">
                             <span>Universal Vision Intelligence</span>
                         </div>
-                        <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-white mb-4 font-display">
-                            Intelligent <span className="text-[#FF6B2B]">Document Layout</span> Understanding
+                        <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-white mb-4 font-display">
+                            Intelligent <span className="text-accent">Document Layout</span> Understanding
                         </h2>
                         <div className="space-y-4 text-slate-400 text-xs sm:text-sm leading-relaxed">
                             <p>
@@ -1924,16 +1924,16 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             </p>
                             <div className="pt-3 grid grid-cols-3 gap-3">
                                 <div className="glass-panel p-3.5 rounded-xl text-center">
-                                    <div className="text-xl font-extrabold text-white font-display">4x</div>
-                                    <div className="text-[10px] uppercase font-bold text-slate-500 mt-0.5">Faster Digitizing</div>
+                                    <div className="text-xl font-semibold text-white font-display">4x</div>
+                                    <div className="text-[11px] uppercase font-bold text-slate-500 mt-0.5">Faster Digitizing</div>
                                 </div>
                                 <div className="glass-panel p-3.5 rounded-xl text-center">
-                                    <div className="text-xl font-extrabold text-emerald-400 font-display">100%</div>
-                                    <div className="text-[10px] uppercase font-bold text-slate-500 mt-0.5">Math Accuracy</div>
+                                    <div className="text-xl font-semibold text-emerald-400 font-display">100%</div>
+                                    <div className="text-[11px] uppercase font-bold text-slate-500 mt-0.5">Math Accuracy</div>
                                 </div>
                                 <div className="glass-panel p-3.5 rounded-xl text-center">
-                                    <div className="text-xl font-extrabold text-[#FF884D] font-display">DOCX</div>
-                                    <div className="text-[10px] uppercase font-bold text-slate-500 mt-0.5">Word Native</div>
+                                    <div className="text-xl font-semibold text-accent-light font-display">DOCX</div>
+                                    <div className="text-[11px] uppercase font-bold text-slate-500 mt-0.5">Word Native</div>
                                 </div>
                             </div>
                         </div>
@@ -1944,7 +1944,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         initial={{ opacity: 0, x: 20 }}
                         whileInView={{ opacity: 1, x: 0 }}
                         viewport={{ once: true }}
-                        className="glass-panel p-5 rounded-2xl relative shadow-2xl border-white/[0.1] bg-[#0E111A]"
+                        className="glass-panel p-5 rounded-2xl relative shadow-2xl border-white/[0.1] bg-surface"
                     >
                         <div className="flex items-center justify-between pb-3 border-b border-white/[0.06] mb-3">
                             <div className="flex items-center gap-1.5">
@@ -1952,12 +1952,12 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
                                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
                             </div>
-                            <span className="text-[10px] font-mono text-slate-500">Live Digitizer Preview</span>
+                            <span className="text-[11px] font-mono text-slate-500">Live Digitizer Preview</span>
                         </div>
 
                         <div className="space-y-3 font-mono text-xs">
                             <div className="p-2.5 bg-white/[0.03] rounded-lg border border-white/[0.05]">
-                                <span className="text-[#FF884D] font-bold">Question 1.</span> <span className="text-slate-200">सबसे छोटी अभाज्य संख्या कौन-सी है?</span>
+                                <span className="text-accent-light font-bold">Question 1.</span> <span className="text-slate-200">सबसे छोटी अभाज्य संख्या कौन-सी है?</span>
                                 <div className="text-slate-400 text-[11px] mt-0.5">Which is the smallest prime number?</div>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -1976,7 +1976,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             </div>
                             <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-[11px] text-emerald-400 font-bold flex items-center justify-between">
                                 <span>Answer: C</span>
-                                <span className="text-[9px] bg-emerald-500/20 px-1.5 py-0.5 rounded text-emerald-300">Verified</span>
+                                <span className="text-[11px] bg-emerald-500/20 px-1.5 py-0.5 rounded text-emerald-300">Verified</span>
                             </div>
                         </div>
                     </motion.div>
@@ -1985,7 +1985,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                 {/* FAQ Section */}
                 <section className="mb-24">
                     <div className="text-center mb-12">
-                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-2 font-display">Frequently Asked Questions</h2>
+                        <h2 className="text-2xl sm:text-3xl font-semibold text-white mb-2 font-display">Frequently Asked Questions</h2>
                         <p className="text-slate-400 text-xs sm:text-sm">Everything you need to know about the conversion engine.</p>
                     </div>
 
@@ -2022,10 +2022,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                 whileInView={{ opacity: 1, y: 0 }}
                                 viewport={{ once: true }}
                                 transition={{ delay: i * 0.05 }}
-                                className="glass-panel p-5 sm:p-6 rounded-2xl hover:border-[#FF6B2B]/40 transition-all"
+                                className="glass-panel p-5 sm:p-6 rounded-2xl hover:border-accent/40 transition-all"
                             >
                                 <h4 className="text-sm sm:text-base font-bold text-white mb-2 font-display flex items-start gap-2">
-                                    <span className="text-[#FF6B2B]">•</span>
+                                    <span className="text-accent">•</span>
                                     <span>{faq.q}</span>
                                 </h4>
                                 <p className="text-slate-400 text-xs sm:text-sm leading-relaxed pl-3.5">{faq.a}</p>
@@ -2037,9 +2037,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                 {/* Footer */}
                 <footer className="pt-12 border-t border-white/[0.08] text-center space-y-4">
                     <div className="flex flex-wrap justify-center gap-6 text-slate-400 text-xs font-semibold">
-                        <a href="#" className="hover:text-[#FF884D] transition-colors">Privacy Policy</a>
-                        <a href="#" className="hover:text-[#FF884D] transition-colors">Terms of Service</a>
-                        <a href="#" className="hover:text-[#FF884D] transition-colors">Contact Support</a>
+                        <a href="#" className="hover:text-accent-light transition-colors">Privacy Policy</a>
+                        <a href="#" className="hover:text-accent-light transition-colors">Terms of Service</a>
+                        <a href="#" className="hover:text-accent-light transition-colors">Contact Support</a>
                     </div>
                     <p className="text-slate-500 text-xs font-medium">
                         © 2026 TextExtract AI Pro. Powered by Google Gemini Vision OCR & Word OMML Engine.

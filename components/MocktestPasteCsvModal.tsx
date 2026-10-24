@@ -153,27 +153,27 @@ export const MocktestPasteCsvModal: React.FC<MocktestPasteCsvModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px]">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
-          className="relative w-full max-w-5xl max-h-[94vh] bg-[#0E111A] border border-white/[0.1] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200"
+          className="relative w-full max-w-5xl max-h-[94vh] bg-surface border border-line-strong rounded-2xl shadow-2xl flex flex-col overflow-hidden text-ink"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 border-b border-white/[0.08] bg-white/[0.02]">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-teal-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-teal-500/20 shrink-0">
-                <ClipboardPaste className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-xl bg-accent/10 border border-accent/25 flex items-center justify-center shrink-0">
+                <ClipboardPaste className="w-5 h-5 text-accent-light" />
               </div>
               <div>
                 <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                   Paste CSV / Add Missing Questions
-                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-full">
+                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold rounded-full">
                     4 & 5 Options Ready
                   </span>
                   {selectedPage !== 'auto' && (
-                    <span className="px-2 py-0.5 bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px] font-bold rounded-full">
+                    <span className="px-2 py-0.5 bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[11px] font-bold rounded-full">
                       Target: Page {selectedPage}
                     </span>
                   )}
@@ -208,7 +208,7 @@ export const MocktestPasteCsvModal: React.FC<MocktestPasteCsvModalProps> = ({
                 <select
                   value={selectedPage}
                   onChange={(e) => setSelectedPage(e.target.value === 'auto' ? 'auto' : Number(e.target.value))}
-                  className="bg-black/50 border border-white/[0.12] text-teal-300 font-bold text-xs rounded-lg px-2.5 py-1 focus:outline-none focus:border-teal-500"
+                  className="bg-black/50 border border-white/[0.12] text-ink-2 font-bold text-xs rounded-lg px-2.5 py-1 focus:outline-none focus:border-accent"
                 >
                   <option value="auto">Auto (from CSV / All Pages)</option>
                   {Array.from({ length: Math.max(totalPages, targetPageNumber || 1) }, (_, i) => i + 1).map(p => (
@@ -249,7 +249,7 @@ export const MocktestPasteCsvModal: React.FC<MocktestPasteCsvModalProps> = ({
                   onClick={() => setMode('smart_fill')}
                   className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1 ${
                     mode === 'smart_fill'
-                      ? 'bg-emerald-500/10 border-emerald-500/50 shadow-md shadow-emerald-500/10'
+                      ? 'bg-emerald-500/10 border-emerald-500/50 shadow-md '
                       : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.04]'
                   }`}
                 >
@@ -270,7 +270,7 @@ export const MocktestPasteCsvModal: React.FC<MocktestPasteCsvModalProps> = ({
                   onClick={() => setMode('append')}
                   className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1 ${
                     mode === 'append'
-                      ? 'bg-blue-500/10 border-blue-500/50 shadow-md shadow-blue-500/10'
+                      ? 'bg-blue-500/10 border-blue-500/50 shadow-md '
                       : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.04]'
                   }`}
                 >
@@ -291,7 +291,7 @@ export const MocktestPasteCsvModal: React.FC<MocktestPasteCsvModalProps> = ({
                   onClick={() => setMode('replace')}
                   className={`p-3 rounded-xl border text-left transition-all flex flex-col gap-1 ${
                     mode === 'replace'
-                      ? 'bg-rose-500/10 border-rose-500/50 shadow-md shadow-rose-500/10'
+                      ? 'bg-rose-500/10 border-rose-500/50 shadow-md '
                       : 'bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.04]'
                   }`}
                 >
@@ -317,7 +317,7 @@ export const MocktestPasteCsvModal: React.FC<MocktestPasteCsvModalProps> = ({
                   className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] text-slate-200 rounded-lg text-xs font-medium transition-all"
                   title="Paste from clipboard"
                 >
-                  <ClipboardPaste className="w-3.5 h-3.5 text-teal-400" />
+                  <ClipboardPaste className="w-3.5 h-3.5 text-ink-3" />
                   <span>Paste Clipboard</span>
                 </button>
 
@@ -351,10 +351,10 @@ Rules:
                     navigator.clipboard.writeText(promptText);
                     alert('📋 AI Extraction Prompt copied to clipboard!\n\nPaste this into ChatGPT / Claude with your page image. Once it outputs the CSV, copy its CSV and click "Paste Clipboard" here!');
                   }}
-                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 rounded-lg text-xs font-medium transition-all"
+                  className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.04] hover:bg-white/[0.08] border border-line-strong text-ink-2 rounded-lg text-xs font-medium transition-all"
                   title="Copy AI Prompt to give to ChatGPT / Claude"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <Sparkles className="w-3.5 h-3.5 text-ink-3" />
                   <span>Copy AI Prompt</span>
                 </button>
 
@@ -405,7 +405,7 @@ Rules:
                   <button
                     type="button"
                     onClick={() => setIsCsvInputCollapsed(!isCsvInputCollapsed)}
-                    className="flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 font-semibold transition-colors"
+                    className="flex items-center gap-1 text-xs text-ink-3 hover:text-ink-2 font-semibold transition-colors"
                   >
                     {isCsvInputCollapsed ? <Eye className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
                     <span>{isCsvInputCollapsed ? 'Show Raw CSV' : 'Minimize Raw CSV'}</span>
@@ -432,19 +432,19 @@ Rules:
                   onChange={(e) => setCsvText(e.target.value)}
                   placeholder="Paste your CSV, TSV (Excel copy), or JSON question array here (Ctrl + V)...&#10;&#10;Supported formats: CSV rows, TSV, or JSON array [ { question_hi, option1_hi... } ]"
                   rows={parsedItems.length > 0 ? 4 : 6}
-                  className="w-full p-3.5 bg-black/60 border border-white/[0.08] focus:border-teal-500/60 rounded-xl text-xs font-mono text-slate-200 placeholder:text-slate-600 focus:outline-none custom-scrollbar resize-y"
+                  className="w-full p-3.5 bg-black/60 border border-white/[0.08] focus:border-accent rounded-xl text-xs font-mono text-slate-200 placeholder:text-slate-600 focus:outline-none custom-scrollbar resize-y"
                 />
               </div>
             ) : (
               <div 
                 onClick={() => setIsCsvInputCollapsed(false)}
-                className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs text-slate-400 hover:border-teal-500/40 cursor-pointer transition-all"
+                className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs text-slate-400 hover:border-white/20 cursor-pointer transition-all"
               >
                 <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-teal-400" />
+                  <FileText className="w-4 h-4 text-ink-3" />
                   <span>Raw CSV Input ({parsedItems.length} questions parsed)</span>
                 </div>
-                <span className="text-[11px] text-teal-400 font-medium">Click to expand & edit</span>
+                <span className="text-[11px] text-ink-3 font-medium">Click to expand & edit</span>
               </div>
             )}
 
@@ -455,7 +455,7 @@ Rules:
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-teal-400" />
+                      <Sparkles className="w-3.5 h-3.5 text-ink-3" />
                       Parsing Result:
                     </span>
                     {parsedItems.length > 0 ? (
@@ -484,7 +484,7 @@ Rules:
                           type="button"
                           onClick={() => setPreviewLang('both')}
                           className={`px-2.5 py-0.5 rounded font-bold transition-all ${
-                            previewLang === 'both' ? 'bg-teal-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                            previewLang === 'both' ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-400 hover:text-white'
                           }`}
                         >
                           Both (Hi + En)
@@ -493,7 +493,7 @@ Rules:
                           type="button"
                           onClick={() => setPreviewLang('hi')}
                           className={`px-2.5 py-0.5 rounded font-bold transition-all ${
-                            previewLang === 'hi' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
+                            previewLang === 'hi' ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-400 hover:text-white'
                           }`}
                         >
                           हिन्दी
@@ -576,7 +576,7 @@ Rules:
                           {/* MCQ Card Header */}
                           <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-white/[0.06]">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 font-extrabold text-xs border border-amber-500/30">
+                              <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 font-semibold text-xs border border-amber-500/30">
                                 #{item.question_r || idx + 1}
                               </span>
                               {item.subject && (
@@ -585,19 +585,19 @@ Rules:
                                 </span>
                               )}
                               {item.difficulty_level && (
-                                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] text-slate-400 text-[10px] font-semibold uppercase tracking-wider">
+                                <span className="px-2 py-0.5 rounded-md bg-white/[0.05] text-slate-400 text-[11px] font-semibold uppercase tracking-wider">
                                   {item.difficulty_level}
                                 </span>
                               )}
                               {hasOpt5 && (
-                                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold">
+                                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-bold">
                                   5 Options (A-E)
                                 </span>
                               )}
                             </div>
 
                             {/* Correct Answer Badge */}
-                            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-extrabold text-xs shadow-sm shadow-emerald-500/10">
+                            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-semibold text-xs shadow-sm ">
                               <Check className="w-3.5 h-3.5 text-emerald-400" />
                               <span>Correct Answer: Option {item.answer}</span>
                             </div>
@@ -608,7 +608,7 @@ Rules:
                             {previewLang !== 'en' && item.question_hi && (
                               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-white/[0.07] space-y-1">
                                 {previewLang === 'both' && item.question_en && (
-                                  <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block">
+                                  <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider block">
                                     हिन्दी प्रश्न:
                                   </span>
                                 )}
@@ -622,7 +622,7 @@ Rules:
                             {previewLang !== 'hi' && item.question_en && (
                               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-white/[0.07] space-y-1">
                                 {previewLang === 'both' && item.question_hi && (
-                                  <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider block">
+                                  <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider block">
                                     English Question:
                                   </span>
                                 )}
@@ -636,7 +636,7 @@ Rules:
 
                           {/* Options Grid */}
                           <div className="space-y-1">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block pl-0.5">
+                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block pl-0.5">
                               Options ({optionsList.length} Options):
                             </span>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -647,12 +647,12 @@ Rules:
                                     key={opt.key}
                                     className={`flex items-start gap-2.5 p-3 rounded-xl border text-xs transition-all ${
                                       isAns
-                                        ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500/40'
+                                        ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200 shadow-md ring-1 ring-emerald-500/40'
                                         : 'border-white/[0.08] bg-black/40 text-slate-300'
                                     }`}
                                   >
                                     <span
-                                      className={`w-6 h-6 rounded-full flex items-center justify-center font-extrabold text-xs shrink-0 ${
+                                      className={`w-6 h-6 rounded-full flex items-center justify-center font-semibold text-xs shrink-0 ${
                                         isAns
                                           ? 'bg-emerald-500 text-black shadow-sm'
                                           : 'bg-white/[0.08] text-slate-400'
@@ -675,7 +675,7 @@ Rules:
                                       )}
                                     </div>
                                     {isAns && (
-                                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold shrink-0">
+                                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold shrink-0">
                                         ✓ Correct
                                       </span>
                                     )}
@@ -687,25 +687,25 @@ Rules:
 
                           {/* Solution / Explanation Box */}
                           {(item.solution_hi || item.solution_en) && (
-                            <div className="p-3.5 rounded-xl bg-indigo-950/25 border border-indigo-500/30 space-y-1.5">
-                              <div className="flex items-center gap-1.5 text-indigo-300 font-bold text-xs">
-                                <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                            <div className="p-3.5 rounded-xl bg-white/[0.04] border border-line-strong space-y-1.5">
+                              <div className="flex items-center gap-1.5 text-ink-2 font-bold text-xs">
+                                <Sparkles className="w-3.5 h-3.5 text-ink-3" />
                                 <span>Step-by-Step Solution & Explanation:</span>
                               </div>
                               {previewLang !== 'en' && item.solution_hi && (
                                 <div className="space-y-0.5">
                                   {previewLang === 'both' && item.solution_en && (
-                                    <span className="text-[10px] font-bold text-amber-400/80 uppercase">Hindi Explanation:</span>
+                                    <span className="text-[11px] font-bold text-amber-400/80 uppercase">Hindi Explanation:</span>
                                   )}
-                                  <LatexRenderer content={item.solution_hi} className="text-indigo-100 text-xs leading-relaxed" />
+                                  <LatexRenderer content={item.solution_hi} className="text-ink text-xs leading-relaxed" />
                                 </div>
                               )}
                               {previewLang !== 'hi' && item.solution_en && (
-                                <div className="space-y-0.5 pt-1 border-t border-indigo-500/20">
+                                <div className="space-y-0.5 pt-1 border-t border-line-strong">
                                   {previewLang === 'both' && item.solution_hi && (
-                                    <span className="text-[10px] font-bold text-blue-400/80 uppercase">English Explanation:</span>
+                                    <span className="text-[11px] font-bold text-blue-400/80 uppercase">English Explanation:</span>
                                   )}
-                                  <LatexRenderer content={item.solution_en} className="text-indigo-200 text-xs leading-relaxed" />
+                                  <LatexRenderer content={item.solution_en} className="text-ink text-xs leading-relaxed" />
                                 </div>
                               )}
                             </div>
@@ -740,21 +740,21 @@ Rules:
 
                           return (
                             <tr key={item.id || idx} className="hover:bg-white/[0.02]">
-                              <td className="p-2.5 font-bold font-mono text-teal-400">
+                              <td className="p-2.5 font-bold font-mono text-ink-3">
                                 #{item.question_r || idx + 1}
                               </td>
                               <td className="p-2.5 max-w-xs truncate font-medium" title={cleanStem}>
                                 {cleanStem}
                               </td>
                               <td className="p-2.5">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                                   hasOpt5 ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.06] text-slate-300'
                                 }`}>
                                   {hasOpt5 ? '5 Opts' : '4 Opts'}
                                 </span>
                               </td>
                               <td className="p-2.5 text-center">
-                                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-extrabold text-xs">
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold text-xs">
                                   {item.answer}
                                 </span>
                               </td>
@@ -774,23 +774,23 @@ Rules:
                   /* ================= STATS SUMMARY ================= */
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                     <div className="p-3 rounded-xl bg-black/40 border border-white/[0.06]">
-                      <span className="text-[10px] text-slate-500 uppercase font-bold block mb-0.5">Action Mode</span>
-                      <span className="font-bold text-teal-300 capitalize text-sm">
+                      <span className="text-[11px] text-slate-500 uppercase font-bold block mb-0.5">Action Mode</span>
+                      <span className="font-bold text-ink-2 capitalize text-sm">
                         {mode === 'smart_fill' ? '🧩 Smart Gap Fill' : mode === 'append' ? '➕ Append Bottom' : '🔄 Replace All'}
                       </span>
                     </div>
                     <div className="p-3 rounded-xl bg-black/40 border border-white/[0.06]">
-                      <span className="text-[10px] text-slate-500 uppercase font-bold block mb-0.5">Gaps to Fill</span>
+                      <span className="text-[11px] text-slate-500 uppercase font-bold block mb-0.5">Gaps to Fill</span>
                       <span className="font-bold text-amber-300 text-sm">
                         {mode === 'smart_fill' ? Math.min(missingGaps.length, parsedItems.length) : 0} Gaps
                       </span>
                     </div>
                     <div className="p-3 rounded-xl bg-black/40 border border-white/[0.06]">
-                      <span className="text-[10px] text-slate-500 uppercase font-bold block mb-0.5">5-Option Qs</span>
+                      <span className="text-[11px] text-slate-500 uppercase font-bold block mb-0.5">5-Option Qs</span>
                       <span className="font-bold text-amber-400 text-sm">{fiveOptionCount} / {parsedItems.length}</span>
                     </div>
                     <div className="p-3 rounded-xl bg-black/40 border border-white/[0.06]">
-                      <span className="text-[10px] text-slate-500 uppercase font-bold block mb-0.5">Final Total</span>
+                      <span className="text-[11px] text-slate-500 uppercase font-bold block mb-0.5">Final Total</span>
                       <span className="font-bold text-emerald-400 text-sm">
                         {mode === 'replace' ? parsedItems.length : existingItems.length + (mode === 'smart_fill' ? Math.max(0, parsedItems.length - missingGaps.length) : parsedItems.length)} Questions
                       </span>
@@ -815,7 +815,7 @@ Rules:
               type="button"
               onClick={handleApply}
               disabled={parsedItems.length === 0}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-teal-500/20 transition-all disabled:opacity-40"
+              className="flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-on-accent rounded-xl text-xs font-bold shadow-lg transition-all disabled:opacity-40"
             >
               <Check className="w-4 h-4" />
               <span>

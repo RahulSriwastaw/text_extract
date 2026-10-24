@@ -36,7 +36,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-[#0B0D13]/70 backdrop-blur-md z-50"
+            className="fixed inset-0 bg-[rgb(4_5_8/0.6)] backdrop-blur-[2px] z-50"
           />
           
           {/* Sidebar */}
@@ -45,7 +45,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-            className="fixed right-0 top-0 h-full w-full max-w-md bg-[#11141F] border-l border-white/[0.08] shadow-2xl z-50 flex flex-col"
+            className="fixed right-0 top-0 h-full w-full max-w-md bg-surface border-l border-line-strong shadow-2xl z-50 flex flex-col"
           >
             {/* Header */}
             <div className="p-4 border-b border-white/[0.08] flex items-center justify-between bg-white/[0.02]">
@@ -55,7 +55,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
                 </div>
                 <div>
                   <h2 className="text-sm font-bold text-white font-display">Conversion History</h2>
-                  <p className="text-[10px] text-slate-400">{history.length} saved sessions</p>
+                  <p className="text-[11px] text-slate-400">{history.length} saved sessions</p>
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
@@ -91,7 +91,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
                     placeholder="Search documents..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-[#08090D] text-xs text-white pl-8 pr-3 py-1.5 rounded-xl border border-white/[0.08] focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-500"
+                    className="w-full bg-canvas text-xs text-white pl-8 pr-3 py-1.5 rounded-xl border border-white/[0.08] focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-500"
                   />
                 </div>
               </div>
@@ -116,12 +116,12 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
                     <motion.div
                       layout
                       key={item.id}
-                      className="group p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-[#FF6B2B]/40 hover:shadow-lg transition-all cursor-pointer relative"
+                      className="group p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-accent/40 hover:shadow-lg transition-all cursor-pointer relative"
                       onClick={() => onSelectItem(item)}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3 overflow-hidden">
-                          <div className="w-9 h-9 rounded-xl bg-white/[0.04] border border-white/[0.08] flex-shrink-0 flex items-center justify-center text-slate-400 group-hover:text-white group-hover:bg-[#FF6B2B]/15 group-hover:border-[#FF6B2B]/30 transition-all">
+                          <div className="w-9 h-9 rounded-xl bg-white/[0.04] border border-white/[0.08] flex-shrink-0 flex items-center justify-center text-slate-400 group-hover:text-white group-hover:bg-accent/15 group-hover:border-accent/30 transition-all">
                             <FileText className="w-4 h-4" />
                           </div>
                           <div className="overflow-hidden">
@@ -146,7 +146,7 @@ const HistorySidebar: React.FC<HistorySidebarProps> = ({
                         </button>
                       </div>
 
-                      <div className="mt-2.5 flex items-center justify-between text-[10px] text-slate-500 border-t border-white/[0.04] pt-2">
+                      <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-500 border-t border-white/[0.04] pt-2">
                         <span>{new Date(item.timestamp || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                         <span className="font-mono text-slate-400">{elements.length} elements</span>
                       </div>

@@ -190,7 +190,7 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
           type="button"
           onClick={() => handleActionClick('explain')}
           disabled={isLoading}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gradient-to-r from-[#FF6B2B]/20 to-[#FF884D]/20 hover:from-[#FF6B2B]/30 hover:to-[#FF884D]/30 border border-[#FF6B2B]/40 text-[#FF884D] hover:text-white rounded-lg text-[11px] font-bold transition-all disabled:opacity-50"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/10 hover:bg-accent/15 border border-accent/40 text-accent-light hover:text-white rounded-lg text-[11px] font-bold transition-all disabled:opacity-50"
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>Gemini से Explain</span>
@@ -222,7 +222,7 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
           type="button"
           onClick={() => handleActionClick('teach')}
           disabled={isLoading}
-          className="flex items-center gap-1 px-2 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 text-purple-300 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-50"
+          className="flex items-center gap-1 px-2 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-line-strong text-ink-2 rounded-lg text-[11px] font-semibold transition-all disabled:opacity-50"
         >
           <GraduationCap className="w-3.5 h-3.5" />
           <span>Teach Topic</span>
@@ -232,7 +232,7 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
           <button
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="ml-auto flex items-center gap-1 text-[10px] text-slate-400 hover:text-white px-1.5 py-1 rounded bg-white/[0.04] transition-all"
+            className="ml-auto flex items-center gap-1 text-[11px] text-slate-400 hover:text-white px-1.5 py-1 rounded bg-white/[0.04] transition-all"
           >
             {isExpanded ? (
               <>
@@ -241,7 +241,7 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
               </>
             ) : (
               <>
-                <span className="text-[#FF884D] font-bold">Saved locally ({conversation?.messages?.length || 1})</span>
+                <span className="text-accent-light font-bold">Saved locally ({conversation?.messages?.length || 1})</span>
                 <ChevronDown className="w-3 h-3" />
               </>
             )}
@@ -253,7 +253,7 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
       {isExpanded && (
         <div className="mt-3 p-3.5 bg-[#0D101D] border border-white/[0.1] rounded-xl space-y-3">
           {/* Top Bar inside panel: Language pills & Local storage badge */}
-          <div className="flex items-center justify-between border-b border-white/[0.06] pb-2 text-[10px]">
+          <div className="flex items-center justify-between border-b border-white/[0.06] pb-2 text-[11px]">
             <div className="flex items-center gap-1">
               <Languages className="w-3 h-3 text-slate-400" />
               <span className="text-slate-400 mr-1">Language:</span>
@@ -264,7 +264,7 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
                   onClick={() => handleLanguageChange(lang)}
                   className={`px-1.5 py-0.5 rounded transition-all font-medium ${
                     preferredLang === lang
-                      ? 'bg-[#FF6B2B] text-white font-bold'
+                      ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                       : 'bg-white/[0.04] text-slate-400 hover:text-slate-200'
                   }`}
                 >
@@ -299,11 +299,11 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
                 className={`p-3 rounded-xl ${
                   msg.role === 'user'
                     ? 'bg-white/[0.06] ml-6 border border-white/[0.08] text-slate-200'
-                    : 'bg-white/[0.02] mr-2 border border-[#FF6B2B]/20 text-slate-100'
+                    : 'bg-white/[0.02] mr-2 border border-accent/20 text-slate-100'
                 }`}
               >
                 {msg.role === 'assistant' && (
-                  <div className="flex items-center gap-1.5 mb-1.5 text-[10px] font-bold text-[#FF884D]">
+                  <div className="flex items-center gap-1.5 mb-1.5 text-[11px] font-bold text-accent-light">
                     <Sparkles className="w-3 h-3" />
                     <span>Gemini AI Mentor</span>
                   </div>
@@ -321,8 +321,8 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
 
             {/* Currently Streaming Message */}
             {isLoading && streamingContent && (
-              <div className="p-3 rounded-xl bg-white/[0.02] mr-2 border border-[#FF6B2B]/30 text-slate-100 animate-pulse">
-                <div className="flex items-center gap-1.5 mb-1.5 text-[10px] font-bold text-[#FF884D]">
+              <div className="p-3 rounded-xl bg-white/[0.02] mr-2 border border-accent/30 text-slate-100 animate-pulse">
+                <div className="flex items-center gap-1.5 mb-1.5 text-[11px] font-bold text-accent-light">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   <span>Gemini is generating explanation...</span>
                 </div>
@@ -340,7 +340,7 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
             {/* Loading placeholder when stream hasn't started yet */}
             {isLoading && !streamingContent && (
               <div className="flex items-center gap-2 p-3 bg-white/[0.02] rounded-xl text-slate-400 text-xs">
-                <Loader2 className="w-4 h-4 animate-spin text-[#FF6B2B]" />
+                <Loader2 className="w-4 h-4 animate-spin text-accent" />
                 <span>
                   {activeAction === 'explain' && 'Generating detailed explanation...'}
                   {activeAction === 'why_wrong' && 'Analyzing student answer mistake...'}
@@ -379,12 +379,12 @@ export const GeminiExplanationPanel: React.FC<GeminiExplanationPanelProps> = ({
               onChange={(e) => setFollowUpText(e.target.value)}
               placeholder="Ask Gemini a follow-up question (e.g. Is topic ko yaad rakhne ka trick kya hai?)..."
               disabled={isLoading}
-              className="flex-1 px-3 py-2 bg-white/[0.04] border border-white/[0.1] focus:border-[#FF6B2B] rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all"
+              className="flex-1 px-3 py-2 bg-white/[0.04] border border-white/[0.1] focus:border-accent rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all"
             />
             <button
               type="submit"
               disabled={isLoading || !followUpText.trim()}
-              className="p-2 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white rounded-xl hover:shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              className="p-2 bg-accent text-on-accent rounded-xl hover:shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
               title="Send query"
             >
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

@@ -69,7 +69,7 @@ const features = [
     desc: 'Translates Hindi & English question papers with separate lines for questions and single-line options.',
   },
   {
-    icon: <Sparkles className="w-5 h-5 text-purple-400" />,
+    icon: <Sparkles className="w-5 h-5 text-ink-3" />,
     title: 'Smart Refine Mode',
     desc: 'Automatically removes unwanted previous year exam tags, shift dates, and watermarks to keep content pure.',
   },
@@ -87,10 +87,10 @@ const features = [
 
 const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools }) => {
   return (
-    <div className="min-h-screen bg-[#0B0D13] text-slate-100 overflow-hidden relative selection:bg-[#FF6B2B]/30">
+    <div className="min-h-screen bg-canvas text-slate-100 overflow-hidden relative selection:bg-accent/30">
       {/* Dynamic Ambient Background Glows */}
       <motion.div
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-[520px] bg-gradient-to-b from-[#FF6B2B]/15 via-purple-600/10 to-transparent blur-[140px] pointer-events-none rounded-full"
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-[520px] bg-accent/10 blur-[140px] pointer-events-none rounded-full"
         animate={{ opacity: [0.6, 1, 0.6] }}
         transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
       />
@@ -146,13 +146,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools }) => {
           {/* Badge */}
           <motion.div
             variants={itemVariants}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-[#FF884D] text-xs uppercase tracking-wider font-bold mb-8 shadow-inner"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.1] text-accent-light text-xs uppercase tracking-wider font-bold mb-8 shadow-inner"
           >
             <motion.span
               animate={{ rotate: [0, 15, 0, -15, 0] }}
               transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
             >
-              <Sparkles className="w-3.5 h-3.5 text-[#FF6B2B]" />
+              <Sparkles className="w-3.5 h-3.5 text-accent" />
             </motion.span>
             <span>Universal AI Document & Exam Digitizer</span>
           </motion.div>
@@ -160,11 +160,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools }) => {
           {/* Heading */}
           <motion.h1
             variants={itemVariants}
-            className="text-4xl sm:text-6xl lg:text-7xl font-extrabold tracking-tight mb-6 font-display text-white leading-tight"
+            className="text-4xl sm:text-6xl lg:text-7xl font-semibold tracking-tight mb-6 font-display text-white leading-tight"
           >
             Convert PDFs & Exams to{' '}
             <motion.span
-              className="bg-clip-text text-transparent bg-[length:200%_auto] bg-gradient-to-r from-[#FF6B2B] via-[#FFA477] to-amber-300"
+              className="text-accent-light"
               animate={{ backgroundPosition: ['0% center', '200% center'] }}
               transition={{ duration: 6, repeat: Infinity, ease: 'linear' }}
             >
@@ -184,8 +184,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools }) => {
           <motion.div variants={itemVariants} className="flex items-center justify-center gap-6 sm:gap-10 mb-10">
             {STATS.map((s, i) => (
               <div key={i} className="text-center">
-                <div className="text-2xl sm:text-3xl font-black text-white font-display">{s.value}</div>
-                <div className="text-[10px] sm:text-xs text-slate-500 uppercase tracking-wider font-semibold">{s.label}</div>
+                <div className="text-2xl sm:text-3xl font-bold text-white font-display">{s.value}</div>
+                <div className="text-[11px] sm:text-xs text-slate-500 uppercase tracking-wider font-semibold">{s.label}</div>
               </div>
             ))}
           </motion.div>
@@ -197,7 +197,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools }) => {
               onClick={onExploreTools}
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
-              className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-2xl bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white font-bold text-sm sm:text-base shadow-xl shadow-[#FF6B2B]/30 hover:shadow-2xl hover:shadow-[#FF6B2B]/40 transition-shadow"
+              className="inline-flex items-center gap-2.5 px-7 py-3.5 rounded-2xl bg-accent text-on-accent font-bold text-sm sm:text-base shadow-xl hover:shadow-2xl transition-shadow"
             >
               <LayoutGrid className="w-5 h-5" />
               Explore All Tools

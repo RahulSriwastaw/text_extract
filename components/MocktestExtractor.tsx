@@ -4,7 +4,7 @@ import {
   AlertCircle, AlertTriangle, Loader2, Sparkles, Download, Copy, Check, Plus, 
   BookOpen, CheckSquare, Square, StopCircle, Zap, Settings, RefreshCw, Key,
   ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, X, Edit3, ChevronDown, ChevronUp, Eye, Camera, SlidersHorizontal, FileText, MessageSquare, Clipboard, ClipboardPaste, Save, History,
-  Image as ImageIcon, Scissors, Crosshair, Cloud, HardDrive, CheckCheck, Hand, ExternalLink
+  Image as ImageIcon, Scissors, Crosshair, Cloud, HardDrive, CheckCheck, Hand, ExternalLink, MoreHorizontal
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -440,6 +440,9 @@ Rules:
   const [showPaperSettings, setShowPaperSettings] = useState(false);
   const [showAiToolsMenu, setShowAiToolsMenu] = useState(false);
   const aiToolsRef = useRef<HTMLDivElement>(null);
+  // Which dropdown is open: 'add' | 'export' | 'runs' | 'more' | `q:${itemId}` | `latex:${itemId}`
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const toggleMenu = (id: string) => setOpenMenu(prev => (prev === id ? null : id));
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvImportInputRef = useRef<HTMLInputElement>(null);
@@ -451,9 +454,22 @@ Rules:
       if (aiToolsRef.current && !aiToolsRef.current.contains(e.target as Node)) {
         setShowAiToolsMenu(false);
       }
+      if (!(e.target as Element | null)?.closest?.('[data-menu-root]')) {
+        setOpenMenu(null);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenMenu(null);
+        setShowAiToolsMenu(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
   }, []);
 
   useEffect(() => {
@@ -2283,65 +2299,26 @@ Rules:
   const solvedCount = extractedMcqs.filter(i => (i.solution_hi && i.solution_hi.length > 10) || (i.solution_en && i.solution_en.length > 10)).length;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Main Header & Studio Command Bar */}
-      <div className="relative rounded-2xl bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-white/[0.08] p-4 sm:p-5 backdrop-blur-xl shadow-2xl space-y-4">
-        {/* Row 1: Title, Subtitle, Stats & Top Actions */}
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/25 text-amber-400 text-[11px] font-bold tracking-wide uppercase">
-              <FileSpreadsheet className="w-3 h-3 text-amber-400" />
-              <span>MockTest Studio • 34-Column Engine</span>
-            </div>
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight font-display">
-              Bilingual MockTest MCQ Extractor
-            </h1>
-            <p className="text-xs text-slate-400 max-w-xl">
-              Strict 34-column exam standard with bilingual Hindi/English extraction, pedagogical solutions, and LaTeX KaTeX support.
+    <div className="app-container py-6 space-y-5">
+      {/* Page header: title + document actions */}
+      <section className="card">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 p-4 sm:p-5">
+          <div className="min-w-0">
+            <p className="page-eyebrow mb-1">MCQ extractor</p>
+            <h1 className="page-title">Bilingual MockTest MCQ extractor</h1>
+            <p className="page-subtitle mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span><strong className="text-ink-2 font-semibold">{pages.length}</strong> pages</span>
+              <span aria-hidden="true">·</span>
+              <span><strong className="text-ink-2 font-semibold">{extractedMcqs.length}</strong> MCQs</span>
+              <span aria-hidden="true">·</span>
+              <span><strong className="text-ink-2 font-semibold">{solvedCount}/{extractedMcqs.length}</strong> solved</span>
             </p>
           </div>
 
-          {/* Quick Stats & Primary Actions */}
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            {/* Compact Stats Pill */}
-            <div className="flex items-center bg-black/50 border border-white/[0.08] rounded-xl px-3 py-1.5 gap-3 text-xs">
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Pages:</span>
-                <span className="font-bold text-blue-400">{pages.length}</span>
-              </div>
-              <div className="h-3 w-px bg-white/[0.1]" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">MCQs:</span>
-                <span className="font-bold text-amber-400">{extractedMcqs.length}</span>
-              </div>
-              <div className="h-3 w-px bg-white/[0.1]" />
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500 font-medium">Solved:</span>
-                <span className="font-bold text-emerald-400">{solvedCount}/{extractedMcqs.length}</span>
-              </div>
-            </div>
-
-            {/* Paper Settings Toggle Button */}
-            <button
-              type="button"
-              onClick={() => setShowPaperSettings(!showPaperSettings)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
-                showPaperSettings 
-                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' 
-                  : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.1] text-slate-300 hover:text-white'
-              }`}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>Paper Settings</span>
-              {showPaperSettings ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </button>
-
-            {/* Output File Name / Rename Input Box */}
-            <div 
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-black/40 border border-white/[0.1] hover:border-amber-500/50 focus-within:border-amber-500 rounded-xl transition-all shadow-sm"
-              title="Output file name. Rename here before download!"
-            >
-              <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <div className="toolbar">
+            {/* Output file name */}
+            <label className="input-group w-full sm:w-60" title="Output file name. Rename here before download!">
+              <FileText className="w-4 h-4 text-ink-3 shrink-0" />
               <input
                 type="text"
                 value={outputFileName || setName}
@@ -2351,41 +2328,80 @@ Rules:
                   setSetName(val);
                   setExtractedMcqs(prev => prev.map(i => ({ ...i, set_name: val })));
                 }}
-                placeholder="File name (Rename)..."
-                className="w-28 sm:w-48 bg-transparent text-xs text-white placeholder:text-slate-500 font-medium focus:outline-none"
+                placeholder="File name"
+                aria-label="Output file name"
               />
-              <span className="text-[10px] text-slate-500 font-bold shrink-0">.csv</span>
-            </div>
+              <span className="text-xs text-ink-3 font-medium shrink-0">.csv</span>
+            </label>
 
-            {/* Export 34-Col CSV Button Group */}
-            <div className="flex items-center p-0.5 bg-black/40 border border-white/[0.1] rounded-xl shadow-sm">
+            {/* Add menu */}
+            <div className="relative" data-menu-root>
               <button
                 type="button"
-                onClick={handleDownloadCsv}
-                disabled={extractedMcqs.length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-lg text-xs transition-all disabled:opacity-40 shadow"
-                title="Download standard 34-column CSV for MockTest portal"
+                onClick={() => toggleMenu('add')}
+                aria-haspopup="menu"
+                aria-expanded={openMenu === 'add'}
+                className="btn btn-secondary"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export CSV</span>
+                <Plus />
+                <span>Add</span>
+                <ChevronDown className={`transition-transform ${openMenu === 'add' ? 'rotate-180' : ''}`} />
               </button>
-              <button
-                type="button"
-                onClick={handleCopyCsv}
-                disabled={extractedMcqs.length === 0}
-                title="Copy CSV data to clipboard"
-                className="p-1.5 hover:bg-white/[0.1] text-slate-400 hover:text-white rounded-lg text-xs transition-all disabled:opacity-40"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => csvImportInputRef.current?.click()}
-                title="Import existing CSV to edit"
-                className="p-1.5 hover:bg-white/[0.1] text-slate-400 hover:text-white rounded-lg text-xs transition-all"
-              >
-                <Upload className="w-3.5 h-3.5" />
-              </button>
+              {openMenu === 'add' && (
+                <div className="menu right-0 mt-1.5 w-72 animate-fadeIn" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setOpenMenu(null);
+                      setAddQuestionTargetPage(pages.find(p => p.status === 'ready')?.pageNumber || 1);
+                      setShowAddQuestionModal(true);
+                    }}
+                  >
+                    <Sparkles />
+                    <span>Add question with AI<span className="menu-item-desc">Type, give an AI instruction or paste a screenshot (Ctrl+V)</span></span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setOpenMenu(null);
+                      setPasteCsvTargetPage(undefined);
+                      setShowPasteCsvModal(true);
+                    }}
+                  >
+                    <ClipboardPaste />
+                    <span>Paste CSV / missing questions<span className="menu-item-desc">Fill gaps or assign pasted rows to pages</span></span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setOpenMenu(null);
+                      handleAddQuestion();
+                    }}
+                  >
+                    <Plus />
+                    <span>Blank MCQ row<span className="menu-item-desc">Create an empty question and fill it by hand</span></span>
+                  </button>
+                  <div className="menu-divider" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setOpenMenu(null);
+                      csvImportInputRef.current?.click();
+                    }}
+                  >
+                    <Upload />
+                    <span>Import CSV / JSON to edit</span>
+                  </button>
+                </div>
+              )}
               <input
                 ref={csvImportInputRef}
                 type="file"
@@ -2395,438 +2411,355 @@ Rules:
               />
             </div>
 
-            {/* DOCX Download Button Group */}
-            <div className="flex items-center gap-0">
-              <select
-                value={docxLang}
-                onChange={e => setDocxLang(e.target.value as 'hi' | 'en' | 'both')}
-                className="h-[34px] px-2 text-[10px] font-bold bg-indigo-800/80 text-white border border-indigo-500/40 rounded-l-xl focus:outline-none cursor-pointer"
-                title="Language for DOCX export"
-              >
-                <option value="both">Hi+En</option>
-                <option value="hi">Hindi</option>
-                <option value="en">English</option>
-              </select>
-              <button
-                type="button"
-                onClick={handleDownloadDocx}
-                disabled={isGeneratingDocx || extractedMcqs.length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-extrabold rounded-r-xl text-xs transition-all disabled:opacity-40 shadow"
-                title="Download Word DOCX with editable LaTeX math equations"
-              >
-                {isGeneratingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                <span>{isGeneratingDocx ? 'Building…' : 'Export DOCX'}</span>
-              </button>
-            </div>
-
-            {/* Quick Add Question via AI / Paste Screenshot */}
-            <button
-              type="button"
-              onClick={() => {
-                setAddQuestionTargetPage(pages.find(p => p.status === 'ready')?.pageNumber || 1);
-                setShowAddQuestionModal(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition-all shadow-md shadow-violet-600/20 shrink-0"
-              title="Add new extra question via text, AI instruction, or paste screenshot (Ctrl+V)"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Question (Paste / AI)</span>
-            </button>
-
-            {/* Paste CSV / Missing Questions Button */}
-            <button
-              type="button"
-              onClick={() => {
-                setPasteCsvTargetPage(undefined);
-                setShowPasteCsvModal(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-extrabold rounded-xl text-xs transition-all shadow-md shadow-teal-600/20 shrink-0"
-              title="Paste CSV or missing questions extracted separately to fill gaps or assign to pages"
-            >
-              <ClipboardPaste className="w-3.5 h-3.5" />
-              <span>Paste CSV / Missing</span>
-            </button>
-
-            {/* Save Set to Account History Button */}
+            {/* Save set to account history */}
             <button
               type="button"
               onClick={handleSaveSetToHistory}
               disabled={extractedMcqs.length === 0}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all shadow-md shrink-0 disabled:opacity-40 ${
-                isSavedToHistory
-                  ? 'bg-emerald-500 text-black shadow-emerald-500/30'
-                  : 'bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 shadow-emerald-600/10'
-              }`}
+              className={`btn btn-secondary ${isSavedToHistory ? 'text-emerald-300 border-emerald-500/40' : ''}`}
               title="Save this question set to your user account history"
             >
-              {isSavedToHistory ? <Check className="w-3.5 h-3.5 text-black" /> : <Save className="w-3.5 h-3.5" />}
-              <span>{isSavedToHistory ? 'Saved to Account!' : 'Save Set to History'}</span>
+              {isSavedToHistory ? <Check /> : <Save />}
+              <span>{isSavedToHistory ? 'Saved' : 'Save'}</span>
             </button>
-          </div>
-        </div>
 
-        {/* Row 2: Streamlined AI Engine, Provider & Concurrency Strip */}
-        <div className="p-2.5 rounded-xl bg-black/40 border border-white/[0.06] flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-          {/* Left: Engine Switcher */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Engine:</span>
-            <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
-              <button
-                type="button"
-                onClick={() => setAiEngine('bridge')}
-                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                  aiEngine === 'bridge'
-                    ? 'bg-emerald-500 text-black shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Zap className="w-3 h-3" />
-                <span>Extension Bridge</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAiEngine('api')}
-                className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                  aiEngine === 'api'
-                    ? 'bg-blue-500 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Key className="w-3 h-3" />
-                <span>Direct Gemini API</span>
-              </button>
-            </div>
-
-            <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
-
-            {/* Mode Switcher: Exact PDF vs Reference Mode (New Questions) */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Mode:</span>
-              <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
+            {/* Export: primary action of the page */}
+            <div className="relative" data-menu-root>
+              <div className="btn-group">
                 <button
                   type="button"
-                  onClick={() => setExtractionMode('exact')}
-                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                    extractionMode === 'exact'
-                      ? 'bg-amber-500 text-black shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                  title="Extract exact questions directly as written in the PDF"
+                  onClick={handleDownloadCsv}
+                  disabled={extractedMcqs.length === 0}
+                  className="btn btn-primary"
+                  title="Download standard 34-column CSV for MockTest portal"
                 >
-                  <BookOpen className="w-3 h-3" />
-                  <span>Exact PDF</span>
+                  <Download />
+                  <span>Export CSV</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setExtractionMode('similar')}
-                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                    extractionMode === 'similar'
-                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-purple-300'
-                  }`}
-                  title="PDF questions act strictly as conceptual reference; AI generates brand-new practice MCQs (No duplicates)"
+                  onClick={() => toggleMenu('export')}
+                  aria-haspopup="menu"
+                  aria-expanded={openMenu === 'export'}
+                  aria-label="More export options"
+                  className="btn btn-primary btn-icon w-8"
                 >
-                  <Sparkles className="w-3 h-3 text-amber-300" />
-                  <span>Ref Mode (New MCQs)</span>
+                  <ChevronDown className={`transition-transform ${openMenu === 'export' ? 'rotate-180' : ''}`} />
                 </button>
               </div>
-            </div>
-
-            {/* Provider / Bridge / API Controls */}
-            {aiEngine === 'bridge' ? (
-              <div className="flex items-center gap-2">
-                <select
-                  value={selectedProvider}
-                  onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
-                  className="px-2 py-0.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs text-amber-300 font-bold focus:outline-none cursor-pointer"
-                >
-                  <option value="gemini">
-                    Gemini {bridgeStatus.openProviders?.includes('gemini') ? '🟢 (Tab Open)' : ''}
-                  </option>
-                  <option value="deepseek">
-                    DeepSeek {bridgeStatus.openProviders?.includes('deepseek') ? '🟢 (Tab Open)' : ''}
-                  </option>
-                  <option value="chatgpt">
-                    ChatGPT {bridgeStatus.openProviders?.includes('chatgpt') ? '🟢 (Tab Open)' : ''}
-                  </option>
-                  <option value="claude">
-                    Claude {bridgeStatus.openProviders?.includes('claude') ? '🟢 (Tab Open)' : ''}
-                  </option>
-                </select>
-
-                {bridgeStatus.connected ? (
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-md text-[11px] font-bold">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Connected
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setAiEngine('api')}
-                      className="text-[10px] text-slate-500 hover:text-rose-400 underline transition-colors"
-                      title="Disconnect Bridge"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                ) : (
+              {openMenu === 'export' && (
+                <div className="menu right-0 mt-1.5 w-72 animate-fadeIn" role="menu">
+                  <p className="menu-label">CSV</p>
                   <button
                     type="button"
-                    onClick={() => setShowConnectModal(true)}
-                    className="px-2.5 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 font-bold rounded-lg text-xs transition-all"
+                    role="menuitem"
+                    className="menu-item"
+                    disabled={extractedMcqs.length === 0}
+                    onClick={() => { setOpenMenu(null); handleDownloadCsv(); }}
                   >
-                    Connect Bridge
+                    <Download />
+                    <span>Download 34-column CSV</span>
                   </button>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-blue-400 font-medium flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Direct API Active
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowSettingsModal(true)}
-                  className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 rounded-lg text-[11px] font-semibold transition-all"
-                >
-                  <Settings className="w-3 h-3" />
-                  <span>Configure Key</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Right: Parallel Batch & One-Shot Toggle */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Batch Selector (API Parallel vs Bridge Sequential) */}
-            {aiEngine === 'api' ? (
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Parallel Batch:</span>
-                <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
-                  {[1, 2, 3, 5].map((count) => (
-                    <button
-                      key={count}
-                      type="button"
-                      onClick={() => setBatchSize(count)}
-                      className={`px-2 py-0.5 text-xs font-bold rounded transition-all ${
-                        batchSize === count
-                          ? 'bg-amber-500 text-black shadow-sm'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                      title={`Process ${count} page(s) simultaneously via Direct API key rotation`}
-                    >
-                      {count}P
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg text-[11px] font-medium text-slate-300" title="Extension Bridge browser chat tab me 1-by-1 sequentially page send aur extract karta hai.">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Bridge: 1-by-1</span>
-              </div>
-            )}
-
-            <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
-
-            {/* New chat every N pages — a long chat makes image upload unreliable */}
-            {aiEngine === 'bridge' && (
-              <>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">New Chat:</span>
-                  <div className="flex items-center p-0.5 bg-white/[0.04] border border-white/[0.08] rounded-lg">
-                    {[2, 3, 5, 10, 0].map((count) => (
-                      <button
-                        key={count}
-                        type="button"
-                        onClick={() => setChatRotation(count)}
-                        className={`px-2 py-0.5 text-xs font-bold rounded transition-all ${
-                          chatRotation === count
-                            ? 'bg-emerald-500 text-black shadow-sm'
-                            : 'text-slate-400 hover:text-white'
-                        }`}
-                        title={count === 0
-                          ? 'Poore document ke liye ek hi chat (lambe run me upload fail ho sakta hai)'
-                          : `Har ${count} page ke baad fresh AI chat — upload aur composer reliable rehte hain`}
-                      >
-                        {count === 0 ? 'Off' : `${count}P`}
-                      </button>
-                    ))}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    disabled={extractedMcqs.length === 0}
+                    onClick={handleCopyCsv}
+                  >
+                    {copied ? <Check className="!text-emerald-400" /> : <Copy />}
+                    <span>{copied ? 'Copied to clipboard' : 'Copy CSV to clipboard'}</span>
+                  </button>
+                  <div className="menu-divider" />
+                  <p className="menu-label">Word document</p>
+                  <div className="px-2.5 pb-2">
+                    <div className="seg seg-sm w-full" role="group" aria-label="DOCX language">
+                      {([['both', 'Hi + En'], ['hi', 'Hindi'], ['en', 'English']] as const).map(([val, label]) => (
+                        <button
+                          key={val}
+                          type="button"
+                          aria-pressed={docxLang === val}
+                          onClick={() => setDocxLang(val)}
+                          className="seg-item flex-1"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    disabled={isGeneratingDocx || extractedMcqs.length === 0}
+                    onClick={() => { setOpenMenu(null); handleDownloadDocx(); }}
+                  >
+                    {isGeneratingDocx ? <Loader2 className="animate-spin" /> : <FileText />}
+                    <span>{isGeneratingDocx ? 'Building DOCX…' : 'Download DOCX'}<span className="menu-item-desc">Editable Word file with LaTeX math</span></span>
+                  </button>
                 </div>
-
-                <div className="h-4 w-px bg-white/[0.1] hidden sm:block" />
-              </>
-            )}
-
-            {/* One-Shot Auto-Fill Toggle */}
-            <label className="flex items-center gap-2 cursor-pointer select-none group" title="Image bhejte hi Question, Options, Answer, Subject, aur Solutions ek sath fill honge">
-              <input
-                type="checkbox"
-                checked={autoDeepSolveAll}
-                onChange={(e) => setAutoDeepSolveAll(e.target.checked)}
-                className="w-3.5 h-3.5 rounded border-amber-500/50 text-amber-500 focus:ring-amber-400 bg-black/80 cursor-pointer accent-amber-500"
-              />
-              <span className={`text-xs font-semibold transition-colors ${autoDeepSolveAll ? 'text-amber-300' : 'text-slate-400'}`}>
-                Auto-Fill All 34 Fields & Solutions
-              </span>
-            </label>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Row 3: Collapsible Paper Settings Panel */}
+        {/* Run settings summary + toggle */}
+        <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-2.5 border-t border-line bg-white/[0.015]">
+          <span className="text-xs font-semibold text-ink-3 mr-1">Run settings</span>
+          {aiEngine === 'bridge' ? (
+            <span className={`badge ${bridgeStatus.connected ? 'badge-success' : 'badge-warning'}`}>
+              <span className="dot" />
+              Bridge · {selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)} · {bridgeStatus.connected ? 'connected' : 'not connected'}
+            </span>
+          ) : (
+            <span className="badge badge-info"><Key /> Direct Gemini API</span>
+          )}
+          <span className="badge badge-neutral">{extractionMode === 'exact' ? 'Exact PDF' : 'Ref mode (new MCQs)'}</span>
+          <span className="badge badge-neutral">
+            {aiEngine === 'api' ? `${batchSize} page${batchSize > 1 ? 's' : ''} in parallel` : chatRotation === 0 ? 'Single chat' : `New chat every ${chatRotation}P`}
+          </span>
+          {autoDeepSolveAll && <span className="badge badge-neutral">Auto-fill all 34 fields</span>}
+          <span className="badge badge-neutral">{answerFormat === 'letters' ? 'A–D' : '1–4'} · {difficulty}</span>
+          <button
+            type="button"
+            onClick={() => setShowPaperSettings(!showPaperSettings)}
+            aria-expanded={showPaperSettings}
+            className="btn btn-ghost btn-sm ml-auto"
+          >
+            <SlidersHorizontal />
+            <span>{showPaperSettings ? 'Hide settings' : 'Change'}</span>
+            {showPaperSettings ? <ChevronUp /> : <ChevronDown />}
+          </button>
+        </div>
+
+        {/* Run settings panel */}
         {showPaperSettings && (
-          <div className="p-4 rounded-xl bg-black/60 border border-amber-500/30 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 animate-fadeIn">
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Set / Output File Name (.csv)
-              </label>
-              <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-black/40 border border-white/[0.12] focus-within:border-amber-500/60 rounded-lg">
-                <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-line border-t border-line animate-fadeIn">
+            {/* AI engine */}
+            <div className="bg-surface p-4 sm:p-5 space-y-4">
+              <h2 className="text-sm font-semibold text-ink">AI engine</h2>
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <span className="field-label">Engine</span>
+                  <div className="seg" role="group" aria-label="AI engine">
+                    <button type="button" aria-pressed={aiEngine === 'bridge'} onClick={() => setAiEngine('bridge')} className="seg-item">
+                      <Zap /> Extension bridge
+                    </button>
+                    <button type="button" aria-pressed={aiEngine === 'api'} onClick={() => setAiEngine('api')} className="seg-item">
+                      <Key /> Direct Gemini API
+                    </button>
+                  </div>
+                </div>
+
+                {aiEngine === 'bridge' ? (
+                  <div>
+                    <span className="field-label">Provider</span>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedProvider}
+                        onChange={(e) => handleProviderChange(e.target.value as AiProvider)}
+                        className="select w-44"
+                        aria-label="AI provider"
+                      >
+                        <option value="gemini">Gemini {bridgeStatus.openProviders?.includes('gemini') ? '🟢 (Tab Open)' : ''}</option>
+                        <option value="deepseek">DeepSeek {bridgeStatus.openProviders?.includes('deepseek') ? '🟢 (Tab Open)' : ''}</option>
+                        <option value="chatgpt">ChatGPT {bridgeStatus.openProviders?.includes('chatgpt') ? '🟢 (Tab Open)' : ''}</option>
+                        <option value="claude">Claude {bridgeStatus.openProviders?.includes('claude') ? '🟢 (Tab Open)' : ''}</option>
+                      </select>
+                      {bridgeStatus.connected ? (
+                        <button
+                          type="button"
+                          onClick={() => setAiEngine('api')}
+                          className="btn btn-ghost btn-sm"
+                          title="Disconnect Bridge"
+                        >
+                          Disconnect
+                        </button>
+                      ) : (
+                        <button type="button" onClick={() => setShowConnectModal(true)} className="btn btn-secondary">
+                          Connect bridge
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <span className="field-label">API key</span>
+                    <button type="button" onClick={() => setShowSettingsModal(true)} className="btn btn-secondary">
+                      <Settings /> Configure key
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <span className="field-label">Mode</span>
+                  <div className="seg" role="group" aria-label="Extraction mode">
+                    <button
+                      type="button"
+                      aria-pressed={extractionMode === 'exact'}
+                      onClick={() => setExtractionMode('exact')}
+                      className="seg-item"
+                      title="Extract exact questions directly as written in the PDF"
+                    >
+                      <BookOpen /> Exact PDF
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={extractionMode === 'similar'}
+                      onClick={() => setExtractionMode('similar')}
+                      className="seg-item"
+                      title="PDF questions act strictly as conceptual reference; AI generates brand-new practice MCQs (No duplicates)"
+                    >
+                      <Sparkles /> Ref mode (new MCQs)
+                    </button>
+                  </div>
+                </div>
+
+                {aiEngine === 'api' ? (
+                  <div>
+                    <span className="field-label">Parallel batch</span>
+                    <div className="seg" role="group" aria-label="Parallel batch size">
+                      {[1, 2, 3, 5].map((count) => (
+                        <button
+                          key={count}
+                          type="button"
+                          aria-pressed={batchSize === count}
+                          onClick={() => setBatchSize(count)}
+                          className="seg-item"
+                          title={`Process ${count} page(s) simultaneously via Direct API key rotation`}
+                        >
+                          {count}P
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <span className="field-label" title="Extension Bridge browser chat tab me 1-by-1 sequentially page send aur extract karta hai.">New chat every</span>
+                    <div className="seg" role="group" aria-label="New chat every N pages">
+                      {[2, 3, 5, 10, 0].map((count) => (
+                        <button
+                          key={count}
+                          type="button"
+                          aria-pressed={chatRotation === count}
+                          onClick={() => setChatRotation(count)}
+                          className="seg-item"
+                          title={count === 0
+                            ? 'Poore document ke liye ek hi chat (lambe run me upload fail ho sakta hai)'
+                            : `Har ${count} page ke baad fresh AI chat — upload aur composer reliable rehte hain`}
+                        >
+                          {count === 0 ? 'Off' : `${count}P`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <label className="flex items-start gap-2.5 cursor-pointer select-none" title="Image bhejte hi Question, Options, Answer, Subject, aur Solutions ek sath fill honge">
                 <input
-                  type="text"
-                  value={outputFileName || setName}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setOutputFileName(val);
-                    setSetName(val);
-                    setExtractedMcqs(prev => prev.map(i => ({ ...i, set_name: val })));
-                  }}
-                  placeholder="e.g. RRB NTPC 2024 CBT-1"
-                  className="w-full bg-transparent text-xs text-white focus:outline-none"
+                  type="checkbox"
+                  checked={autoDeepSolveAll}
+                  onChange={(e) => setAutoDeepSolveAll(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 cursor-pointer"
                 />
-                <span className="text-xs text-slate-500 font-bold shrink-0">.csv</span>
-              </div>
+                <span className="text-sm text-ink-2">
+                  Auto-fill all 34 fields and solutions
+                  <span className="block text-xs text-ink-3">Question, options, answer, subject and solutions in one pass</span>
+                </span>
+              </label>
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Answer Format
-              </label>
-              <div className="flex items-center gap-1 p-0.5 bg-black/40 border border-white/[0.12] rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => setAnswerFormat('letters')}
-                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
-                    answerFormat === 'letters'
-                      ? 'bg-amber-500 text-black shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Letters (A, B, C, D)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAnswerFormat('numbers')}
-                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
-                    answerFormat === 'numbers'
-                      ? 'bg-amber-500 text-black shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Numbers (1, 2, 3, 4)
-                </button>
-              </div>
-            </div>
+            {/* Paper */}
+            <div className="bg-surface p-4 sm:p-5 space-y-4">
+              <h2 className="text-sm font-semibold text-ink">Paper</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <span className="field-label">Answer format</span>
+                  <div className="seg w-full" role="group" aria-label="Answer format">
+                    <button type="button" aria-pressed={answerFormat === 'letters'} onClick={() => setAnswerFormat('letters')} className="seg-item flex-1">
+                      Letters (A–D)
+                    </button>
+                    <button type="button" aria-pressed={answerFormat === 'numbers'} onClick={() => setAnswerFormat('numbers')} className="seg-item flex-1">
+                      Numbers (1–4)
+                    </button>
+                  </div>
+                </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Math Notation
-              </label>
-              <div className="flex items-center gap-1 p-0.5 bg-black/40 border border-white/[0.12] rounded-lg">
-                <button
-                  type="button"
-                  onClick={() => setMathFormat('mathjax')}
-                  title="LaTeX standard \(...\)"
-                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
-                    mathFormat === 'mathjax'
-                      ? 'bg-amber-500 text-black shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  MathJax \(...\)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMathFormat('unicode')}
-                  title="Plain Unicode and HTML"
-                  className={`flex-1 py-1 text-xs font-bold rounded transition-all ${
-                    mathFormat === 'unicode'
-                      ? 'bg-amber-500 text-black shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Unicode / HTML
-                </button>
-              </div>
-            </div>
+                <div>
+                  <span className="field-label">Math notation</span>
+                  <div className="seg w-full" role="group" aria-label="Math notation">
+                    <button type="button" aria-pressed={mathFormat === 'mathjax'} onClick={() => setMathFormat('mathjax')} title="LaTeX standard \(...\)" className="seg-item flex-1">
+                      LaTeX \(...\)
+                    </button>
+                    <button type="button" aria-pressed={mathFormat === 'unicode'} onClick={() => setMathFormat('unicode')} title="Plain Unicode and HTML" className="seg-item flex-1">
+                      Unicode / HTML
+                    </button>
+                  </div>
+                </div>
 
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Default Difficulty
-              </label>
-              <select
-                value={difficulty}
-                onChange={(e) => {
-                  const diff = e.target.value as DifficultyLevel;
-                  setDifficulty(diff);
-                  setExtractedMcqs(prev => prev.map(i => ({ ...i, difficulty_level: diff })));
-                }}
-                className="px-2.5 py-1.5 bg-black/40 border border-white/[0.12] focus:border-amber-500/60 rounded-lg text-xs text-white focus:outline-none"
-              >
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
-              </select>
+                <div>
+                  <label className="field-label" htmlFor="mcq-default-difficulty">Default difficulty</label>
+                  <select
+                    id="mcq-default-difficulty"
+                    value={difficulty}
+                    onChange={(e) => {
+                      const diff = e.target.value as DifficultyLevel;
+                      setDifficulty(diff);
+                      setExtractedMcqs(prev => prev.map(i => ({ ...i, difficulty_level: diff })));
+                    }}
+                    className="select"
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Input Mode Selector & Upload / Direct Text Area */}
-      <div className="space-y-2">
-        {/* Tab Selector */}
+      {/* Input: upload files or paste text */}
+      <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex p-1 bg-black/60 border border-white/[0.08] rounded-xl shadow-inner">
+          <div className="seg" role="tablist" aria-label="Input mode">
             <button
               type="button"
+              role="tab"
+              aria-selected={inputMode === 'upload'}
               onClick={() => setInputMode('upload')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                inputMode === 'upload'
-                  ? 'bg-amber-500 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              className="seg-item"
             >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Upload Files (PDF / DOCX / TXT / Images)</span>
+              <Upload />
+              <span>Upload files</span>
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={inputMode === 'direct_text'}
               onClick={() => setInputMode('direct_text')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                inputMode === 'direct_text'
-                  ? 'bg-amber-500 text-black shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              className="seg-item"
             >
-              <FileText className="w-3.5 h-3.5" />
-              <span>Direct Text / Paste Exam Paper</span>
+              <FileText />
+              <span>Paste text</span>
             </button>
           </div>
 
           {inputMode === 'upload' && (
-            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-400">
-              <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-300 font-semibold">.docx Word</span>
-              <span className="px-2 py-0.5 rounded bg-red-500/10 border border-red-500/20 text-red-300 font-semibold">.pdf</span>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-semibold">.txt / .md</span>
-              <span className="px-2 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-300 font-semibold">Images</span>
-            </div>
+            <p className="hidden sm:block text-xs text-ink-3">PDF, Word (.docx), TXT / MD and images</p>
           )}
         </div>
 
         {inputMode === 'upload' ? (
           /* File Upload Dropzone */
-          <div 
+          <div
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onDrop={(e) => {
               e.preventDefault();
@@ -2834,10 +2767,10 @@ Rules:
               if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
             }}
             onClick={() => fileInputRef.current?.click()}
-            className={`relative border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${
-              pages.length === 0 
-                ? 'border-amber-500/40 bg-amber-500/[0.03] hover:bg-amber-500/[0.06] p-8' 
-                : 'border-white/[0.08] bg-white/[0.015] hover:bg-white/[0.04] p-3'
+            className={`relative border border-dashed rounded-[14px] cursor-pointer transition-colors ${
+              pages.length === 0
+                ? 'border-line-strong bg-surface hover:border-accent/50 hover:bg-surface-2 px-6 py-10 text-center'
+                : 'border-line-strong bg-surface hover:border-accent/50 hover:bg-surface-2 px-4 py-3'
             }`}
           >
             <input
@@ -2849,57 +2782,53 @@ Rules:
               className="hidden"
             />
 
-            <div className="flex items-center justify-center gap-2.5">
-              <div className={`rounded-lg border text-amber-400 ${pages.length === 0 ? 'p-3 bg-amber-500/10 border-amber-500/20' : 'p-1.5 bg-amber-500/10 border-amber-500/20'}`}>
-                <Upload className={pages.length === 0 ? "w-5 h-5" : "w-3.5 h-3.5"} />
-              </div>
-              <div className="text-left">
-                <h3 className={`font-bold text-white ${pages.length === 0 ? 'text-sm' : 'text-xs'}`}>
-                  {pages.length === 0 ? 'Upload Exam PDF, DOCX Word Document, TXT or Images' : '+ Add More (PDF / DOCX / TXT / Images)'}
-                </h3>
-                {pages.length === 0 && (
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Drag & drop PDF, Word (.docx), text files, or photos. Word DOCX and direct text extract with 100% fidelity without OCR errors.
+            {pages.length === 0 ? (
+              <div className="flex flex-col items-center gap-3">
+                <span className="w-12 h-12 rounded-xl flex items-center justify-center bg-accent/10 border border-accent/25 text-accent-light">
+                  <Upload className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-semibold text-ink">Drop your exam paper here</h3>
+                  <p className="text-sm text-ink-3 mt-1 max-w-lg">
+                    PDF, Word (.docx), text files or photos. Word and text files are read exactly, without OCR errors.
                   </p>
-                )}
+                </div>
+                <span className="btn btn-secondary btn-sm mt-1">Browse files</span>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center gap-2.5 text-sm text-ink-2">
+                <Upload className="w-4 h-4 text-ink-3" />
+                <span className="font-medium">Add more files</span>
+                <span className="text-ink-3 hidden sm:inline">— drop here or click to browse</span>
+              </div>
+            )}
 
             {uploadProgress && (
-              <div className="mt-3 max-w-md mx-auto p-2 bg-black/60 rounded-lg border border-amber-500/30 flex items-center gap-2.5">
-                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin flex-shrink-0" />
-                <span className="text-xs text-amber-300 font-medium">{uploadProgress.text}</span>
+              <div className="mt-3 max-w-md mx-auto callout callout-info items-center">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span className="font-medium">{uploadProgress.text}</span>
               </div>
             )}
           </div>
         ) : (
           /* Direct Text Input Editor */
-          <div className="relative rounded-2xl bg-gradient-to-b from-slate-900/95 to-slate-950/95 border border-amber-500/30 p-4 shadow-xl space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/[0.08] pb-2.5">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400">
-                  <FileText className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-white">Paste Raw Exam Text / Notes</h3>
-                  <p className="text-[11px] text-slate-400">Paste questions directly from any source (PDF text, Word document, web page, or notes)</p>
-                </div>
+          <div className="card p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-ink">Paste exam text</h3>
+                <p className="text-xs text-ink-3">From a PDF, Word document, web page or your notes</p>
               </div>
 
-              {/* Chunking options */}
-              <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Chunk By:</span>
-                <div className="flex items-center p-0.5 bg-black/50 border border-white/[0.1] rounded-lg text-xs">
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="text-xs font-medium text-ink-3">Split every</span>
+                <div className="seg seg-sm" role="group" aria-label="Questions per section">
                   {[5, 10, 15, 20, 50].map((num) => (
                     <button
                       key={num}
                       type="button"
+                      aria-pressed={directTextSplitCount === num}
                       onClick={() => setDirectTextSplitCount(num)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
-                        directTextSplitCount === num
-                          ? 'bg-amber-500 text-black shadow-sm'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
+                      className="seg-item"
                       title={`Split text into sections of approximately ${num} questions`}
                     >
                       {num} Qs
@@ -2908,7 +2837,6 @@ Rules:
                 </div>
               </div>
             </div>
-
             <textarea
               rows={pages.length === 0 ? 9 : 6}
               value={directTextInput}
@@ -2931,30 +2859,26 @@ Example:
 (D) 1919
 Answer: (A) 1885
 Explanation: The Indian National Congress was founded in December 1885 at Bombay by Allan Octavian Hume."
-              className="w-full bg-black/60 border border-white/[0.1] focus:border-amber-500/60 rounded-xl p-3 text-xs text-slate-200 placeholder:text-slate-600 font-mono leading-relaxed focus:outline-none custom-scrollbar resize-y"
+              className="textarea font-mono text-[13px] resize-y"
             />
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1 text-xs">
-              <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                <span>Characters: <strong className="text-amber-400">{directTextInput.length}</strong></span>
-                <span>•</span>
-                <span>Words: <strong className="text-amber-400">{directTextInput.trim() ? directTextInput.trim().split(/\s+/).length : 0}</strong></span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
+                <span><strong className="text-ink-2 font-semibold">{directTextInput.length}</strong> characters</span>
+                <span><strong className="text-ink-2 font-semibold">{directTextInput.trim() ? directTextInput.trim().split(/\s+/).length : 0}</strong> words</span>
                 {directTextInput.trim() && (
-                  <>
-                    <span>•</span>
-                    <span className="text-emerald-400 font-semibold">
-                      ~{splitTextIntoDocumentPages(directTextInput, directTextSplitCount || 10).length} section(s)
-                    </span>
-                  </>
+                  <span className="badge badge-success">
+                    ~{splitTextIntoDocumentPages(directTextInput, directTextSplitCount || 10).length} section(s)
+                  </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-2 self-end sm:self-auto">
+              <div className="flex flex-wrap items-center gap-2 self-end sm:self-auto">
                 {directTextInput.trim() && (
                   <button
                     type="button"
                     onClick={() => setDirectTextInput('')}
-                    className="px-2.5 py-1.5 text-xs text-slate-400 hover:text-rose-400 transition-colors"
+                    className="btn btn-ghost"
                   >
                     Clear
                   </button>
@@ -2964,299 +2888,270 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                   type="button"
                   onClick={() => handleAddDirectText(false)}
                   disabled={!directTextInput.trim()}
-                  className="px-3 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-white font-bold rounded-xl text-xs transition-all disabled:opacity-40"
+                  className="btn btn-secondary"
                 >
-                  + Add to Queue as Pages
+                  <Plus />
+                  Add as pages
                 </button>
 
                 <button
                   type="button"
                   onClick={() => handleAddDirectText(true)}
                   disabled={!directTextInput.trim()}
-                  className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all disabled:opacity-40"
+                  className="btn btn-primary"
                 >
-                  <Sparkles className="w-3.5 h-3.5 fill-black" />
-                  <span>⚡ Add & Extract Immediately</span>
+                  <Play />
+                  <span>Add and extract</span>
                 </button>
               </div>
             </div>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Main Workspace: TextExtract Style UI (Left: Pages | Right: Questions) */}
+      {/* Main workspace: page image on the left, extracted questions on the right */}
       {pages.length > 0 && (
         <div className="space-y-4">
-          {/* Workspace Command Bar & Filmstrip */}
-          <div className="p-3.5 bg-slate-900/80 border border-white/[0.08] rounded-2xl space-y-3 backdrop-blur-md shadow-xl">
-            {/* Top Command Row: Extraction Control, Views & Grouped Actions */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              {/* Left: Primary Run Control & Status */}
-              <div className="flex flex-wrap items-center gap-2.5">
+          {/* Workspace command bar & page filmstrip (sticky under the navbar) */}
+          <div className="card sticky top-14 z-30 shadow-[0_8px_24px_rgb(0_0_0/0.35)]">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3">
+              {/* Run control */}
+              <div className="toolbar">
                 {!isProcessingAll ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleStartExtraction('exact')}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold rounded-xl text-xs shadow-lg shadow-amber-500/20 transition-all"
-                      title="Extract exact questions directly as written in the PDF"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-black" />
-                      <span>Start Extraction</span>
-                    </button>
-
-                    {/* NEW REQUESTED BUTTON: Generate Similar MCQs (Reference Mode) */}
-                    <button
-                      type="button"
-                      onClick={() => handleStartExtraction('similar')}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-violet-600 hover:from-purple-500 hover:via-indigo-500 hover:to-violet-500 text-white font-extrabold rounded-xl text-xs shadow-lg shadow-purple-500/30 border border-purple-400/30 transition-all group"
-                      title="PDF questions act strictly as conceptual reference/blueprint. Generates brand-new similar MCQs (strictly no verbatim duplicates)!"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300 group-hover:rotate-12 transition-transform" />
-                      <span>✨ Generate Similar MCQs (Ref Mode)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleReExtractAll(extractionMode)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-white/[0.04] hover:bg-amber-500/15 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 font-semibold rounded-xl text-xs transition-all"
-                      title="Re-run all pages from scratch"
-                    >
-                      <RotateCw className="w-3 h-3" />
-                      <span>Re-Run All</span>
-                    </button>
-                  </div>
+                  <>
+                    <div className="relative" data-menu-root>
+                      <div className="btn-group">
+                        <button
+                          type="button"
+                          onClick={() => handleStartExtraction('exact')}
+                          className="btn btn-primary"
+                          title="Extract exact questions directly as written in the PDF"
+                        >
+                          <Play />
+                          <span>Start extraction</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleMenu('runs')}
+                          aria-haspopup="menu"
+                          aria-expanded={openMenu === 'runs'}
+                          aria-label="More run options"
+                          className="btn btn-primary btn-icon w-8"
+                        >
+                          <ChevronDown className={`transition-transform ${openMenu === 'runs' ? 'rotate-180' : ''}`} />
+                        </button>
+                      </div>
+                      {openMenu === 'runs' && (
+                        <div className="menu left-0 mt-1.5 w-80 animate-fadeIn" role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="menu-item"
+                            onClick={() => { setOpenMenu(null); handleStartExtraction('similar'); }}
+                            title="PDF questions act strictly as conceptual reference/blueprint. Generates brand-new similar MCQs (strictly no verbatim duplicates)!"
+                          >
+                            <Sparkles />
+                            <span>Generate similar MCQs (ref mode)<span className="menu-item-desc">Use pages as reference and create brand-new questions</span></span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="menu-item"
+                            onClick={() => { setOpenMenu(null); handleReExtractAll(extractionMode); }}
+                          >
+                            <RotateCw />
+                            <span>Re-run all pages<span className="menu-item-desc">Extract every page again from scratch ({extractionMode === 'exact' ? 'exact PDF' : 'ref mode'})</span></span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </>
                 ) : (
-                  <div className="flex items-center gap-2">
+                  <>
                     <button
                       type="button"
                       onClick={() => setIsPaused(!isPaused)}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/50 text-amber-200 font-bold rounded-xl text-xs shadow-lg transition-all"
+                      className="btn btn-secondary"
                     >
-                      {isPaused ? <Play className="w-3.5 h-3.5 fill-white" /> : <Pause className="w-3.5 h-3.5" />}
+                      {isPaused ? <Play /> : <Pause />}
                       <span>{isPaused ? 'Resume' : 'Pause'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleStopAll}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs shadow-lg transition-all active:scale-95"
+                      className="btn btn-danger-solid"
                       title="Stop all running extractions"
                     >
-                      <Square className="w-3.5 h-3.5 fill-white" />
-                      <span>Stop All</span>
+                      <Square className="fill-current" />
+                      <span>Stop all</span>
                     </button>
-                  </div>
+                  </>
                 )}
 
-                {/* Status indicator */}
+                {/* Status / selection */}
                 {liveStatusText ? (
-                  <span className="text-xs text-amber-300 font-medium flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-lg animate-pulse max-w-sm sm:max-w-md truncate">
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                  <span className={`badge h-7 max-w-[18rem] sm:max-w-md ${isProcessingAll ? 'badge-accent' : 'badge-neutral'}`} role="status">
+                    {isProcessingAll ? <Loader2 className="animate-spin" /> : <span className="dot text-ink-3" />}
                     <span className="truncate">{liveStatusText}</span>
                   </span>
                 ) : (
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <div className="flex items-center gap-1 text-xs text-ink-3">
                     <button
                       type="button"
                       onClick={() => {
                         const allSelected = pages.every(p => p.isSelected);
                         setPages(prev => prev.map(p => ({ ...p, isSelected: !allSelected })));
                       }}
-                      className="hover:text-amber-300 underline font-medium"
+                      className="btn btn-ghost btn-xs"
                     >
-                      {pages.every(p => p.isSelected) ? 'Deselect All' : 'Select All'}
+                      {pages.every(p => p.isSelected) ? 'Deselect all' : 'Select all'}
                     </button>
-                    <span className="text-slate-500">
-                      ({pages.filter(p => p.isSelected).length}/{pages.length} selected)
-                    </span>
+                    <span>{pages.filter(p => p.isSelected).length}/{pages.length} selected</span>
                   </div>
                 )}
               </div>
 
-              {/* Center: View Switcher Tabs */}
-              <div className="flex items-center p-0.5 bg-black/60 border border-white/[0.08] rounded-xl self-start lg:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('split')}
-                  className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 ${
-                    activeTab === 'split' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <BookOpen className="w-3.5 h-3.5" />
-                  <span>Split View</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('grid')}
-                  className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 ${
-                    activeTab === 'grid' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>18-Col Grid</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('csv')}
-                  className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all flex items-center gap-1.5 ${
-                    activeTab === 'csv' ? 'bg-amber-500 text-black shadow' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Raw CSV</span>
-                </button>
-              </div>
-
-              {/* Right: Grouped AI Tools Menu, Add Question & Clear All */}
-              <div className="flex items-center gap-2 self-end lg:self-auto">
-                {/* Grouped AI Tools Dropdown Menu */}
-                <div className="relative" ref={aiToolsRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowAiToolsMenu(!showAiToolsMenu)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-500/15 to-indigo-500/15 hover:from-purple-500/25 hover:to-indigo-500/25 border border-purple-500/30 text-purple-200 rounded-xl text-xs font-bold transition-all shadow-sm"
-                  >
-                    {isSolvingAll || isProofreading ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-400" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                    )}
-                    <span>AI Tools</span>
-                    <ChevronDown className={`w-3 h-3 transition-transform ${showAiToolsMenu ? 'rotate-180' : ''}`} />
+              <div className="toolbar justify-between lg:justify-end">
+                {/* View switcher */}
+                <div className="seg" role="tablist" aria-label="View">
+                  <button type="button" role="tab" aria-selected={activeTab === 'split'} onClick={() => setActiveTab('split')} className="seg-item">
+                    <BookOpen />
+                    <span>Split</span>
                   </button>
-
-                  {/* Dropdown Card */}
-                  {showAiToolsMenu && (
-                    <div className="absolute right-0 mt-1.5 w-64 rounded-xl bg-slate-900 border border-white/[0.12] shadow-2xl p-1.5 z-50 space-y-1 animate-fadeIn">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAiToolsMenu(false);
-                          handleGenerateSimilarFromCurrentMcqs();
-                        }}
-                        disabled={isGeneratingSimilarBatch || extractedMcqs.length === 0}
-                        className="w-full flex items-start gap-2.5 p-2 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-left text-xs font-semibold text-purple-200 hover:text-white transition-all disabled:opacity-40 border border-purple-500/20"
-                      >
-                        <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold text-purple-200">✨ Generate Similar Set (AI)</div>
-                          <div className="text-[11px] text-slate-400 font-normal">Create brand-new practice MCQs using current items as reference</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAiToolsMenu(false);
-                          handleAutoSolveAll();
-                        }}
-                        disabled={isSolvingAll || extractedMcqs.length === 0}
-                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-purple-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
-                      >
-                        <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold text-purple-200">Auto-Solve All (AI)</div>
-                          <div className="text-[11px] text-slate-400 font-normal">Generate deep bilingual solutions for all MCQs</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAiToolsMenu(false);
-                          handleProofreadAll();
-                        }}
-                        disabled={isProofreading || extractedMcqs.length === 0}
-                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-cyan-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
-                      >
-                        <Sparkles className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold text-cyan-200">AI Proofread (Clean Tags)</div>
-                          <div className="text-[11px] text-slate-400 font-normal">Validate HTML tags & fix OCR anomalies</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAiToolsMenu(false);
-                          handleStandardizeMathJaxAndHtml();
-                        }}
-                        disabled={extractedMcqs.length === 0}
-                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-emerald-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
-                      >
-                        <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold text-emerald-200">Fix MathJax + &lt;p&gt;</div>
-                          <div className="text-[11px] text-slate-400 font-normal">Standardize all 14 fields with &lt;p&gt; and \(...\)</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAiToolsMenu(false);
-                          handleCleanAllMath();
-                        }}
-                        disabled={extractedMcqs.length === 0}
-                        className="w-full flex items-start gap-2.5 p-2 rounded-lg hover:bg-amber-500/15 text-left text-xs font-semibold text-slate-200 hover:text-white transition-all disabled:opacity-40"
-                      >
-                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold text-amber-200">Clean Tags & Math</div>
-                          <div className="text-[11px] text-slate-400 font-normal">Sanitize raw symbols & formatting glitches</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAiToolsMenu(false);
-                          handleRecaptureFullChat();
-                        }}
-                        disabled={isProcessingAll}
-                        className="w-full flex items-start gap-2.5 p-2 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-left text-xs font-semibold text-cyan-200 hover:text-white transition-all disabled:opacity-40 border border-cyan-500/20"
-                      >
-                        <Camera className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-                        <div>
-                          <div className="font-bold text-cyan-200">📸 Recapture All from Chat</div>
-                          <div className="text-[11px] text-slate-400 font-normal">Re-read complete AI conversation for this document</div>
-                        </div>
-                      </button>
-                    </div>
-                  )}
+                  <button type="button" role="tab" aria-selected={activeTab === 'grid'} onClick={() => setActiveTab('grid')} className="seg-item">
+                    <FileSpreadsheet />
+                    <span>Grid</span>
+                  </button>
+                  <button type="button" role="tab" aria-selected={activeTab === 'csv'} onClick={() => setActiveTab('csv')} className="seg-item">
+                    <Copy />
+                    <span>Raw CSV</span>
+                  </button>
                 </div>
 
-                {/* Manual Add MCQ */}
-                <button
-                  type="button"
-                  onClick={handleAddQuestion}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-slate-200 hover:text-white rounded-xl text-xs font-semibold transition-all"
-                  title="Manually create a new MCQ row"
-                >
-                  <Plus className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Add MCQ</span>
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {/* AI tools */}
+                  <div className="relative" ref={aiToolsRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowAiToolsMenu(!showAiToolsMenu)}
+                      aria-haspopup="menu"
+                      aria-expanded={showAiToolsMenu}
+                      className="btn btn-secondary"
+                    >
+                      {isSolvingAll || isProofreading ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                      <span>AI tools</span>
+                      <ChevronDown className={`transition-transform ${showAiToolsMenu ? 'rotate-180' : ''}`} />
+                    </button>
 
-                {/* Clear All */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (confirm('Clear all pages and questions?')) {
-                      setPages([]);
-                      setExtractedMcqs([]);
-                    }
-                  }}
-                  disabled={isProcessingAll}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all disabled:opacity-40"
-                  title="Clear all pages and extracted questions"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                    {showAiToolsMenu && (
+                      <div className="menu right-0 mt-1.5 w-80 animate-fadeIn" role="menu">
+                        <p className="menu-label">Generate</p>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setShowAiToolsMenu(false); handleGenerateSimilarFromCurrentMcqs(); }}
+                          disabled={isGeneratingSimilarBatch || extractedMcqs.length === 0}
+                          className="menu-item"
+                        >
+                          <Sparkles />
+                          <span>Generate similar set<span className="menu-item-desc">Brand-new practice MCQs using current items as reference</span></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setShowAiToolsMenu(false); handleAutoSolveAll(); }}
+                          disabled={isSolvingAll || extractedMcqs.length === 0}
+                          className="menu-item"
+                        >
+                          <CheckCheck />
+                          <span>Auto-solve all<span className="menu-item-desc">Deep bilingual solutions for every MCQ</span></span>
+                        </button>
+                        <div className="menu-divider" />
+                        <p className="menu-label">Clean up</p>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setShowAiToolsMenu(false); handleProofreadAll(); }}
+                          disabled={isProofreading || extractedMcqs.length === 0}
+                          className="menu-item"
+                        >
+                          <Eye />
+                          <span>AI proofread (clean tags)<span className="menu-item-desc">Validate HTML tags and fix OCR anomalies</span></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setShowAiToolsMenu(false); handleStandardizeMathJaxAndHtml(); }}
+                          disabled={extractedMcqs.length === 0}
+                          className="menu-item"
+                        >
+                          <FileText />
+                          <span>Fix MathJax + &lt;p&gt;<span className="menu-item-desc">Standardize all 14 fields with &lt;p&gt; and \(...\)</span></span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setShowAiToolsMenu(false); handleCleanAllMath(); }}
+                          disabled={extractedMcqs.length === 0}
+                          className="menu-item"
+                        >
+                          <RefreshCw />
+                          <span>Clean tags and math<span className="menu-item-desc">Sanitize raw symbols and formatting glitches</span></span>
+                        </button>
+                        <div className="menu-divider" />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setShowAiToolsMenu(false); handleRecaptureFullChat(); }}
+                          disabled={isProcessingAll}
+                          className="menu-item"
+                        >
+                          <Camera />
+                          <span>Recapture all from chat<span className="menu-item-desc">Re-read the complete AI conversation for this document</span></span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Overflow */}
+                  <div className="relative" data-menu-root>
+                    <button
+                      type="button"
+                      onClick={() => toggleMenu('more')}
+                      aria-haspopup="menu"
+                      aria-expanded={openMenu === 'more'}
+                      aria-label="More actions"
+                      title="More actions"
+                      className="btn btn-ghost btn-icon"
+                    >
+                      <MoreHorizontal />
+                    </button>
+                    {openMenu === 'more' && (
+                      <div className="menu right-0 mt-1.5 w-60 animate-fadeIn" role="menu">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="menu-item menu-item-danger"
+                          disabled={isProcessingAll}
+                          onClick={() => {
+                            setOpenMenu(null);
+                            if (confirm('Clear all pages and questions?')) {
+                              setPages([]);
+                              setExtractedMcqs([]);
+                            }
+                          }}
+                        >
+                          <Trash2 />
+                          <span>Clear all pages and questions</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Bottom Row: Quick Jump Filmstrip with Problem Indicators */}
+            {/* Page filmstrip with problem indicators */}
             {(() => {
               const pagesWithIssues = pages.filter(p => {
                 if (p.status === 'error' || Boolean(p.errorMessage)) return true;
@@ -3267,35 +3162,28 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
               });
 
               return (
-                <div className="pt-2 border-t border-white/[0.04] flex items-center gap-2 overflow-x-auto pb-1 custom-scrollbar">
-                  <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                      P:
-                    </span>
-                    {pagesWithIssues.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          scrollToPageCard(pagesWithIssues[0].pageNumber);
-                        }}
-                        className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 transition-all shrink-0 animate-pulse shadow-sm"
-                        title="Click to jump directly to the first page with missing/incomplete fields"
-                      >
-                        <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                        <span>{pagesWithIssues.length} Needs Fix</span>
-                      </button>
-                    )}
-                  </div>
+                <div className="px-3 py-2 border-t border-line flex items-center gap-2 overflow-x-auto">
+                  <span className="text-xs font-semibold text-ink-3 shrink-0">Pages</span>
+                  {pagesWithIssues.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => scrollToPageCard(pagesWithIssues[0].pageNumber)}
+                      className="badge badge-warning h-6 cursor-pointer hover:bg-amber-500/20 shrink-0"
+                      title="Jump to the first page with missing or incomplete fields"
+                    >
+                      <AlertTriangle />
+                      <span>{pagesWithIssues.length} need fixes</span>
+                    </button>
+                  )}
 
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0">
                     {pages.map((p) => {
                       const pageQuestions = (p.items && p.items.length > 0)
                         ? p.items
                         : extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id);
                       const count = pageQuestions.length;
                       const isError = p.status === 'error' || Boolean(p.errorMessage);
-                      const problemQuestions = pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues);
-                      const problemCount = problemQuestions.length;
+                      const problemCount = pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues).length;
                       const hasIncomplete = p.status === 'ready' && problemCount > 0;
 
                       return (
@@ -3307,43 +3195,34 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                             isError
                               ? `Page ${p.pageNumber}: Error processing page! Click to jump & inspect.`
                               : hasIncomplete
-                              ? `Page ${p.pageNumber}: ⚠️ ${problemCount} of ${count} question(s) have incomplete/missing fields! Click to jump directly.`
+                              ? `Page ${p.pageNumber}: ${problemCount} of ${count} question(s) have incomplete/missing fields. Click to jump.`
                               : p.status === 'ready'
-                              ? `Page ${p.pageNumber}: All ${count} questions complete & verified.`
+                              ? `Page ${p.pageNumber}: All ${count} questions complete.`
                               : `Page ${p.pageNumber}`
                           }
-                          className={`px-2 py-0.5 rounded-lg text-xs font-bold shrink-0 border transition-all flex items-center gap-1.5 shadow-sm ${
+                          className={`h-6 px-2 rounded-md text-xs font-semibold shrink-0 border transition-colors flex items-center gap-1 ${
                             p.status === 'processing'
-                              ? 'bg-amber-500/20 border-amber-500/40 text-amber-300 animate-pulse'
+                              ? 'bg-accent/10 border-accent/40 text-accent-light'
                               : isError
-                              ? 'bg-rose-500/25 border-rose-500/60 text-rose-200 hover:bg-rose-500/35 ring-1 ring-rose-500/40 animate-pulse'
+                              ? 'bg-rose-500/10 border-rose-500/40 text-rose-300 hover:bg-rose-500/20'
                               : hasIncomplete
-                              ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 hover:bg-amber-500/30 ring-1 ring-amber-500/40 shadow-sm shadow-amber-500/10'
+                              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/20'
                               : p.status === 'ready'
-                              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
-                              : 'bg-black/40 border-white/[0.08] text-slate-400 hover:text-white'
+                              ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20'
+                              : 'bg-transparent border-line-strong text-ink-3 hover:text-ink hover:bg-white/[0.04]'
                           }`}
                         >
-                          {isError ? (
-                            <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
+                          {p.status === 'processing' ? (
+                            <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                          ) : isError ? (
+                            <AlertCircle className="w-3 h-3 shrink-0" />
                           ) : hasIncomplete ? (
-                            <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
                           ) : null}
-
-                          <span>P.{p.pageNumber}</span>
-
+                          <span>P{p.pageNumber}</span>
                           {count > 0 && (
-                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-extrabold flex items-center gap-0.5 ${
-                              hasIncomplete 
-                                ? 'bg-amber-500 text-black font-black' 
-                                : isError 
-                                ? 'bg-rose-900 text-rose-200' 
-                                : 'bg-black/60 text-amber-300'
-                            }`}>
-                              {count}
-                              {hasIncomplete && (
-                                <span className="opacity-90">({problemCount}⚠)</span>
-                              )}
+                            <span className="opacity-75 font-medium">
+                              · {count}{hasIncomplete && ` (${problemCount})`}
                             </span>
                           )}
                         </button>
@@ -3368,311 +3247,266 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                   <div
                     key={page.id}
                     id={`page-card-${page.pageNumber}`}
-                    className={`rounded-2xl overflow-hidden shadow-xl flex flex-col lg:flex-row h-auto min-h-[380px] transition-all duration-300 border ${
-                      page.isSelected
-                        ? 'border-amber-500/40 ring-1 ring-amber-500/30 bg-[#10131E]'
-                        : 'border-white/[0.06] bg-[#0A0C13] opacity-90 hover:opacity-100'
+                    className={`card overflow-hidden flex flex-col lg:flex-row min-h-[380px] scroll-mt-40 transition-colors ${
+                      page.isSelected ? 'border-accent/35' : ''
                     }`}
                   >
-                    {/* LEFT SIDE: Page Image & Page Controls (like ProcessingList.tsx) */}
-                    <div className="w-full lg:w-[320px] xl:w-[360px] bg-[#08090E] border-b lg:border-b-0 lg:border-r border-white/[0.08] p-4 flex flex-col justify-between shrink-0">
-                      <div>
-                        {/* Page Card Header */}
-                        <div className="flex items-center justify-between gap-2 mb-3">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => togglePageSelection(page.id)}
-                              className="p-1.5 rounded-lg bg-black/60 border border-white/[0.1] text-white hover:text-amber-400 backdrop-blur-md"
-                              title="Toggle batch selection"
-                            >
-                              {page.isSelected ? (
-                                <CheckSquare className="w-4 h-4 text-amber-400" />
-                              ) : (
-                                <Square className="w-4 h-4 text-slate-400" />
-                              )}
-                            </button>
-                            <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-slate-900 border border-white/[0.1] text-white shadow">
-                              Page {page.pageNumber}
+                    {/* LEFT SIDE: page image and page actions */}
+                    <div className="w-full lg:w-[320px] xl:w-[360px] bg-canvas/60 border-b lg:border-b-0 lg:border-r border-line p-4 flex flex-col gap-3 shrink-0">
+                      {/* Page header */}
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="flex items-center gap-2 cursor-pointer select-none" title="Include this page in batch runs">
+                          <input
+                            type="checkbox"
+                            checked={!!page.isSelected}
+                            onChange={() => togglePageSelection(page.id)}
+                            className="w-4 h-4 cursor-pointer"
+                          />
+                          <span className="text-sm font-semibold text-ink">Page {page.pageNumber}</span>
+                        </label>
+
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          {page.status === 'processing' && (
+                            <span className="badge badge-accent">
+                              <Loader2 className="animate-spin" /> Extracting…
                             </span>
-                          </div>
-
-                          {/* Status Badge */}
-                          <div>
-                            {page.status === 'processing' && (
-                              <div className="flex items-center gap-1.5">
-                                <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 animate-pulse">
-                                  <Loader2 className="w-3 h-3 animate-spin" /> Digitizing...
+                          )}
+                          {page.status === 'ready' && (() => {
+                            const issueCount = pageQuestions.filter(q => detectItemFieldIssues(q).hasIssues).length;
+                            return (
+                              <>
+                                {issueCount > 0 && (
+                                  <span
+                                    className="badge badge-warning"
+                                    title={`${issueCount} of ${pageQuestions.length} question(s) have missing or incomplete fields`}
+                                  >
+                                    <AlertTriangle /> {issueCount} need fix
+                                  </span>
+                                )}
+                                <span className="badge badge-success">
+                                  <CheckCircle2 /> {pageQuestions.length} MCQs
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStopPage(page.id);
-                                  }}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/40 text-rose-300 hover:text-white rounded-full text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
-                                  title={`Stop digitizing Page ${page.pageNumber}`}
-                                >
-                                  <Square className="w-2.5 h-2.5 fill-current" />
-                                  <span>Stop</span>
-                                </button>
-                              </div>
-                            )}
-                            {page.status === 'ready' && (
-                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                                {(() => {
-                                  const issueCount = pageQuestions.filter(q => detectItemFieldIssues(q).hasIssues).length;
-                                  if (issueCount > 0) {
-                                    return (
-                                      <span 
-                                        className="bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1 shadow-sm"
-                                        title={`${issueCount} of ${pageQuestions.length} question(s) have missing or incomplete fields`}
-                                      >
-                                        <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                        <span>{issueCount} Need Fix</span>
-                                      </span>
-                                    );
-                                  }
-                                  return null;
-                                })()}
-                                <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
-                                  <CheckCircle2 className="w-3 h-3" /> {pageQuestions.length} MCQs
-                                </span>
-                              </div>
-                            )}
-                            {page.status === 'error' && (
-                              <span className="bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5">
-                                <AlertCircle className="w-3 h-3" /> Error
-                              </span>
-                            )}
-                            {page.status === 'pending' && (
-                              <span className="bg-white/[0.04] border border-white/[0.08] text-slate-400 text-xs font-bold px-2.5 py-1 rounded-full">
-                                Pending
-                              </span>
-                            )}
-                          </div>
+                              </>
+                            );
+                          })()}
+                          {page.status === 'error' && (
+                            <span className="badge badge-danger">
+                              <AlertCircle /> Error
+                            </span>
+                          )}
+                          {page.status === 'pending' && (
+                            <span className="badge badge-neutral">Pending</span>
+                          )}
                         </div>
-
-                        {/* Page Preview (Image or Text/DOCX Document) */}
-                        {page.imageUrl ? (
-                          <div
-                            className="relative group rounded-xl overflow-hidden border border-white/[0.08] bg-black cursor-pointer aspect-[3/4] max-h-[380px] flex items-center justify-center shadow-inner"
-                            onClick={() => { setZoomPageIndex(idx); setIsFigureCropMode(false); }}
-                            title="Click to view full image in lightbox"
-                          >
-                            <img
-                              src={page.imageUrl}
-                              alt={`Page ${page.pageNumber}`}
-                              className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
-                            />
-                            
-                            {/* Floating Quick Action Buttons on Image */}
-                            <div 
-                              className="absolute top-2 right-2 flex items-center gap-1.5 z-20"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setZoomPageIndex(idx);
-                                  setIsFigureCropMode(true);
-                                  const firstQ = pageQuestions[0];
-                                  if (firstQ) setSelectedTargetQuestionId(firstQ.id);
-                                }}
-                                className="flex items-center gap-1 px-2 py-1 bg-orange-600/90 hover:bg-orange-500 border border-orange-400/50 text-white rounded-lg text-[10px] font-extrabold transition-all shadow-lg backdrop-blur-md cursor-pointer active:scale-95"
-                                title={`Open Page ${page.pageNumber} in Figure Cropper`}
-                              >
-                                <Scissors className="w-3 h-3 text-white" />
-                                <span>Crop Figures</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleCopyPageImage(page)}
-                                className="flex items-center gap-1 px-2 py-1 bg-black/80 hover:bg-slate-900 border border-white/20 hover:border-sky-400 text-sky-300 hover:text-white rounded-lg text-[10px] font-extrabold transition-all shadow-lg backdrop-blur-md cursor-pointer active:scale-95"
-                                title={`Copy Page ${page.pageNumber} image to clipboard to paste (Ctrl+V) in ChatGPT / Claude`}
-                              >
-                                {copiedImagePageId === page.id ? <Check className="w-3 h-3 text-emerald-400" /> : <ImageIcon className="w-3 h-3 text-sky-400" />}
-                                <span>{copiedImagePageId === page.id ? 'Copied!' : 'Copy Image'}</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleCopyPagePrompt(page)}
-                                className="flex items-center gap-1 px-2 py-1 bg-black/80 hover:bg-slate-900 border border-white/20 hover:border-indigo-400 text-indigo-300 hover:text-white rounded-lg text-[10px] font-extrabold transition-all shadow-lg backdrop-blur-md cursor-pointer active:scale-95"
-                                title={`Copy ready-to-use CSV prompt for ChatGPT / Claude`}
-                              >
-                                {copiedPromptPageId === page.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Clipboard className="w-3 h-3 text-indigo-400" />}
-                                <span>{copiedPromptPageId === page.id ? 'Copied!' : 'Copy Prompt'}</span>
-                              </button>
-                            </div>
-
-                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white gap-2 font-bold text-xs backdrop-blur-xs">
-                              <ZoomIn className="w-5 h-5 text-amber-400" />
-                              <span>Click to Zoom Image</span>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="rounded-xl overflow-hidden border border-white/[0.08] bg-slate-950/90 p-3 aspect-[3/4] max-h-[380px] flex flex-col justify-between shadow-inner">
-                            <div className="flex items-center justify-between pb-2 border-b border-white/[0.06] text-[11px]">
-                              <span className="font-bold text-amber-400 flex items-center gap-1">
-                                <FileText className="w-3.5 h-3.5" />
-                                <span>{page.sourceType === 'docx' ? 'Word DOCX' : 'Direct Text'}</span>
-                              </span>
-                              <span className="text-slate-400 text-[10px]">
-                                {page.rawTextContent ? `${page.rawTextContent.length} chars` : ''}
-                              </span>
-                            </div>
-                            <div className="flex-1 my-2 overflow-y-auto custom-scrollbar font-mono text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap select-text p-2.5 rounded-lg bg-black/50 border border-white/[0.04]">
-                              {page.rawTextContent || 'No text content available'}
-                            </div>
-                            <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between text-[11px]">
-                              <span className="text-slate-500 truncate max-w-[140px] text-[10px]" title={page.fileName}>
-                                {page.fileName || `Section ${page.pageNumber}`}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (page.rawTextContent) {
-                                    navigator.clipboard.writeText(page.rawTextContent);
-                                    alert('Copied section text to clipboard!');
-                                  }
-                                }}
-                                className="px-2 py-1 bg-white/[0.05] hover:bg-white/[0.1] rounded text-slate-300 hover:text-white flex items-center gap-1 transition-colors text-[10px]"
-                              >
-                                <Copy className="w-3 h-3" />
-                                <span>Copy</span>
-                              </button>
-                            </div>
-                          </div>
-                        )}
                       </div>
 
-                      {/* Bottom Controls for Page */}
-                      <div className="mt-3 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs gap-1.5 flex-wrap">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {page.status === 'processing' && (
+                      {/* Page preview (image or text / DOCX section) */}
+                      {page.imageUrl ? (
+                        <button
+                          type="button"
+                          className="relative group rounded-[10px] overflow-hidden border border-line bg-white/[0.03] aspect-[3/4] max-h-[400px] w-full flex items-center justify-center"
+                          onClick={() => { setZoomPageIndex(idx); setIsFigureCropMode(false); }}
+                          title="Open full-size page"
+                        >
+                          <img
+                            src={page.imageUrl}
+                            alt={`Page ${page.pageNumber}`}
+                            className="w-full h-full object-contain"
+                          />
+                          <span className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 flex items-center justify-center gap-2 text-sm font-semibold text-white transition-opacity">
+                            <ZoomIn className="w-5 h-5" />
+                            Open full size
+                          </span>
+                        </button>
+                      ) : (
+                        <div className="rounded-[10px] overflow-hidden border border-line bg-canvas p-3 aspect-[3/4] max-h-[400px] flex flex-col">
+                          <div className="flex items-center justify-between pb-2 border-b border-line text-xs">
+                            <span className="font-semibold text-ink-2 flex items-center gap-1.5">
+                              <FileText className="w-3.5 h-3.5 text-ink-3" />
+                              <span>{page.sourceType === 'docx' ? 'Word DOCX' : 'Direct text'}</span>
+                            </span>
+                            <span className="text-ink-3">
+                              {page.rawTextContent ? `${page.rawTextContent.length} chars` : ''}
+                            </span>
+                          </div>
+                          <div className="flex-1 my-2 overflow-y-auto font-mono text-xs text-ink-2 leading-relaxed whitespace-pre-wrap select-text">
+                            {page.rawTextContent || 'No text content available'}
+                          </div>
+                          <div className="pt-2 border-t border-line flex items-center justify-between gap-2 text-xs">
+                            <span className="text-ink-3 truncate" title={page.fileName}>
+                              {page.fileName || `Section ${page.pageNumber}`}
+                            </span>
                             <button
                               type="button"
-                              onClick={() => handleStopPage(page.id)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/50 text-rose-300 hover:text-white rounded-lg font-bold transition-all text-xs active:scale-95 shadow-sm animate-pulse"
-                              title={`Stop extraction for Page ${page.pageNumber}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (page.rawTextContent) {
+                                  navigator.clipboard.writeText(page.rawTextContent);
+                                  alert('Copied section text to clipboard!');
+                                }
+                              }}
+                              className="btn btn-ghost btn-xs"
                             >
-                              <Square className="w-3.5 h-3.5 fill-rose-400" />
-                              <span>Stop</span>
+                              <Copy />
+                              <span>Copy</span>
                             </button>
-                          )}
+                          </div>
+                        </div>
+                      )}
 
+                      {/* Page actions */}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {page.status === 'processing' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleStopPage(page.id)}
+                            className="btn btn-danger-solid btn-sm"
+                            title={`Stop extraction for Page ${page.pageNumber}`}
+                          >
+                            <Square className="fill-current" />
+                            <span>Stop</span>
+                          </button>
+                        ) : (
                           <button
                             type="button"
                             onClick={() => handleRetryPage(page, idx, 'exact')}
-                            disabled={page.status === 'processing'}
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] hover:bg-amber-500/20 border border-white/[0.08] hover:border-amber-500/30 text-slate-300 hover:text-amber-300 rounded-lg font-bold transition-all disabled:opacity-40"
+                            className="btn btn-secondary btn-sm"
                             title="Extract exact questions from this page"
                           >
-                            <RotateCw className={`w-3.5 h-3.5 ${page.status === 'processing' ? 'animate-spin' : ''}`} />
-                            <span>Exact</span>
+                            <RotateCw />
+                            <span>{page.status === 'pending' ? 'Extract' : 'Re-extract'}</span>
                           </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleRetryPage(page, idx, 'similar')}
-                            disabled={page.status === 'processing'}
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 hover:text-purple-200 rounded-lg font-bold transition-all disabled:opacity-40"
-                            title="Use this page strictly as conceptual reference and generate brand-new practice MCQs"
-                          >
-                            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                            <span>✨ Similar</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleRecaptureFromAiTab(page)}
-                            disabled={page.status === 'processing'}
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 hover:text-cyan-200 rounded-lg font-bold transition-all disabled:opacity-40"
-                            title="Read complete finished response from AI tab if anything was cut off"
-                          >
-                            <Camera className="w-3.5 h-3.5 text-cyan-400" />
-                            <span>Recapture</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (activePastePageId === page.id) {
-                                setActivePastePageId(null);
-                                setPasteInputText('');
-                                setPasteError(null);
-                              } else {
-                                setActivePastePageId(page.id);
-                                setPasteInputText('');
-                                setPasteError(null);
-                              }
-                            }}
-                            disabled={page.status === 'processing'}
-                            className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-lg font-bold transition-all disabled:opacity-40 ${
-                              activePastePageId === page.id
-                                ? 'bg-amber-500/25 border-amber-500/60 text-amber-200 shadow-sm'
-                                : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-300 hover:text-emerald-200'
-                            }`}
-                            title="Paste CSV rows, Excel table, or JSON directly for this page"
-                          >
-                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Paste CSV</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleCopyPageImage(page)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-300 hover:text-sky-200 rounded-lg font-bold transition-all text-xs"
-                            title={`Copy Page ${page.pageNumber} image to clipboard to paste in ChatGPT / Claude`}
-                          >
-                            {copiedImagePageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <ImageIcon className="w-3.5 h-3.5 text-sky-400" />}
-                            <span>{copiedImagePageId === page.id ? 'Copied' : 'Copy Img'}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleCopyPagePrompt(page)}
-                            className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 hover:text-indigo-200 rounded-lg font-bold transition-all text-xs"
-                            title={`Copy ready-to-use CSV prompt for ChatGPT / Claude`}
-                          >
-                            {copiedPromptPageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Clipboard className="w-3.5 h-3.5 text-indigo-400" />}
-                            <span>{copiedPromptPageId === page.id ? 'Copied' : 'Copy Prompt'}</span>
-                          </button>
-                        </div>
+                        )}
 
                         <button
                           type="button"
-                          onClick={() => handleDeletePage(page.id)}
+                          onClick={() => {
+                            if (activePastePageId === page.id) {
+                              setActivePastePageId(null);
+                            } else {
+                              setActivePastePageId(page.id);
+                            }
+                            setPasteInputText('');
+                            setPasteError(null);
+                          }}
                           disabled={page.status === 'processing'}
-                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all disabled:opacity-40"
-                          title="Delete this page"
+                          aria-expanded={activePastePageId === page.id}
+                          className={`btn btn-secondary btn-sm ${activePastePageId === page.id ? 'border-accent/50 text-accent-light' : ''}`}
+                          title="Paste CSV rows, Excel table, or JSON directly for this page"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <ClipboardPaste />
+                          <span>Paste</span>
                         </button>
+
+                        <span className="flex-1" />
+
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPageImage(page)}
+                          className="btn btn-ghost btn-sm btn-icon"
+                          title={`Copy Page ${page.pageNumber} image to paste (Ctrl+V) in ChatGPT / Claude`}
+                          aria-label="Copy page image"
+                        >
+                          {copiedImagePageId === page.id ? <Check className="text-emerald-400" /> : <ImageIcon />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyPagePrompt(page)}
+                          className="btn btn-ghost btn-sm btn-icon"
+                          title="Copy ready-to-use CSV prompt for ChatGPT / Claude"
+                          aria-label="Copy CSV prompt"
+                        >
+                          {copiedPromptPageId === page.id ? <Check className="text-emerald-400" /> : <Clipboard />}
+                        </button>
+
+                        <div className="relative" data-menu-root>
+                          <button
+                            type="button"
+                            onClick={() => toggleMenu(`page:${page.id}`)}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenu === `page:${page.id}`}
+                            aria-label={`More actions for page ${page.pageNumber}`}
+                            title="More page actions"
+                            className="btn btn-ghost btn-sm btn-icon"
+                          >
+                            <MoreHorizontal />
+                          </button>
+                          {openMenu === `page:${page.id}` && (
+                            <div className="menu right-0 bottom-full mb-1.5 w-72 animate-fadeIn" role="menu">
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="menu-item"
+                                disabled={page.status === 'processing'}
+                                onClick={() => { setOpenMenu(null); handleRetryPage(page, idx, 'similar'); }}
+                                title="Use this page strictly as conceptual reference and generate brand-new practice MCQs"
+                              >
+                                <Sparkles />
+                                <span>Generate similar MCQs<span className="menu-item-desc">New questions using this page as reference</span></span>
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="menu-item"
+                                disabled={page.status === 'processing'}
+                                onClick={() => { setOpenMenu(null); handleRecaptureFromAiTab(page); }}
+                              >
+                                <Camera />
+                                <span>Recapture from AI tab<span className="menu-item-desc">Re-read the finished response if it was cut off</span></span>
+                              </button>
+                              {page.imageUrl && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="menu-item"
+                                  onClick={() => {
+                                    setOpenMenu(null);
+                                    setZoomPageIndex(idx);
+                                    setIsFigureCropMode(true);
+                                    const firstQ = pageQuestions[0];
+                                    if (firstQ) setSelectedTargetQuestionId(firstQ.id);
+                                  }}
+                                >
+                                  <Scissors />
+                                  <span>Crop figures</span>
+                                </button>
+                              )}
+                              <div className="menu-divider" />
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="menu-item menu-item-danger"
+                                disabled={page.status === 'processing'}
+                                onClick={() => { setOpenMenu(null); handleDeletePage(page.id); }}
+                              >
+                                <Trash2 />
+                                <span>Delete page</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* Inline Manual Paste CSV / JSON Drawer directly below page */}
                       {activePastePageId === page.id && (
-                        <div className="mt-3 p-3.5 bg-slate-900/95 border border-emerald-500/40 rounded-xl space-y-2.5 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+                        <div className="panel p-3 space-y-2.5 animate-fadeIn">
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
-                              <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                              <span>Paste CSV / Table / JSON (Page {page.pageNumber})</span>
+                            <div className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+                              <FileSpreadsheet className="w-4 h-4 text-ink-3" />
+                              <span>Paste CSV / table / JSON</span>
                             </div>
                             <button
                               type="button"
                               onClick={() => { setActivePastePageId(null); setPasteInputText(''); setPasteError(null); }}
-                              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10"
+                              className="btn btn-ghost btn-xs btn-icon"
                               title="Close"
+                              aria-label="Close paste panel"
                             >
-                              <X className="w-3.5 h-3.5" />
+                              <X />
                             </button>
                           </div>
 
-                          <p className="text-[11px] text-slate-400 leading-tight">
+                          <p className="text-xs text-ink-3 leading-snug">
                             DeepSeek, ChatGPT, Excel ya kahi se bhi Page {page.pageNumber} ke CSV rows ya JSON yaha paste karein:
                           </p>
 
@@ -3681,11 +3515,11 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                             onChange={(e) => { setPasteInputText(e.target.value); setPasteError(null); }}
                             placeholder={`Example CSV format:\nquestion_hi,option1_hi,option2_hi,option3_hi,option4_hi,answer,solution_hi\n"भारत की राजधानी?","मुंबई","दिल्ली","कोलकाता","चेन्नई","B","दिल्ली भारत की राजधानी है"`}
                             rows={5}
-                            className="w-full bg-black/70 border border-white/10 rounded-lg p-2.5 text-[11px] font-mono text-slate-200 placeholder-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 custom-scrollbar resize-y"
+                            className="textarea font-mono text-xs resize-y"
                           />
 
                           {pasteError && (
-                            <div className="text-[11px] text-rose-400 flex items-center gap-1.5 bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
+                            <div className="callout callout-danger items-center text-xs">
                               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                               <span>{pasteError}</span>
                             </div>
@@ -3707,18 +3541,18 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                   setPasteError('Could not read clipboard. Please paste manually (Ctrl+V).');
                                 }
                               }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white rounded-lg text-xs font-semibold transition-all"
+                              className="btn btn-ghost btn-sm"
                               title="Paste directly from clipboard"
                             >
-                              <Clipboard className="w-3.5 h-3.5 text-cyan-400" />
-                              <span>Paste Clipboard</span>
+                              <Clipboard />
+                              <span>From clipboard</span>
                             </button>
 
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
                                 onClick={() => { setActivePastePageId(null); setPasteInputText(''); setPasteError(null); }}
-                                className="px-2.5 py-1.5 text-slate-400 hover:text-slate-200 text-xs font-semibold"
+                                className="btn btn-ghost btn-sm"
                               >
                                 Cancel
                               </button>
@@ -3726,10 +3560,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                 type="button"
                                 onClick={() => handleImportPastedContentForPage(page, pasteInputText)}
                                 disabled={!pasteInputText.trim()}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold rounded-lg text-xs shadow-md transition-all disabled:opacity-40"
+                                className="btn btn-primary btn-sm"
                               >
-                                <Check className="w-3.5 h-3.5" />
-                                <span>Import to Page {page.pageNumber}</span>
+                                <Check />
+                                <span>Import</span>
                               </button>
                             </div>
                           </div>
@@ -3737,208 +3571,211 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                       )}
                     </div>
 
-                    {/* RIGHT SIDE: Extracted Questions for THIS Page */}
-                    <div className="flex-1 min-w-0 bg-[#0C0F17] flex flex-col p-4 space-y-3">
-                      {/* Right Panel Header */}
-                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
+                    {/* RIGHT SIDE: extracted questions for this page */}
+                    <div className="flex-1 min-w-0 flex flex-col p-4 gap-4">
+                      {/* Panel header */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-line">
                         {(() => {
                           const pageIncompleteCount = pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues).length;
                           return (
                             <>
                               <div className="flex items-center gap-2">
-                                <span className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">
-                                  Page {page.pageNumber} MCQs
-                                </span>
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/[0.06] text-slate-300">
-                                  {pageQuestions.length} Questions
-                                </span>
+                                <h3 className="text-sm font-semibold text-ink">Questions</h3>
+                                <span className="badge badge-neutral">{pageQuestions.length}</span>
                                 {pageIncompleteCount > 0 && (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 animate-pulse">
-                                    <AlertTriangle className="w-3 h-3 text-amber-400" />
-                                    <span>{pageIncompleteCount} Incomplete</span>
+                                  <span className="badge badge-warning">
+                                    <AlertTriangle />
+                                    <span>{pageIncompleteCount} incomplete</span>
                                   </span>
                                 )}
                               </div>
 
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1.5">
                                 {pageIncompleteCount > 0 && (
                                   <>
                                     <button
                                       type="button"
                                       onClick={() => handleReverifyMissingFields(pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues))}
                                       disabled={isRepairingAll}
-                                      className="flex items-center gap-1 px-2.5 py-1 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                      className="btn btn-secondary btn-sm"
                                       title="Visually re-inspect page images to recover missing fields"
                                     >
-                                      <Eye className="w-3.5 h-3.5 text-blue-400" />
+                                      <Eye />
                                       <span>Re-verify ({pageIncompleteCount})</span>
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => handleAiRepairPageItems(pageQuestions)}
                                       disabled={isRepairingAll}
-                                      className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                                      className="btn btn-primary btn-sm"
                                       title="Auto-fill missing options & solutions for incomplete questions on this page"
                                     >
-                                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                                      <span>AI Fill ({pageIncompleteCount})</span>
+                                      <Sparkles />
+                                      <span>AI fill ({pageIncompleteCount})</span>
                                     </button>
                                   </>
                                 )}
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyPageImage(page)}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-sky-600/20 hover:bg-sky-600/35 border border-sky-500/40 text-sky-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
-                                  title={`Copy Page ${page.pageNumber} image to clipboard (press Ctrl+V in ChatGPT / Claude / Gemini)`}
-                                >
-                                  {copiedImagePageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <ImageIcon className="w-3.5 h-3.5 text-sky-400" />}
-                                  <span>{copiedImagePageId === page.id ? 'Image Copied!' : 'Copy Image'}</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyPagePrompt(page)}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/40 text-indigo-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
-                                  title={`Copy ready-to-use CSV prompt for ChatGPT / Claude / Gemini`}
-                                >
-                                  {copiedPromptPageId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Clipboard className="w-3.5 h-3.5 text-indigo-400" />}
-                                  <span>{copiedPromptPageId === page.id ? 'Prompt Copied!' : 'Copy Prompt'}</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setAddQuestionTargetPage(page.pageNumber);
-                                    setShowAddQuestionModal(true);
-                                  }}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-violet-600/20 hover:bg-violet-600/30 border border-violet-500/40 text-violet-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm"
-                                  title="Add question to this page via text prompt or paste screenshot (Ctrl+V)"
-                                >
-                                  <Plus className="w-3.5 h-3.5 text-violet-400" />
-                                  <span>AI Add / Paste</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setPasteCsvTargetPage(page.pageNumber);
-                                    setShowPasteCsvModal(true);
-                                  }}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/40 text-teal-300 hover:text-white rounded-lg text-xs font-bold transition-all shadow-sm"
-                                  title={`Paste CSV or missing questions extracted separately directly into Page ${page.pageNumber}`}
-                                >
-                                  <ClipboardPaste className="w-3.5 h-3.5 text-teal-400" />
-                                  <span>Paste to Page</span>
-                                </button>
+                                <div className="relative" data-menu-root>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleMenu(`pageadd:${page.id}`)}
+                                    aria-haspopup="menu"
+                                    aria-expanded={openMenu === `pageadd:${page.id}`}
+                                    className="btn btn-ghost btn-sm"
+                                  >
+                                    <Plus />
+                                    <span>Add</span>
+                                    <ChevronDown />
+                                  </button>
+                                  {openMenu === `pageadd:${page.id}` && (
+                                    <div className="menu right-0 mt-1.5 w-72 animate-fadeIn" role="menu">
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        className="menu-item"
+                                        onClick={() => {
+                                          setOpenMenu(null);
+                                          setAddQuestionTargetPage(page.pageNumber);
+                                          setShowAddQuestionModal(true);
+                                        }}
+                                      >
+                                        <Sparkles />
+                                        <span>Add with AI / screenshot<span className="menu-item-desc">Text prompt or paste a screenshot (Ctrl+V)</span></span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        className="menu-item"
+                                        onClick={() => {
+                                          setOpenMenu(null);
+                                          setPasteCsvTargetPage(page.pageNumber);
+                                          setShowPasteCsvModal(true);
+                                        }}
+                                      >
+                                        <ClipboardPaste />
+                                        <span>Paste CSV to page {page.pageNumber}</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        className="menu-item"
+                                        onClick={() => { setOpenMenu(null); handleAddQuestionToPage(page); }}
+                                      >
+                                        <Plus />
+                                        <span>Blank question</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </>
                           );
                         })()}
                       </div>
 
-                      {/* Content Area according to Status */}
+                      {/* Content area by status */}
                       {page.status === 'processing' && (
-                        <div className="py-16 flex flex-col items-center justify-center text-center space-y-4">
-                          <Loader2 className="w-9 h-9 text-amber-400 animate-spin" />
+                        <div className="py-16 flex flex-col items-center justify-center text-center gap-3" role="status">
+                          <Loader2 className="w-8 h-8 text-accent animate-spin" />
                           <div className="space-y-1 max-w-sm">
-                            <p className="text-xs font-bold text-amber-300 uppercase tracking-wider">
-                              Extracting Bilingual MCQs with LaTeX...
-                            </p>
-                            <p className="text-[11px] text-slate-400">
-                              {page.errorMessage || 'AI model is reading questions, options, and deep step-by-step solutions.'}
+                            <p className="text-sm font-semibold text-ink">Extracting bilingual MCQs…</p>
+                            <p className="text-sm text-ink-3">
+                              {page.errorMessage || 'Reading questions, options and step-by-step solutions.'}
                             </p>
                           </div>
                           <button
                             type="button"
                             onClick={() => handleStopPage(page.id)}
-                            className="mt-2 flex items-center gap-2 px-4 py-2 bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/40 hover:border-rose-500/70 text-rose-300 hover:text-white rounded-xl text-xs font-bold transition-all shadow-lg hover:shadow-rose-500/20 active:scale-95 group"
+                            className="btn btn-secondary btn-sm mt-1"
                             title={`Stop extracting Page ${page.pageNumber}`}
                           >
-                            <Square className="w-3.5 h-3.5 fill-rose-400 group-hover:fill-rose-300" />
-                            <span>Stop Extraction</span>
+                            <Square className="fill-current" />
+                            <span>Stop extraction</span>
                           </button>
                         </div>
                       )}
 
                       {page.status === 'pending' && (
-                        <div className="py-16 text-center space-y-2 text-slate-500">
-                          <BookOpen className="w-8 h-8 mx-auto text-slate-600" />
-                          <p className="text-xs font-semibold text-slate-400">Page is ready in queue</p>
-                          <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
-                            Click "Start MCQ Extraction" at the top or click "Re-Extract Page" on the left to digitize this page.
+                        <div className="py-16 text-center flex flex-col items-center gap-2">
+                          <BookOpen className="w-8 h-8 text-ink-3" />
+                          <p className="text-sm font-semibold text-ink-2">Waiting in queue</p>
+                          <p className="text-sm text-ink-3 max-w-sm">
+                            Use “Start extraction” above, or “Extract” on the left to run just this page.
                           </p>
                         </div>
                       )}
 
                       {page.status === 'error' && (
-                        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 space-y-3">
-                          <div className="flex items-center gap-2 font-bold text-xs">
+                        <div className="callout callout-danger flex-col gap-3 p-4">
+                          <div className="flex items-center gap-2 font-semibold text-sm">
                             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                            <span>Page Extraction Error</span>
+                            <span>Couldn’t extract this page</span>
                           </div>
-                          <p className="text-xs text-rose-200/90 leading-relaxed">{page.errorMessage || 'Failed to extract this page.'}</p>
-                          
+                          <p className="text-sm text-rose-200/90 leading-relaxed">{page.errorMessage || 'Failed to extract this page.'}</p>
+
                           {page.errorMessage?.includes('timed out') ? (
-                            <div className="p-2.5 rounded-lg bg-black/40 border border-amber-500/30 text-amber-200 text-xs space-y-1.5">
-                              <p className="font-semibold text-amber-300 flex items-center gap-1.5">
-                                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                <span>AI Browser Tab Timeout (Chrome Extension Bridge)</span>
+                            <div className="callout callout-warning flex-col gap-1">
+                              <p className="font-semibold flex items-center gap-1.5">
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                <span>AI browser tab timeout (extension bridge)</span>
                               </p>
-                              <p className="text-[11px] text-slate-300">
+                              <p className="text-ink-2">
                                 1. Agar Chrome me AI tab (Gemini/ChatGPT/DeepSeek) ne likhna pura kar liya hai, to <strong>"Recapture"</strong> dabayein.<br/>
                                 2. Ya fir bina extension/timeout ke fast server processing ke liye <strong>"Direct API"</strong> se extract karein.
                               </p>
                             </div>
                           ) : null}
 
-                          <div className="flex items-center gap-2 flex-wrap pt-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => handleRetryPage(page, idx)}
+                              className="btn btn-primary btn-sm"
+                            >
+                              <RotateCw />
+                              Retry extraction
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleRecaptureFromAiTab(page)}
-                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-sm"
+                              className="btn btn-secondary btn-sm"
                               title="Read response from open AI tab in Chrome"
                             >
-                              <Camera className="w-3.5 h-3.5" />
-                              <span>Recapture from AI Tab</span>
+                              <Camera />
+                              <span>Recapture from AI tab</span>
                             </button>
-
                             <button
                               type="button"
                               onClick={() => {
                                 setAiEngine('api');
                                 setTimeout(() => handleRetryPage(page, idx, 'exact'), 50);
                               }}
-                              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold rounded-lg text-xs flex items-center gap-1.5 shadow-sm"
+                              className="btn btn-secondary btn-sm"
                               title="Switch to direct server Gemini API (fast, no browser tab needed)"
                             >
-                              <Zap className="w-3.5 h-3.5" />
-                              <span>Switch to Direct API & Retry</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleRetryPage(page, idx)}
-                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-xs"
-                            >
-                              Retry Extraction
+                              <Zap />
+                              <span>Retry with direct API</span>
                             </button>
                           </div>
                         </div>
                       )}
 
                       {page.status === 'ready' && pageQuestions.length === 0 && (
-                        <div className="py-12 text-center text-slate-500 space-y-2">
-                          <AlertCircle className="w-7 h-7 mx-auto text-slate-600" />
-                          <p className="text-xs font-semibold">No questions found on Page {page.pageNumber}</p>
-                          <div className="flex items-center justify-center gap-2 pt-1">
+                        <div className="py-12 text-center flex flex-col items-center gap-2">
+                          <AlertCircle className="w-7 h-7 text-ink-3" />
+                          <p className="text-sm font-semibold text-ink-2">No questions found on page {page.pageNumber}</p>
+                          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                             <button
                               type="button"
                               onClick={() => {
                                 setPasteCsvTargetPage(page.pageNumber);
                                 setShowPasteCsvModal(true);
                               }}
-                              className="px-3 py-1.5 text-xs font-bold bg-teal-600/25 hover:bg-teal-600/40 border border-teal-500/40 text-teal-300 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+                              className="btn btn-secondary btn-sm"
                               title={`Paste CSV data or missing questions into Page ${page.pageNumber}`}
                             >
-                              <ClipboardPaste className="w-3.5 h-3.5 text-teal-400" />
-                              <span>Paste CSV to Page {page.pageNumber}</span>
+                              <ClipboardPaste />
+                              <span>Paste CSV</span>
                             </button>
                             <button
                               type="button"
@@ -3946,23 +3783,23 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                 setAddQuestionTargetPage(page.pageNumber);
                                 setShowAddQuestionModal(true);
                               }}
-                              className="px-3 py-1.5 text-xs font-bold bg-violet-600/25 hover:bg-violet-600/40 border border-violet-500/40 text-violet-300 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+                              className="btn btn-secondary btn-sm"
                             >
-                              <Plus className="w-3.5 h-3.5 text-violet-400" />
-                              <span>+ Add via AI / Paste Screenshot</span>
+                              <Sparkles />
+                              <span>Add with AI / screenshot</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleAddQuestionToPage(page)}
-                              className="px-3 py-1.5 text-xs text-slate-400 border border-white/[0.1] rounded-lg hover:bg-white/[0.06] transition-all"
+                              className="btn btn-ghost btn-sm"
                             >
-                              + Blank
+                              <Plus />
+                              Blank
                             </button>
                           </div>
                         </div>
                       )}
-
-                      {/* Questions List for this Page */}
+                      {/* Questions list for this page */}
                       {pageQuestions.length > 0 && (
                         <div className="space-y-4">
                           {pageQuestions.map((item) => {
@@ -3970,344 +3807,317 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                             const isSolving = solvingId === item.id;
                             const isRepairing = repairingId === item.id;
                             const issues = detectItemFieldIssues(item);
+                            const hasPassage = Boolean(item.passage_hi || (item.figure_notes && item.figure_notes.toLowerCase().includes('passage')) || /गद्यांश|काव्यांश|पद्यांश|निर्देश/i.test(item.question_hi));
+                            const isRefVariant = Boolean(item.source_question_reference?.includes('Variant') || item.correction_notes?.includes('reference'));
+                            const menuId = `q:${item.id}`;
 
                             return (
-                              <div
+                              <article
                                 key={item.id}
-                                className={`rounded-xl border p-4 space-y-3 transition-all ${
+                                className={`rounded-xl border bg-surface-2/40 transition-colors ${
                                   issues.hasIssues
-                                    ? 'border-amber-500/60 bg-black/60 shadow-xl shadow-amber-500/10 ring-1 ring-amber-500/30'
-                                    : 'border-white/[0.08] bg-black/40 hover:border-white/[0.15]'
+                                    ? 'border-amber-500/45'
+                                    : isEditing
+                                    ? 'border-accent/45'
+                                    : 'border-line hover:border-line-strong'
                                 }`}
                               >
-                                {/* MCQ Header Bar */}
-                                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/[0.06]">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-extrabold text-xs border border-amber-500/30">
-                                      Q#{item.question_r}
-                                    </span>
+                                {/* Card header */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 border-b border-line">
+                                  <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                                    <span className="text-sm font-bold text-ink tabular-nums mr-1">Q{item.question_r}</span>
 
-                                    {/* Ref Variant Badge */}
-                                    {(item.source_question_reference?.includes('Variant') || item.correction_notes?.includes('reference')) && (
-                                      <span className="px-2 py-0.5 rounded bg-purple-500/25 text-purple-300 font-extrabold text-[10px] border border-purple-500/40 flex items-center gap-1 shadow-sm">
-                                        <Sparkles className="w-2.5 h-2.5 text-amber-300" />
-                                        <span>Ref Variant</span>
-                                      </span>
-                                    )}
-
-                                    {/* STRICT ACADEMIC SUBJECT SELECTOR */}
-                                    <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs">
-                                      <span className="text-amber-400 font-bold text-[10px] uppercase">Subject:</span>
+                                    <label className="badge badge-neutral h-7 pr-1 cursor-pointer" title="Subject">
+                                      <span className="sr-only">Subject</span>
                                       <select
                                         value={item.subject || 'Current Affairs'}
                                         onChange={(e) => updateItem(item.id, { subject: normalizeStrictSubject(e.target.value) })}
-                                        className="bg-transparent text-amber-300 font-extrabold text-xs focus:outline-none cursor-pointer"
+                                        className="bg-transparent text-ink text-xs font-semibold focus:outline-none cursor-pointer max-w-[11rem]"
                                       >
                                         {STANDARD_SUBJECTS.map((s) => (
-                                          <option key={s} value={s} className="bg-slate-900 text-slate-200">{s}</option>
+                                          <option key={s} value={s} className="bg-surface-2 text-ink">{s}</option>
                                         ))}
                                       </select>
-                                    </div>
+                                    </label>
 
-                                    {/* Subject Level */}
-                                    <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] px-2 py-0.5 rounded-lg text-xs">
-                                      <span className="text-slate-400 font-bold text-[10px] uppercase">Level:</span>
+                                    <label className="badge badge-neutral h-7 font-medium" title="Subject level / exam">
+                                      <span className="text-ink-3">Level</span>
                                       <input
                                         type="text"
                                         value={item.subject_level || ''}
                                         onChange={(e) => updateItem(item.id, { subject_level: e.target.value })}
-                                        placeholder="e.g. RRB Level 01 Stage I 2025"
-                                        className="bg-transparent text-slate-200 text-xs focus:outline-none w-32 truncate"
+                                        placeholder="RRB Level 01 Stage I 2025"
+                                        className="bg-transparent text-ink text-xs focus:outline-none w-36 truncate placeholder:text-ink-3/70"
                                       />
-                                    </div>
+                                    </label>
 
-                                    <span className="text-[11px] text-slate-400">
-                                      Diff: <strong className="text-white capitalize">{item.difficulty_level}</strong>
-                                    </span>
+                                    <span className="badge badge-neutral h-7 capitalize">{item.difficulty_level}</span>
 
-                                    {/* Passage Attached Indicator */}
-                                    {(item.passage_hi || (item.figure_notes && item.figure_notes.toLowerCase().includes('passage')) || /गद्यांश|काव्यांश|पद्यांश|निर्देश/i.test(item.question_hi)) && (
-                                      <span className="flex items-center gap-1 bg-amber-500/15 border border-amber-500/40 text-amber-300 font-extrabold px-2 py-0.5 rounded-lg text-[10px] shadow-sm" title="This question has a Reading Comprehension / गद्यांश passage attached">
-                                        <BookOpen className="w-3 h-3 text-amber-400 shrink-0" />
-                                        <span>📖 गद्यांश (Passage)</span>
+                                    {isRefVariant && (
+                                      <span className="badge badge-accent h-7">
+                                        <Sparkles />
+                                        <span>Ref variant</span>
+                                      </span>
+                                    )}
+
+                                    {hasPassage && (
+                                      <span className="badge badge-info h-7" title="This question has a Reading Comprehension / गद्यांश passage attached">
+                                        <BookOpen />
+                                        <span>गद्यांश · Passage</span>
                                       </span>
                                     )}
                                   </div>
 
-                                  <div className="flex items-center gap-2">
-                                    {/* Correct Answer Badge */}
-                                    <div className="flex items-center gap-1 text-xs">
-                                      <span className="text-slate-400 font-bold">Ans:</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-3" title="Correct answer">
+                                      Ans
                                       <input
                                         type="text"
                                         value={item.answer}
                                         onChange={(e) => updateItem(item.id, { answer: e.target.value })}
-                                        className="w-12 px-1.5 py-0.5 bg-black/80 border border-emerald-500/40 rounded text-center text-xs font-extrabold text-emerald-400 focus:outline-none"
+                                        className="input input-sm w-12 px-1 text-center font-bold text-emerald-300 border-emerald-500/40"
+                                        aria-label="Correct answer"
                                       />
-                                    </div>
+                                    </label>
 
-                                    {/* Visual Re-verify from Image Button */}
                                     {issues.hasIssues && (
                                       <button
                                         type="button"
-                                        onClick={() => handleReverifyItem(item)}
+                                        onClick={() => handleAiRepairSingle(item)}
                                         disabled={isRepairing || isSolving}
-                                        className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-extrabold bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 transition-all disabled:opacity-50"
-                                        title="Visually re-inspect page images to recover missing fields"
+                                        className="btn btn-primary btn-sm"
+                                        title="Auto-fill missing options, deduce answer, and generate solutions"
                                       >
-                                        {isRepairing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3 text-blue-400" />}
-                                        <span>Re-verify</span>
+                                        {isRepairing ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                                        <span>Auto-fill</span>
                                       </button>
                                     )}
 
-                                    {/* AI Auto-Repair / Fill Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleAiRepairSingle(item)}
-                                      disabled={isRepairing || isSolving}
-                                      className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-extrabold transition-all disabled:opacity-50 ${
-                                        issues.hasIssues
-                                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-md shadow-amber-500/20'
-                                          : 'bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300'
-                                      }`}
-                                      title="Auto-fill missing options, deduce answer, and generate solutions"
-                                    >
-                                      {isRepairing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-                                      <span>{issues.hasIssues ? '⚡ Auto-Fill' : 'Repair'}</span>
-                                    </button>
-
-                                    {/* Auto-Solve Single Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSolveSingle(item)}
-                                      disabled={isSolving || isRepairing}
-                                      className="flex items-center gap-1 px-2.5 py-1 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded text-xs font-semibold transition-all disabled:opacity-50"
-                                      title="Generate deep research step-by-step solutions"
-                                    >
-                                      {isSolving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3 text-purple-400" />}
-                                      <span className="hidden sm:inline">
-                                        {item.solution_hi || item.solution_en ? 'Re-Solve' : 'Auto-Solve'}
-                                      </span>
-                                    </button>
-
-                                    {/* AI Fix LaTeX Button with Scope Dropdown */}
-                                    <div className="relative group">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenLatexRepair(item, 'entire_mcq')}
-                                        className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-teal-500/15 to-emerald-500/15 hover:from-teal-500/25 hover:to-emerald-500/25 border border-teal-500/30 text-teal-300 hover:text-white rounded text-xs font-bold transition-all shadow-sm"
-                                        title="Inspect & Repair LaTeX formulas with KaTeX and AI"
-                                      >
-                                        <Sparkles className="w-3.5 h-3.5 text-teal-400" />
-                                        <span>Fix LaTeX</span>
-                                        <ChevronDown className="w-3 h-3 text-teal-400/80 ml-0.5" />
-                                      </button>
-                                      <div className="absolute right-0 top-full mt-1 hidden group-hover:block z-30 min-w-[160px] p-1 bg-zinc-900 border border-white/15 rounded-xl shadow-2xl text-xs">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleOpenLatexRepair(item, 'entire_mcq')}
-                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
-                                        >
-                                          <span>📐</span>
-                                          <span>Fix Entire MCQ</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleOpenLatexRepair(item, 'question')}
-                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
-                                        >
-                                          <span>❓</span>
-                                          <span>Fix Question</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleOpenLatexRepair(item, 'options')}
-                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
-                                        >
-                                          <span>🔠</span>
-                                          <span>Fix Options</span>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleOpenLatexRepair(item, 'solution')}
-                                          className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white font-medium flex items-center gap-2"
-                                        >
-                                          <span>💡</span>
-                                          <span>Fix Solution</span>
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {/* Generate Similar Question Variant Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleGenerateSimilarSingleItem(item)}
-                                      disabled={generatingSimilarId === item.id || isSolving || isRepairing}
-                                      className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-violet-600/20 to-purple-600/20 hover:from-violet-600/30 hover:to-purple-600/30 border border-violet-500/30 text-violet-300 rounded text-xs font-semibold transition-all disabled:opacity-50 shadow-sm"
-                                      title="Generate brand-new practice MCQ testing this same concept (No duplicate)"
-                                    >
-                                      {generatingSimilarId === item.id ? (
-                                        <Loader2 className="w-3 h-3 animate-spin text-violet-400" />
-                                      ) : (
-                                        <Sparkles className="w-3 h-3 text-violet-400" />
-                                      )}
-                                      <span className="hidden sm:inline">Similar Variant</span>
-                                    </button>
-
-                                    {/* AI Chat & Fix Button */}
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveChatQuestion(item)}
-                                      className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-indigo-600/25 to-violet-600/25 hover:from-indigo-600/40 hover:to-violet-600/40 border border-indigo-500/40 text-indigo-300 hover:text-white rounded text-xs font-bold transition-all shadow-sm"
-                                      title="Chat with AI to fix, modify, re-calculate, or improve this question"
-                                    >
-                                      <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
-                                      <span className="hidden sm:inline">AI Chat</span>
-                                    </button>
-
-                                    {/* Edit Toggle Button */}
                                     <button
                                       type="button"
                                       onClick={() => setEditingItemId(isEditing ? null : item.id)}
-                                      className={`p-1 rounded transition-all ${
-                                        isEditing 
-                                          ? 'bg-amber-500 text-black' 
-                                          : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
-                                      }`}
+                                      aria-pressed={isEditing}
+                                      className={`btn btn-sm ${isEditing ? 'btn-secondary border-accent/50 text-accent-light' : 'btn-secondary'}`}
                                       title="Edit fields"
                                     >
-                                      <Edit3 className="w-3.5 h-3.5" />
+                                      {isEditing ? <Check /> : <Edit3 />}
+                                      <span className="hidden sm:inline">{isEditing ? 'Done' : 'Edit'}</span>
                                     </button>
 
-                                    {/* Delete Button */}
                                     <button
                                       type="button"
-                                      onClick={() => deleteItem(item.id)}
-                                      className="p-1 text-slate-500 hover:text-rose-400 rounded transition-all"
-                                      title="Delete question"
+                                      onClick={() => setActiveChatQuestion(item)}
+                                      className="btn btn-ghost btn-sm"
+                                      title="Chat with AI to fix, modify, re-calculate, or improve this question"
                                     >
-                                      <Trash2 className="w-3.5 h-3.5" />
+                                      <MessageSquare />
+                                      <span className="hidden sm:inline">AI chat</span>
                                     </button>
+
+                                    <div className="relative" data-menu-root>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleMenu(menuId)}
+                                        aria-haspopup="menu"
+                                        aria-expanded={openMenu === menuId}
+                                        aria-label={`More actions for question ${item.question_r}`}
+                                        title="More actions"
+                                        className="btn btn-ghost btn-sm btn-icon"
+                                      >
+                                        {isSolving || isRepairing || generatingSimilarId === item.id ? <Loader2 className="animate-spin" /> : <MoreHorizontal />}
+                                      </button>
+                                      {openMenu === menuId && (
+                                        <div className="menu right-0 mt-1.5 w-72 animate-fadeIn" role="menu">
+                                          <p className="menu-label">AI</p>
+                                          <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="menu-item"
+                                            disabled={isSolving || isRepairing}
+                                            onClick={() => { setOpenMenu(null); handleSolveSingle(item); }}
+                                          >
+                                            <CheckCheck />
+                                            <span>{item.solution_hi || item.solution_en ? 'Re-solve' : 'Auto-solve'}<span className="menu-item-desc">Deep step-by-step bilingual solution</span></span>
+                                          </button>
+                                          {!issues.hasIssues && (
+                                            <button
+                                              type="button"
+                                              role="menuitem"
+                                              className="menu-item"
+                                              disabled={isRepairing || isSolving}
+                                              onClick={() => { setOpenMenu(null); handleAiRepairSingle(item); }}
+                                            >
+                                              <Sparkles />
+                                              <span>Repair with AI<span className="menu-item-desc">Fill options, deduce answer, regenerate solutions</span></span>
+                                            </button>
+                                          )}
+                                          <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="menu-item"
+                                            disabled={isRepairing || isSolving}
+                                            onClick={() => { setOpenMenu(null); handleReverifyItem(item); }}
+                                          >
+                                            <Eye />
+                                            <span>Re-verify from page image<span className="menu-item-desc">Recover missing fields without guessing</span></span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="menu-item"
+                                            disabled={generatingSimilarId === item.id || isSolving || isRepairing}
+                                            onClick={() => { setOpenMenu(null); handleGenerateSimilarSingleItem(item); }}
+                                          >
+                                            <Plus />
+                                            <span>Similar variant<span className="menu-item-desc">New practice MCQ testing the same concept</span></span>
+                                          </button>
+                                          <div className="menu-divider" />
+                                          <p className="menu-label">Fix LaTeX</p>
+                                          <div className="grid grid-cols-2 gap-0.5">
+                                            {([
+                                              ['entire_mcq', 'Entire MCQ'],
+                                              ['question', 'Question'],
+                                              ['options', 'Options'],
+                                              ['solution', 'Solution'],
+                                            ] as const).map(([scope, label]) => (
+                                              <button
+                                                key={scope}
+                                                type="button"
+                                                role="menuitem"
+                                                className="menu-item py-1.5"
+                                                onClick={() => { setOpenMenu(null); handleOpenLatexRepair(item, scope); }}
+                                              >
+                                                <span>{label}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                          <div className="menu-divider" />
+                                          <button
+                                            type="button"
+                                            role="menuitem"
+                                            className="menu-item menu-item-danger"
+                                            onClick={() => { setOpenMenu(null); deleteItem(item.id); }}
+                                          >
+                                            <Trash2 />
+                                            <span>Delete question</span>
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
 
-                                {/* WARNING MESSAGE BANNER FOR MISSING/BLANK FIELDS */}
+                                <div className="p-3.5 space-y-3">
+                                {/* Missing / blank fields warning */}
                                 {issues.hasIssues && (
-                                  <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/40 rounded-xl text-xs">
-                                    <div className="flex items-center gap-2">
-                                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
-                                      <div>
-                                        <div className="font-extrabold text-amber-300 flex items-center gap-1.5">
-                                          <span>⚠️ चेतावनी: रिक्त फ़ील्ड (Missing Fields Detected)</span>
-                                          <span className="px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 text-[10px]">Action Required</span>
+                                  <div className="callout callout-warning flex-wrap items-start justify-between">
+                                    <div className="flex items-start gap-2 min-w-0">
+                                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                      <div className="min-w-0">
+                                        <div className="font-semibold text-amber-200">
+                                          रिक्त फ़ील्ड · Missing fields
                                         </div>
-                                        <div className="text-slate-300 text-[11px] mt-0.5 font-medium">
+                                        <div className="text-ink-2 text-xs mt-0.5">
                                           {issues.issueSummary}
                                         </div>
                                         <div className="flex flex-wrap gap-1 mt-1.5">
                                           {issues.missingFieldNames.map((name) => (
-                                            <span key={name} className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 text-[10px] font-bold border border-amber-500/30">
-                                              Missing: {name}
+                                            <span key={name} className="badge badge-warning">
+                                              {name}
                                             </span>
                                           ))}
                                         </div>
                                       </div>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2 ml-auto sm:ml-0">
+                                    <div className="flex flex-wrap items-center gap-2 ml-auto">
                                       <button
                                         type="button"
                                         onClick={() => handleReverifyItem(item)}
                                         disabled={isRepairing}
-                                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 font-extrabold rounded-lg text-xs shadow-md transition-all disabled:opacity-50"
+                                        className="btn btn-secondary btn-sm"
                                         title="Inspect original page images to recover missing fields without hallucinating"
                                       >
-                                        {isRepairing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5 text-blue-400" />}
-                                        <span>🔍 Re-verify from Images</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAiRepairSingle(item)}
-                                        disabled={isRepairing}
-                                        className="flex items-center gap-1 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow-md shadow-amber-500/20 transition-all disabled:opacity-50"
-                                      >
-                                        {isRepairing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 fill-black" />}
-                                        <span>⚡ AI Auto-Fill</span>
+                                        {isRepairing ? <Loader2 className="animate-spin" /> : <Eye />}
+                                        <span>Re-verify from image</span>
                                       </button>
                                     </div>
                                   </div>
                                 )}
 
-                                {/* Extra Metadata Editing when Expanded */}
+                                {/* Extra metadata (edit mode) */}
                                 {isEditing && (
-                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 bg-black/60 rounded-lg border border-white/[0.08] text-xs">
-                                    <div className="flex flex-col gap-0.5">
-                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Test Date:</label>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 panel p-3">
+                                    <div>
+                                      <label className="field-label" htmlFor={`test-date-${item.id}`}>Test date</label>
                                       <input
+                                        id={`test-date-${item.id}`}
                                         type="text"
                                         value={item.test_date || ''}
                                         onChange={(e) => updateItem(item.id, { test_date: e.target.value })}
                                         placeholder="YYYY-MM-DD"
-                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                        className="input input-sm"
                                       />
                                     </div>
-                                    <div className="flex flex-col gap-0.5">
-                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Test Time:</label>
+                                    <div>
+                                      <label className="field-label" htmlFor={`test-time-${item.id}`}>Test time</label>
                                       <input
+                                        id={`test-time-${item.id}`}
                                         type="text"
                                         value={item.test_time || ''}
                                         onChange={(e) => updateItem(item.id, { test_time: e.target.value })}
                                         placeholder="4:30 PM - 6:00 PM"
-                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                        className="input input-sm"
                                       />
                                     </div>
-                                    <div className="flex flex-col gap-0.5">
-                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Source PDF:</label>
+                                    <div>
+                                      <label className="field-label" htmlFor={`source-pdf-${item.id}`}>Source PDF</label>
                                       <input
+                                        id={`source-pdf-${item.id}`}
                                         type="text"
                                         value={item.source_pdf || ''}
                                         onChange={(e) => updateItem(item.id, { source_pdf: e.target.value })}
                                         placeholder="SHIFT 3.pdf"
-                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                        className="input input-sm"
                                       />
                                     </div>
-                                    <div className="flex flex-col gap-0.5">
-                                      <label className="text-[10px] text-slate-400 font-bold uppercase">Source Ref:</label>
+                                    <div>
+                                      <label className="field-label" htmlFor={`source-ref-${item.id}`}>Source ref</label>
                                       <input
+                                        id={`source-ref-${item.id}`}
                                         type="text"
                                         value={item.source_question_reference || ''}
                                         onChange={(e) => updateItem(item.id, { source_question_reference: e.target.value })}
                                         placeholder={`Q.${item.question_r}`}
-                                        className="bg-black/50 border border-white/[0.1] rounded px-2 py-1 text-white text-xs"
+                                        className="input input-sm"
                                       />
                                     </div>
                                   </div>
                                 )}
-
                                 {/* Interactive Bilingual Content View */}
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-5">
                                   {/* HINDI SIDE */}
-                                  <div className="space-y-2 p-3 bg-black/40 rounded-xl border border-white/[0.06]">
+                                  <div className="space-y-3 min-w-0">
                                     <div className="flex items-center justify-between">
-                                      <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
-                                        Hindi Question & Options
+                                      <span className="field-label mb-0 whitespace-nowrap">
+                                        हिन्दी · Hindi
                                       </span>
                                       <div className="flex items-center gap-1.5">
                                         <button
                                           type="button"
                                           onClick={() => handleQuickCropForQuestion(item, 'question')}
-                                          className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                          className="btn btn-ghost btn-xs"
                                           title="Crop diagram/figure and attach to Question"
                                         >
-                                          <Scissors className="w-2.5 h-2.5" />
-                                          <span>Crop Fig</span>
+                                          <Scissors />
+                                          <span>Crop figure</span>
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => handleOpenLatexRepair(item, 'question')}
-                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                          className="btn btn-ghost btn-xs"
                                           title="Fix LaTeX in Question"
                                         >
-                                          <Sparkles className="w-2.5 h-2.5" />
+                                          <Sparkles />
                                           <span>Fix LaTeX</span>
                                         </button>
                                       </div>
@@ -4323,7 +4133,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                       <>
                                         <LatexRenderer 
                                           content={(item.question_hi || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim()} 
-                                          className="text-slate-200 font-medium" 
+                                          className="text-[15px] leading-relaxed text-ink" 
                                         />
                                         {/* Live Attached Question Diagrams */}
                                         {(() => {
@@ -4331,13 +4141,13 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                           const qFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.question_en);
                                           if (qFigUrls.length === 0) return null;
                                           return (
-                                            <div className="mt-2.5 p-2 rounded-xl bg-white/[0.03] border border-orange-500/30 space-y-1.5 animate-in fade-in duration-200">
-                                              <div className="flex items-center justify-between text-[10px] font-bold text-orange-300">
+                                            <div className="mt-2.5 p-2.5 rounded-lg bg-white/[0.03] border border-line space-y-2">
+                                              <div className="flex items-center justify-between text-xs font-semibold text-ink-2">
                                                 <span className="flex items-center gap-1">
-                                                  <ImageIcon className="w-3 h-3 text-orange-400" />
+                                                  <ImageIcon className="w-3.5 h-3.5 text-ink-3" />
                                                   <span>Question Diagram ({qFigUrls.length})</span>
                                                 </span>
-                                                <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                                <span className="text-ink-3 text-xs font-normal">Click to zoom</span>
                                               </div>
                                               <div className="flex flex-wrap gap-2 pt-0.5">
                                                 {qFigUrls.map((url, uIdx) => (
@@ -4355,7 +4165,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                         e.stopPropagation();
                                                         handleRemoveFigureFromItem(item.id, 'question', url);
                                                       }}
-                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      className="absolute -top-2 -right-2 w-5 h-5 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[11px] shadow"
                                                       title="Remove diagram"
                                                     >
                                                       ✕
@@ -4387,17 +4197,17 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         return (
                                           <div
                                             key={key}
-                                            className={`group/opt flex flex-col gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs transition-all ${
+                                            className={`group/opt flex flex-col gap-1.5 px-2.5 py-2 rounded-lg border text-sm transition-colors ${
                                               isCorrect
-                                                ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                                                ? 'bg-emerald-500/10 border-emerald-500/45 text-emerald-200'
                                                 : isBlank
                                                 ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-200'
-                                                : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
+                                                : 'bg-transparent border-line text-ink-2 hover:border-line-strong'
                                             }`}
                                           >
                                             <div className="flex items-center gap-2">
-                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
-                                                isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
+                                              <span className={`w-6 h-6 shrink-0 rounded-md text-xs font-bold flex items-center justify-center ${
+                                                isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.06] text-ink-3'
                                               }`}>
                                                 {optLetter}
                                               </span>
@@ -4411,16 +4221,16 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                               ) : (
                                                 <span className="flex-1 min-w-0" title={htmlToPlainText(item[key] || '')}>
                                                   {optPlainText ? (
-                                                    <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                                    <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-100 font-semibold' : 'text-ink'} />
                                                   ) : hasImg ? (
                                                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300/90">
-                                                      <ImageIcon className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                                                      <ImageIcon className="w-3.5 h-3.5 text-ink-3 shrink-0" />
                                                       <span>Figure Option ({optLetter})</span>
                                                     </span>
                                                   ) : (
                                                     <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
                                                       <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                                      <span>Blank Option (Click "⚡ Auto-Fill" or ✂ Crop)</span>
+                                                      <span>Blank option — use Auto-fill or Crop</span>
                                                     </span>
                                                   )}
                                                 </span>
@@ -4431,18 +4241,18 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                   e.stopPropagation();
                                                   handleQuickCropForQuestion(item, targetOptField);
                                                 }}
-                                                className="p-1 rounded hover:bg-orange-500/20 text-slate-400 hover:text-orange-300 transition-all opacity-60 hover:opacity-100 group-hover/opt:opacity-100 shrink-0 flex items-center gap-1 text-[10px]"
+                                                className="btn btn-ghost btn-xs shrink-0 opacity-50 hover:opacity-100 focus-visible:opacity-100 group-hover/opt:opacity-100"
                                                 title={`Crop & attach diagram for Option ${optLetter}`}
                                               >
                                                 <Scissors className="w-3 h-3" />
-                                                <span className="hidden sm:inline text-[9px]">{hasImg ? 'Re-crop' : 'Crop'}</span>
+                                                <span className="hidden sm:inline">{hasImg ? 'Re-crop' : 'Crop'}</span>
                                               </button>
                                               {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                                             </div>
 
                                             {/* Live Image Thumbnail for Option */}
                                             {optFigUrls.length > 0 && (
-                                              <div className="flex flex-wrap gap-2 pl-6 pt-0.5">
+                                              <div className="flex flex-wrap gap-2 pl-8 pt-0.5">
                                                 {optFigUrls.map((url, uIdx) => (
                                                   <div key={uIdx} className="relative group/optfig rounded-lg bg-white p-1 border border-white/20 shadow-md inline-block">
                                                     <img
@@ -4458,7 +4268,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                         e.stopPropagation();
                                                         handleRemoveFigureFromItem(item.id, targetOptField, url);
                                                       }}
-                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      className="absolute -top-2 -right-2 w-5 h-5 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[11px] shadow"
                                                       title="Remove figure"
                                                     >
                                                       ✕
@@ -4473,28 +4283,28 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                     </div>
 
                                     {/* Hindi Solution */}
-                                    <div className="pt-2 border-t border-white/[0.06] space-y-1">
+                                    <div className="pt-3 border-t border-line space-y-2">
                                       <div className="flex items-center justify-between">
-                                        <span className="text-[10px] font-bold text-amber-400/80 uppercase">
-                                          Solution (Hindi)
+                                        <span className="field-label mb-0 whitespace-nowrap">
+                                          हल · Solution
                                         </span>
                                         <div className="flex items-center gap-1.5">
                                           <button
                                             type="button"
                                             onClick={() => handleQuickCropForQuestion(item, 'solution')}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                            className="btn btn-ghost btn-xs"
                                             title="Crop diagram/figure and attach to Hindi Solution"
                                           >
-                                            <Scissors className="w-2.5 h-2.5" />
-                                            <span>Crop Fig</span>
+                                            <Scissors />
+                                            <span>Crop figure</span>
                                           </button>
                                           <button
                                             type="button"
                                             onClick={() => handleOpenLatexRepair(item, 'solution')}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                            className="btn btn-ghost btn-xs"
                                             title="Fix LaTeX in Hindi Solution"
                                           >
-                                            <Sparkles className="w-2.5 h-2.5" />
+                                            <Sparkles />
                                             <span>Fix LaTeX</span>
                                           </button>
                                         </div>
@@ -4504,26 +4314,26 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                           rows={4}
                                           value={item.solution_hi}
                                           onChange={(v) => updateItemDraft(item.id, { solution_hi: v })}
-                                          textClassName="text-amber-200"
+                                          textClassName="text-ink-2"
                                         />
                                       ) : (
-                                        <div className="p-2.5 rounded-lg bg-amber-500/[0.03] border border-amber-500/20 space-y-2">
+                                        <div className="p-3 rounded-lg bg-white/[0.025] border border-line space-y-2">
                                           <LatexRenderer 
                                             content={(item.solution_hi || '<p>हल उपलब्ध नहीं है</p>').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim() || '<p>हल उपलब्ध नहीं है</p>'} 
-                                            className="text-amber-200/90 text-xs" 
+                                            className="text-ink-2 text-sm" 
                                           />
                                           {(() => {
                                             const rawUrls = extractFigureUrls(item.solution_hi);
                                             const solFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.solution_en);
                                             if (solFigUrls.length === 0) return null;
                                             return (
-                                              <div className="pt-2 border-t border-amber-500/20 space-y-1.5 animate-in fade-in duration-200">
-                                                <div className="flex items-center justify-between text-[10px] font-bold text-amber-300">
+                                              <div className="pt-2 border-t border-line space-y-1.5">
+                                                <div className="flex items-center justify-between text-xs font-semibold text-ink-2">
                                                   <span className="flex items-center gap-1">
-                                                    <ImageIcon className="w-3 h-3 text-amber-400" />
+                                                    <ImageIcon className="w-3.5 h-3.5 text-ink-3" />
                                                     <span>Solution Diagram ({solFigUrls.length})</span>
                                                   </span>
-                                                  <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                                  <span className="text-ink-3 text-xs font-normal">Click to zoom</span>
                                                 </div>
                                                 <div className="flex flex-wrap gap-2">
                                                   {solFigUrls.map((url, uIdx) => (
@@ -4541,7 +4351,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                           e.stopPropagation();
                                                           handleRemoveFigureFromItem(item.id, 'solution', url);
                                                         }}
-                                                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                        className="absolute -top-2 -right-2 w-5 h-5 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[11px] shadow"
                                                         title="Remove diagram"
                                                       >
                                                         ✕
@@ -4558,28 +4368,28 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                   </div>
 
                                   {/* ENGLISH SIDE */}
-                                  <div className="space-y-2 p-3 bg-black/40 rounded-xl border border-white/[0.06]">
+                                  <div className="space-y-3 min-w-0 lg:border-l lg:border-line lg:pl-6">
                                     <div className="flex items-center justify-between">
-                                      <span className="text-[10px] font-extrabold text-blue-400 uppercase tracking-wider block">
-                                        English Question & Options
+                                      <span className="field-label mb-0 whitespace-nowrap">
+                                        English
                                       </span>
                                       <div className="flex items-center gap-1.5">
                                         <button
                                           type="button"
                                           onClick={() => handleQuickCropForQuestion(item, 'question')}
-                                          className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                          className="btn btn-ghost btn-xs"
                                           title="Crop diagram/figure and attach to Question"
                                         >
-                                          <Scissors className="w-2.5 h-2.5" />
-                                          <span>Crop Fig</span>
+                                          <Scissors />
+                                          <span>Crop figure</span>
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => handleOpenLatexRepair(item, 'question')}
-                                          className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                          className="btn btn-ghost btn-xs"
                                           title="Fix LaTeX in Question"
                                         >
-                                          <Sparkles className="w-2.5 h-2.5" />
+                                          <Sparkles />
                                           <span>Fix LaTeX</span>
                                         </button>
                                       </div>
@@ -4595,20 +4405,20 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                       <>
                                         <LatexRenderer 
                                           content={(item.question_en || '').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim()} 
-                                          className="text-slate-200 font-medium" 
+                                          className="text-[15px] leading-relaxed text-ink" 
                                         />
                                         {(() => {
                                           const rawUrls = extractFigureUrls(item.question_en);
                                           const qFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.question_hi);
                                           if (qFigUrls.length === 0) return null;
                                           return (
-                                            <div className="mt-2.5 p-2 rounded-xl bg-white/[0.03] border border-blue-500/30 space-y-1.5 animate-in fade-in duration-200">
-                                              <div className="flex items-center justify-between text-[10px] font-bold text-blue-300">
+                                            <div className="mt-2.5 p-2.5 rounded-lg bg-white/[0.03] border border-line space-y-2">
+                                              <div className="flex items-center justify-between text-xs font-semibold text-ink-2">
                                                 <span className="flex items-center gap-1">
-                                                  <ImageIcon className="w-3 h-3 text-blue-400" />
+                                                  <ImageIcon className="w-3.5 h-3.5 text-ink-3" />
                                                   <span>Question Diagram ({qFigUrls.length})</span>
                                                 </span>
-                                                <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                                <span className="text-ink-3 text-xs font-normal">Click to zoom</span>
                                               </div>
                                               <div className="flex flex-wrap gap-2 pt-0.5">
                                                 {qFigUrls.map((url, uIdx) => (
@@ -4626,7 +4436,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                         e.stopPropagation();
                                                         handleRemoveFigureFromItem(item.id, 'question', url);
                                                       }}
-                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      className="absolute -top-2 -right-2 w-5 h-5 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[11px] shadow"
                                                       title="Remove diagram"
                                                     >
                                                       ✕
@@ -4658,17 +4468,17 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                         return (
                                           <div
                                             key={key}
-                                            className={`group/opt flex flex-col gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs transition-all ${
+                                            className={`group/opt flex flex-col gap-1.5 px-2.5 py-2 rounded-lg border text-sm transition-colors ${
                                               isCorrect
-                                                ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 font-bold'
+                                                ? 'bg-emerald-500/10 border-emerald-500/45 text-emerald-200'
                                                 : isBlank
                                                 ? 'bg-amber-500/5 border-dashed border-amber-500/40 text-amber-200'
-                                                : 'bg-white/[0.02] border-white/[0.06] text-slate-300'
+                                                : 'bg-transparent border-line text-ink-2 hover:border-line-strong'
                                             }`}
                                           >
                                             <div className="flex items-center gap-2">
-                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
-                                                isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-slate-400'
+                                              <span className={`w-6 h-6 shrink-0 rounded-md text-xs font-bold flex items-center justify-center ${
+                                                isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.06] text-ink-3'
                                               }`}>
                                                 {optLetter}
                                               </span>
@@ -4682,16 +4492,16 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                               ) : (
                                                 <span className="flex-1 min-w-0" title={htmlToPlainText(item[key] || '')}>
                                                   {optPlainText ? (
-                                                    <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-300 font-bold' : 'text-slate-200 font-medium'} />
+                                                    <LatexRenderer content={cleanOptText} inline={true} className={isCorrect ? 'text-emerald-100 font-semibold' : 'text-ink'} />
                                                   ) : hasImg ? (
                                                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300/90">
-                           <ImageIcon className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                           <ImageIcon className="w-3.5 h-3.5 text-ink-3 shrink-0" />
                            <span>Figure Option ({optLetter})</span>
                          </span>
                                                   ) : (
                                                     <span className="inline-flex items-center gap-1 text-amber-400/90 font-semibold italic text-[11px]">
                                                       <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                                                      <span>Blank Option (Click "⚡ Auto-Fill" or ✂ Crop)</span>
+                                                      <span>Blank option — use Auto-fill or Crop</span>
                                                     </span>
                                                   )}
                                                 </span>
@@ -4702,18 +4512,18 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                   e.stopPropagation();
                                                   handleQuickCropForQuestion(item, targetOptField);
                                                 }}
-                                                className="p-1 rounded hover:bg-orange-500/20 text-slate-400 hover:text-orange-300 transition-all opacity-60 hover:opacity-100 group-hover/opt:opacity-100 shrink-0 flex items-center gap-1 text-[10px]"
+                                                className="btn btn-ghost btn-xs shrink-0 opacity-50 hover:opacity-100 focus-visible:opacity-100 group-hover/opt:opacity-100"
                                                 title={`Crop & attach diagram for Option ${optLetter}`}
                                               >
                                                 <Scissors className="w-3 h-3" />
-                                                <span className="hidden sm:inline text-[9px]">{hasImg ? 'Re-crop' : 'Crop'}</span>
+                                                <span className="hidden sm:inline">{hasImg ? 'Re-crop' : 'Crop'}</span>
                                               </button>
                                               {isCorrect && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                                             </div>
 
                                             {/* Live Image Thumbnail for Option (English) */}
                                             {optFigUrls.length > 0 && (
-                                              <div className="flex flex-wrap gap-2 pl-6 pt-0.5">
+                                              <div className="flex flex-wrap gap-2 pl-8 pt-0.5">
                                                 {optFigUrls.map((url, uIdx) => (
                                                   <div key={uIdx} className="relative group/optfig rounded-lg bg-white p-1 border border-white/20 shadow-md inline-block">
                                                     <img 
@@ -4729,7 +4539,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                         e.stopPropagation();
                                                         handleRemoveFigureFromItem(item.id, targetOptField, url);
                                                       }}
-                                                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                      className="absolute -top-2 -right-2 w-5 h-5 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[11px] shadow"
                                                       title="Remove figure"
                                                     >
                                                       ✕
@@ -4744,28 +4554,28 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                     </div>
 
                                     {/* English Solution */}
-                                    <div className="pt-2 border-t border-white/[0.06] space-y-1">
+                                    <div className="pt-3 border-t border-line space-y-2">
                                       <div className="flex items-center justify-between">
-                                        <span className="text-[10px] font-bold text-blue-400/80 uppercase">
-                                          Solution (English)
+                                        <span className="field-label mb-0 whitespace-nowrap">
+                                          Solution
                                         </span>
                                         <div className="flex items-center gap-1.5">
                                           <button
                                             type="button"
                                             onClick={() => handleQuickCropForQuestion(item, 'solution')}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-orange-400 hover:text-orange-300 transition-colors"
+                                            className="btn btn-ghost btn-xs"
                                             title="Crop diagram/figure and attach to English Solution"
                                           >
-                                            <Scissors className="w-2.5 h-2.5" />
-                                            <span>Crop Fig</span>
+                                            <Scissors />
+                                            <span>Crop figure</span>
                                           </button>
                                           <button
                                             type="button"
                                             onClick={() => handleOpenLatexRepair(item, 'solution')}
-                                            className="flex items-center gap-1 text-[10px] font-bold text-teal-400 hover:text-teal-300 transition-colors"
+                                            className="btn btn-ghost btn-xs"
                                             title="Fix LaTeX in English Solution"
                                           >
-                                            <Sparkles className="w-2.5 h-2.5" />
+                                            <Sparkles />
                                             <span>Fix LaTeX</span>
                                           </button>
                                         </div>
@@ -4775,26 +4585,26 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                           rows={4}
                                           value={item.solution_en}
                                           onChange={(v) => updateItemDraft(item.id, { solution_en: v })}
-                                          textClassName="text-blue-200"
+                                          textClassName="text-ink-2"
                                         />
                                       ) : (
-                                        <div className="p-2.5 rounded-lg bg-blue-500/[0.03] border border-blue-500/20 space-y-2">
+                                        <div className="p-3 rounded-lg bg-white/[0.025] border border-line space-y-2">
                                           <LatexRenderer 
                                             content={(item.solution_en || '<p>Solution not available</p>').replace(/<p>\s*<img[^>]*>\s*<\/p>/gi, '').replace(/<img[^>]*>/gi, '').replace(/!\[[^\]]*\]\([^)]+\)/gi, '').replace(/\[(?:FIGURE|IMAGE|FIG)[^\]]*:\s*[^\s\]]+\]/gi, '').trim() || '<p>Solution not available</p>'} 
-                                            className="text-blue-200/90 text-xs" 
+                                            className="text-ink-2 text-sm" 
                                           />
                                           {(() => {
                                             const rawUrls = extractFigureUrls(item.solution_en);
                           const solFigUrls = rawUrls.length > 0 ? rawUrls : extractFigureUrls(item.solution_hi);
                                             if (solFigUrls.length === 0) return null;
                                             return (
-                                              <div className="pt-2 border-t border-blue-500/20 space-y-1.5 animate-in fade-in duration-200">
-                                                <div className="flex items-center justify-between text-[10px] font-bold text-blue-300">
+                                              <div className="pt-2 border-t border-line space-y-1.5">
+                                                <div className="flex items-center justify-between text-xs font-semibold text-ink-2">
                                                   <span className="flex items-center gap-1">
-                                                    <ImageIcon className="w-3 h-3 text-blue-400" />
+                                                    <ImageIcon className="w-3.5 h-3.5 text-ink-3" />
                                                     <span>Solution Diagram ({solFigUrls.length})</span>
                                                   </span>
-                                                  <span className="text-slate-400 text-[9px]">Click to zoom</span>
+                                                  <span className="text-ink-3 text-xs font-normal">Click to zoom</span>
                                                 </div>
                                                 <div className="flex flex-wrap gap-2">
                                                   {solFigUrls.map((url, uIdx) => (
@@ -4812,7 +4622,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                           e.stopPropagation();
                                                           handleRemoveFigureFromItem(item.id, 'solution', url);
                                                         }}
-                                                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[10px] shadow"
+                                                        className="absolute -top-2 -right-2 w-5 h-5 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-[11px] shadow"
                                                         title="Remove diagram"
                                                       >
                                                         ✕
@@ -4828,7 +4638,8 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                     </div>
                                   </div>
                                 </div>
-                              </div>
+                                </div>
+                              </article>
                             );
                           })}
                         </div>
@@ -4842,11 +4653,11 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
 
           {/* TAB 2: LIVE 34-COLUMN CSV GRID VIEW */}
           {activeTab === 'grid' && (
-            <div className="rounded-2xl border border-white/[0.08] bg-black/40 backdrop-blur-xl overflow-hidden shadow-2xl p-4">
-              <div className="max-h-[700px] overflow-auto custom-scrollbar">
+            <div className="card overflow-hidden">
+              <div className="max-h-[70vh] overflow-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-white/[0.1] bg-white/[0.04] text-[11px] font-bold text-amber-400 whitespace-nowrap">
+                    <tr className="sticky top-0 z-10 border-b border-line-strong bg-surface-2 text-[11px] font-semibold uppercase tracking-wide text-ink-3 whitespace-nowrap">
                       <th className="p-2">#</th>
                       <th className="p-2 min-w-[200px]">question_hi</th>
                       <th className="p-2 min-w-[100px]">opt1_hi</th>
@@ -4867,7 +4678,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                       <th className="p-2 min-w-[80px]">difficulty</th>
                       <th className="p-2 min-w-[100px]">test_date</th>
                       <th className="p-2 min-w-[110px]">test_time</th>
-                      <th className="p-2 min-w-[130px] bg-amber-500/10 text-amber-300">subject (STRICT)</th>
+                      <th className="p-2 min-w-[130px] text-ink-2">subject (STRICT)</th>
                       <th className="p-2 min-w-[140px]">subject_level</th>
                       <th className="p-2 min-w-[100px]">figure_notes</th>
                       <th className="p-2 min-w-[120px]">correction_notes</th>
@@ -4883,10 +4694,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                       <th className="p-2 min-w-[160px]">duplicate_stats</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/[0.05] text-slate-300 whitespace-nowrap">
+                  <tbody className="divide-y divide-line text-ink-2 whitespace-nowrap">
                     {extractedMcqs.map((row) => (
-                      <tr key={row.id} className="hover:bg-white/[0.02]">
-                        <td className="p-2 font-bold text-amber-400">{row.question_r}</td>
+                      <tr key={row.id} className="hover:bg-white/[0.03]">
+                        <td className="p-2 font-semibold text-ink">{row.question_r}</td>
                         <td className="p-2 truncate max-w-[200px]" title={row.question_hi}>{row.question_hi}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option1_hi}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option2_hi}</td>
@@ -4901,12 +4712,12 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                         <td className="p-2 truncate max-w-[100px]">{row.option4_en}</td>
                         <td className="p-2 truncate max-w-[100px]">{row.option5_en || '—'}</td>
                         <td className="p-2 truncate max-w-[200px]" title={row.solution_en}>{row.solution_en}</td>
-                        <td className="p-2 font-bold text-emerald-400">{row.answer}</td>
+                        <td className="p-2 font-semibold text-emerald-300">{row.answer}</td>
                         <td className="p-2 truncate max-w-[120px]">{row.set_name}</td>
                         <td className="p-2 capitalize">{row.difficulty_level}</td>
                         <td className="p-2">{row.test_date || '—'}</td>
                         <td className="p-2">{row.test_time || '—'}</td>
-                        <td className="p-2 font-extrabold text-amber-300 bg-amber-500/5">{row.subject || '—'}</td>
+                        <td className="p-2 font-medium text-ink">{row.subject || '—'}</td>
                         <td className="p-2">{row.subject_level || '—'}</td>
                         <td className="p-2">{row.figure_notes || '—'}</td>
                         <td className="p-2 truncate max-w-[140px]" title={row.correction_notes}>{row.correction_notes || '—'}</td>
@@ -4930,134 +4741,85 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
 
           {/* TAB 3: RAW CSV VIEW */}
           {activeTab === 'csv' && (
-            <div className="rounded-2xl border border-white/[0.08] bg-black/40 backdrop-blur-xl overflow-hidden p-5 space-y-3">
-              <div className="flex items-center justify-between text-xs text-slate-400">
+            <div className="card overflow-hidden p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-3">
                 <span>RFC 4180 CSV with UTF-8 BOM (\uFEFF) • Ready for direct MockTest Portal Upload</span>
                 <button
                   type="button"
                   onClick={handleCopyCsv}
-                  className="flex items-center gap-1 text-amber-400 hover:text-amber-300 font-bold"
+                  className="btn btn-secondary btn-sm"
                 >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copied ? 'Copied!' : 'Copy to Clipboard'}</span>
                 </button>
               </div>
-              <pre className="p-4 bg-black/80 rounded-xl border border-white/[0.08] text-xs text-slate-300 font-mono overflow-x-auto max-h-[500px] custom-scrollbar whitespace-pre-wrap">
+              <pre className="p-4 bg-canvas rounded-lg border border-line text-xs text-ink-2 font-mono overflow-x-auto max-h-[60vh] whitespace-pre-wrap">
                 {serializeMockTestToCsv(extractedMcqs, answerFormat)}
               </pre>
             </div>
           )}
 
-          {/* Bottom Summary Bar */}
+          {/* Bottom summary bar */}
           {(() => {
             const incompleteTotal = extractedMcqs.filter(it => detectItemFieldIssues(it).hasIssues).length;
             return (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 rounded-2xl border border-white/[0.08] bg-black/50 backdrop-blur-xl text-xs text-slate-400">
-                <div className="flex flex-wrap items-center gap-4">
-                  <span>Total Questions: <strong className="text-white">{extractedMcqs.length}</strong></span>
-                  <span>Fully Solved: <strong className="text-emerald-400">{solvedCount}</strong></span>
-                  <span>Pages Digitized: <strong className="text-blue-400">{pages.filter(p => p.status === 'ready').length} of {pages.length}</strong></span>
+              <div className="card flex flex-col md:flex-row md:items-center justify-between gap-3 px-4 py-3 text-sm text-ink-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                  <span><strong className="text-ink font-semibold">{extractedMcqs.length}</strong> questions</span>
+                  <span><strong className="text-ink font-semibold">{solvedCount}</strong> solved</span>
+                  <span><strong className="text-ink font-semibold">{pages.filter(p => p.status === 'ready').length}/{pages.length}</strong> pages done</span>
                   {incompleteTotal > 0 && (
-                    <span className="text-amber-400 font-extrabold flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 animate-pulse">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                      <span>{incompleteTotal} Incomplete (Blank Options/Fields)</span>
+                    <span className="badge badge-warning">
+                      <AlertTriangle />
+                      <span>{incompleteTotal} incomplete</span>
                     </span>
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   {incompleteTotal > 0 && (
                     <>
                       <button
                         type="button"
                         onClick={() => handleReverifyMissingFields()}
                         disabled={isRepairingAll}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-200 font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+                        className="btn btn-secondary btn-sm"
                         title="Visually re-inspect page images to recover missing fields across the whole document"
                       >
-                        {isRepairingAll ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Re-verifying ({repairProgress?.current || 0}/{repairProgress?.total || incompleteTotal})...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="w-3.5 h-3.5 text-blue-400" />
-                            <span>🔍 Re-verify All from Images ({incompleteTotal})</span>
-                          </>
-                        )}
+                        {isRepairingAll ? <Loader2 className="animate-spin" /> : <Eye />}
+                        <span>
+                          {isRepairingAll
+                            ? `Re-verifying (${repairProgress?.current || 0}/${repairProgress?.total || incompleteTotal})…`
+                            : `Re-verify all (${incompleteTotal})`}
+                        </span>
                       </button>
                       <button
                         type="button"
                         onClick={handleAiRepairAllIncomplete}
                         disabled={isRepairingAll}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+                        className="btn btn-secondary btn-sm"
                         title="AI will deduce options, verify answers, and generate solutions for all incomplete items"
                       >
-                        {isRepairingAll ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Repairing ({repairProgress?.current || 0}/{repairProgress?.total || incompleteTotal})...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                            <span>⚡ AI Auto-Fill All ({incompleteTotal})</span>
-                          </>
-                        )}
+                        {isRepairingAll ? <Loader2 className="animate-spin" /> : <Sparkles />}
+                        <span>
+                          {isRepairingAll
+                            ? `Repairing (${repairProgress?.current || 0}/${repairProgress?.total || incompleteTotal})…`
+                            : `AI auto-fill all (${incompleteTotal})`}
+                        </span>
                       </button>
                     </>
                   )}
-
-                  <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 bg-black/60 border border-white/[0.1] rounded-lg text-xs">
-                    <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="text-[10px] text-slate-400 font-bold">File:</span>
-                    <input
-                      type="text"
-                      value={outputFileName || setName}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setOutputFileName(val);
-                        setSetName(val);
-                      }}
-                      className="w-36 sm:w-48 bg-transparent text-xs text-amber-300 font-bold focus:outline-none"
-                      title="Rename output file before downloading"
-                    />
-                    <span className="text-[10px] text-slate-500 font-bold">.csv</span>
-                  </div>
 
                   <button
                     type="button"
                     onClick={handleDownloadCsv}
                     disabled={extractedMcqs.length === 0}
-                    className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow transition-all disabled:opacity-40"
+                    className="btn btn-primary btn-sm"
+                    title={`Download ${(outputFileName || setName || 'mocktest')}.csv`}
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download 34-Column CSV</span>
+                    <Download />
+                    <span>Export CSV</span>
                   </button>
-
-                  {/* DOCX export in bottom panel */}
-                  <div className="flex items-center gap-0">
-                    <select
-                      value={docxLang}
-                      onChange={e => setDocxLang(e.target.value as 'hi' | 'en' | 'both')}
-                      className="h-8 px-2 text-[10px] font-bold bg-indigo-800/80 text-white border border-indigo-500/40 rounded-l-lg focus:outline-none cursor-pointer"
-                    >
-                      <option value="both">Hi+En</option>
-                      <option value="hi">Hindi</option>
-                      <option value="en">English</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={handleDownloadDocx}
-                      disabled={isGeneratingDocx || extractedMcqs.length === 0}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-extrabold rounded-r-lg text-xs transition-all disabled:opacity-40"
-                      title="Download DOCX with native Word math equations"
-                    >
-                      {isGeneratingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                      <span>{isGeneratingDocx ? 'Building…' : 'Export DOCX'}</span>
-                    </button>
-                  </div>
                 </div>
               </div>
             );
@@ -5187,22 +4949,22 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                 className="max-h-[70vh] max-w-full object-contain rounded select-none"
               />
             </div>
-            <span className="text-[10px] text-slate-400">Click outside or ✕ to close</span>
+            <span className="text-[11px] text-slate-400">Click outside or ✕ to close</span>
           </div>
         </div>
       )}
 
       {/* Floating Undo Toast for LaTeX Repair */}
       {undoToast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 bg-zinc-900/95 border border-teal-500/40 rounded-2xl shadow-2xl shadow-black/80 text-xs backdrop-blur-md">
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 bg-zinc-900/95 border border-line-strong rounded-2xl shadow-2xl shadow-black/80 text-xs backdrop-blur-md">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
             <span className="text-slate-200 font-medium">LaTeX repaired for <strong>Q#{undoToast.questionNum}</strong></span>
           </div>
           <button
             type="button"
             onClick={() => handleUndoRepair(undoToast.itemId)}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-bold border border-teal-500/40 transition-colors"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-ink-2 font-bold border border-line-strong transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Undo</span>

@@ -20,7 +20,7 @@ function App() {
   if (window.location.pathname.replace(/\/$/, '') === '/csv-converter') {
     return (
       <ErrorBoundary>
-        <React.Suspense fallback={<div className="p-8 text-slate-300">Loading CSV converter…</div>}>
+        <React.Suspense fallback={<div className="p-8 text-ink-2">Loading CSV converter…</div>}>
           <UniversalCsvConverter />
         </React.Suspense>
       </ErrorBoundary>
@@ -55,11 +55,11 @@ function ExistingApp() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#0B0D13] flex items-center justify-center">
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
         <motion.div
           animate={{ scale: [1, 1.08, 1], opacity: [0.7, 1, 0.7] }}
           transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
-          className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] flex items-center justify-center shadow-lg shadow-[#FF6B2B]/30"
+          className="w-14 h-14 rounded-2xl bg-accent flex items-center justify-center shadow-lg "
         >
           <Sparkles className="w-7 h-7 text-white" />
         </motion.div>
@@ -77,7 +77,7 @@ function ExistingApp() {
 
   return (
     <ErrorBoundary>
-      <div className="min-h-screen bg-[#0F0F0F]">
+      <div className="min-h-screen bg-canvas">
         <Navbar 
           activeTool={activeTool}
           onSelectTool={(tool) => setActiveTool(tool)}
@@ -118,7 +118,7 @@ function ExistingApp() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="pt-16"
+              className="pt-14"
             >
               <PdfConverter 
                 initialImages={preloadedPages}
@@ -133,7 +133,7 @@ function ExistingApp() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="pt-16"
+              className="pt-14"
             >
               <MocktestExtractor 
                 initialPages={preloadedPages}

@@ -182,30 +182,30 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
   const normAns = (currentItem.answer || '').trim().toUpperCase();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px] animate-fade-in">
       <div 
-        className="relative w-full max-w-6xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden text-slate-100"
+        className="relative w-full max-w-6xl max-h-[92vh] flex flex-col bg-surface border border-line-strong rounded-2xl shadow-2xl overflow-hidden text-ink"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Top Header */}
         <div className="flex items-center justify-between px-5 py-3.5 bg-slate-950/80 border-b border-white/[0.08]">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 shadow-md shadow-indigo-500/20 text-white">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-accent/10 border border-accent/25 text-accent-light">
               <Bot className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-sm text-white">
+                <span className="font-semibold text-sm text-white">
                   Q#{currentItem.question_r || 1} AI Assistant & Live Editor
                 </span>
-                <span className="px-2 py-0.5 rounded bg-violet-500/20 text-violet-300 font-bold text-[10px] border border-violet-500/30">
+                <span className="px-2 py-0.5 rounded bg-white/[0.04] text-ink-2 font-bold text-[11px] border border-line-strong">
                   {currentItem.subject || 'General'}
                 </span>
-                <span className="px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300 font-medium text-[10px] capitalize">
+                <span className="px-1.5 py-0.5 rounded bg-white/[0.06] text-slate-300 font-medium text-[11px] capitalize">
                   {currentItem.difficulty_level || 'Medium'}
                 </span>
                 {hasModified && (
-                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[10px] border border-emerald-500/40 flex items-center gap-1">
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[11px] border border-emerald-500/40 flex items-center gap-1">
                     <Check className="w-3 h-3" />
                     <span>Modified</span>
                   </span>
@@ -246,7 +246,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Live Preview:</span>
-                <span className="text-[10px] text-emerald-400 font-medium">(Updates in real time)</span>
+                <span className="text-[11px] text-emerald-400 font-medium">(Updates in real time)</span>
               </div>
 
               {/* Language Switcher */}
@@ -255,7 +255,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                   type="button"
                   onClick={() => setActiveLang('hi')}
                   className={`px-2 py-0.5 font-bold rounded transition-all ${
-                    activeLang === 'hi' ? 'bg-amber-500 text-black shadow-sm' : 'text-slate-400 hover:text-white'
+                    activeLang === 'hi' ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   हिन्दी
@@ -274,13 +274,13 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
 
             {/* Question Stem */}
             <div className="p-3 rounded-xl bg-slate-900/90 border border-white/[0.08] space-y-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">Question Stem ({activeLang.toUpperCase()}):</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">Question Stem ({activeLang.toUpperCase()}):</span>
               <LatexContent content={qText} className="text-slate-100" />
             </div>
 
             {/* Options List */}
             <div className="space-y-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Options:</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Options:</span>
               {[
                 { label: 'A', text: optA, key: ['A', '1'] },
                 { label: 'B', text: optB, key: ['B', '2'] },
@@ -294,11 +294,11 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                     key={opt.label}
                     className={`flex items-start gap-2.5 p-2.5 rounded-xl border transition-all text-xs ${
                       isCorrect
-                        ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-200 shadow-sm shadow-emerald-500/10'
+                        ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-200 shadow-sm '
                         : 'border-white/[0.06] bg-slate-900/60 text-slate-300'
                     }`}
                   >
-                    <span className={`flex items-center justify-center w-5 h-5 rounded-full shrink-0 font-extrabold text-[11px] ${
+                    <span className={`flex items-center justify-center w-5 h-5 rounded-full shrink-0 font-semibold text-[11px] ${
                       isCorrect ? 'bg-emerald-500 text-black' : 'bg-white/[0.08] text-slate-400'
                     }`}>
                       {opt.label}
@@ -307,7 +307,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                       <LatexContent content={opt.text} />
                     </div>
                     {isCorrect && (
-                      <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider shrink-0 bg-emerald-500/20 px-1.5 py-0.5 rounded">
+                      <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider shrink-0 bg-emerald-500/20 px-1.5 py-0.5 rounded">
                         Correct Answer
                       </span>
                     )}
@@ -317,13 +317,13 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
             </div>
 
             {/* Solution Preview */}
-            <div className="p-3 rounded-xl bg-slate-900/90 border border-indigo-500/30 space-y-1.5">
+            <div className="p-3 rounded-xl bg-slate-900/90 border border-line-strong space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-indigo-400" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-ink-3 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-ink-3" />
                   <span>Step-by-Step Solution ({activeLang.toUpperCase()}):</span>
                 </span>
-                <span className="text-[10px] text-slate-500">Shuffle-Safe</span>
+                <span className="text-[11px] text-slate-500">Shuffle-Safe</span>
               </div>
               <LatexContent content={solText} className="text-slate-200" />
             </div>
@@ -344,7 +344,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                     <div className={`flex items-center justify-center w-7 h-7 rounded-xl shrink-0 text-xs ${
                       isUser
                         ? 'bg-blue-600 text-white shadow-sm'
-                        : 'bg-gradient-to-tr from-violet-600 to-indigo-500 text-white shadow-sm'
+                        : 'bg-accent text-on-accent shadow-sm'
                     }`}>
                       {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
                     </div>
@@ -352,7 +352,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                     {/* Bubble */}
                     <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs leading-relaxed space-y-1 ${
                       isUser
-                        ? 'bg-blue-600 text-white rounded-tr-none shadow-md shadow-blue-600/10'
+                        ? 'bg-blue-600 text-white rounded-tr-none shadow-md '
                         : 'bg-slate-800/90 border border-white/[0.08] text-slate-200 rounded-tl-none shadow-md'
                     }`}>
                       <div className="prose prose-invert max-w-none text-xs leading-relaxed">
@@ -360,7 +360,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                           {msg.text}
                         </ReactMarkdown>
                       </div>
-                      <div className={`text-[9px] text-right font-medium ${isUser ? 'text-blue-200/70' : 'text-slate-500'}`}>
+                      <div className={`text-[11px] text-right font-medium ${isUser ? 'text-blue-200/70' : 'text-slate-500'}`}>
                         {msg.timestamp}
                       </div>
                     </div>
@@ -371,11 +371,11 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
               {/* AI Thinking Spinner */}
               {isSending && (
                 <div className="flex items-start gap-2.5">
-                  <div className="flex items-center justify-center w-7 h-7 rounded-xl bg-violet-600 text-white shadow-sm">
+                  <div className="flex items-center justify-center w-7 h-7 rounded-xl bg-accent/10 border border-accent/25 text-accent-light">
                     <Bot className="w-4 h-4" />
                   </div>
-                  <div className="bg-slate-800/90 border border-violet-500/30 text-violet-300 rounded-2xl rounded-tl-none px-4 py-2.5 text-xs flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />
+                  <div className="bg-slate-800/90 border border-line-strong text-ink-2 rounded-2xl rounded-tl-none px-4 py-2.5 text-xs flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-3" />
                     <span className="font-semibold">AI is analyzing & fixing this question...</span>
                   </div>
                 </div>
@@ -393,7 +393,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                     type="button"
                     onClick={() => handleSendMessage(chip.prompt)}
                     disabled={isSending}
-                    className="shrink-0 px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-violet-500/20 border border-white/[0.08] hover:border-violet-500/40 text-[11px] font-semibold text-slate-300 hover:text-violet-200 transition-all disabled:opacity-40"
+                    className="shrink-0 px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] hover:border-white/20 text-[11px] font-semibold text-slate-300 hover:text-ink transition-all disabled:opacity-40"
                   >
                     {chip.label}
                   </button>
@@ -403,7 +403,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
 
             {/* Chat Input Bar */}
             <div className="p-3.5 border-t border-white/[0.08] bg-slate-950/80">
-              <div className="relative flex items-end gap-2 bg-slate-900 border border-white/[0.12] focus-within:border-violet-500/60 rounded-xl p-1.5 shadow-inner transition-all">
+              <div className="relative flex items-end gap-2 bg-slate-900 border border-white/[0.12] focus-within:border-accent rounded-xl p-1.5 shadow-inner transition-all">
                 <textarea
                   ref={textareaRef}
                   value={inputPrompt}
@@ -419,14 +419,14 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
                   type="button"
                   onClick={() => handleSendMessage()}
                   disabled={!inputPrompt.trim() || isSending}
-                  className="flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold transition-all disabled:opacity-40 shadow-sm shrink-0"
+                  className="flex items-center justify-center w-8 h-8 rounded-lg bg-accent hover:bg-accent-hover text-on-accent font-bold transition-all disabled:opacity-40 shadow-sm shrink-0"
                   title="Send instruction (Enter)"
                 >
                   {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 </button>
               </div>
 
-              <div className="flex items-center justify-between pt-2 px-1 text-[10px] text-slate-500">
+              <div className="flex items-center justify-between pt-2 px-1 text-[11px] text-slate-500">
                 <span>Press <strong>Enter</strong> to send, <strong>Shift+Enter</strong> for new line</span>
                 <span>Prompt follows strict YCT patterns & 0-option-letter safety</span>
               </div>
@@ -453,7 +453,7 @@ export const MocktestAiChatModal: React.FC<MocktestAiChatModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold rounded-lg text-xs transition-all shadow-md shadow-emerald-600/20"
+              className="px-4 py-1.5 bg-accent hover:bg-accent-hover text-on-accent font-semibold rounded-lg text-xs transition-all shadow-md "
             >
               Done / Close
             </button>

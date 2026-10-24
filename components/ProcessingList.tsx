@@ -154,14 +154,14 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
             key={page.id} 
             className={`glass-panel rounded-2xl overflow-hidden shadow-xl flex flex-col md:flex-row h-auto min-h-[260px] transition-all duration-300 ${
                 page.isSelected 
-                  ? 'border-white/[0.15] ring-2 ring-[#FF6B2B]/40 bg-[#11141F]/80' 
-                  : 'border-white/[0.05] opacity-80 hover:opacity-100 bg-[#0B0D13]/60'
+                  ? 'border-white/[0.15] ring-2 ring-accent/40 bg-surface/80' 
+                  : 'border-white/[0.05] opacity-80 hover:opacity-100 bg-canvas/60'
             }`}
         >
           
           {/* Image Thumbnail Side */}
           <div 
-            className="w-full md:w-1/4 bg-[#08090D] relative group border-b md:border-b-0 md:border-r border-white/[0.08] cursor-pointer flex items-center justify-center p-3"
+            className="w-full md:w-1/4 bg-canvas relative group border-b md:border-b-0 md:border-r border-white/[0.08] cursor-pointer flex items-center justify-center p-3"
             onClick={() => onToggleSelection(page.id)}
           >
             <img 
@@ -183,7 +183,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                             height: `${Math.abs(el.bbox.ymax - el.bbox.ymin) / 1000 * 100}%`,
                         }}
                     >
-                        <span className="absolute -top-3.5 left-0 bg-emerald-500 text-slate-950 text-[8px] px-1 rounded font-black uppercase">Diagram</span>
+                        <span className="absolute -top-3.5 left-0 bg-emerald-500 text-slate-950 text-[8px] px-1 rounded font-bold uppercase">Diagram</span>
                     </div>
                 )
             ))}
@@ -192,31 +192,31 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
             <div className="absolute top-3 left-3 z-10">
                 <div className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all ${
                     page.isSelected 
-                        ? 'bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] border-[#FF6B2B] text-white shadow-md shadow-[#FF6B2B]/30' 
-                        : 'bg-[#0B0D13]/80 border-white/[0.2] hover:border-white/[0.4]'
+                        ? 'bg-accent border-accent text-on-accent shadow-md ' 
+                        : 'bg-canvas/80 border-white/[0.2] hover:border-white/[0.4]'
                 }`}>
                     {page.isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                 </div>
             </div>
 
-            <div className="absolute top-3 left-10 bg-slate-900/80 text-slate-200 text-[10px] font-bold px-2 py-0.5 rounded-md backdrop-blur-md border border-white/[0.08]">
+            <div className="absolute top-3 left-10 bg-slate-900/80 text-slate-200 text-[11px] font-bold px-2 py-0.5 rounded-md backdrop-blur-md border border-white/[0.08]">
                 Page {page.pageNumber}
             </div>
             
             {/* Status Badge */}
             <div className="absolute top-3 right-3">
                {page.status === 'processing' && (
-                 <span className="bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
+                 <span className="bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
                    <Loader2 className="w-3 h-3 animate-spin" /> Digitizing...
                  </span>
                )}
                {page.status === 'done' && (
-                 <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
+                 <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
                    <CheckCircle2 className="w-3 h-3" /> Ready
                  </span>
                )}
                {page.status === 'error' && (
-                 <span className="bg-rose-500/15 border border-rose-500/30 text-rose-400 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
+                 <span className="bg-rose-500/15 border border-rose-500/30 text-rose-400 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
                    <AlertCircle className="w-3 h-3" /> Error
                  </span>
                )}
@@ -224,7 +224,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
           </div>
 
           {/* Text & Content Viewer / Editor Side */}
-          <div className="w-full md:w-3/4 flex flex-col h-[360px] md:h-auto bg-[#0E111A]">
+          <div className="w-full md:w-3/4 flex flex-col h-[360px] md:h-auto bg-surface">
             {/* Content Toolbar */}
             <div className="flex justify-between items-center px-4 py-2.5 border-b border-white/[0.06] bg-white/[0.02]">
                 <div className="flex items-center gap-2">
@@ -233,13 +233,13 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                   </span>
                   {page.extractedText && (
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-slate-500 font-mono">
+                      <span className="text-[11px] text-slate-500 font-mono">
                         ({page.extractedText.split(/\s+/).filter(Boolean).length} words)
                       </span>
                       {page.extractedText.split(/\s+/).filter(Boolean).length < 20 && onRecapture && (
                         <button
                           onClick={() => onRecapture(page.id)}
-                          className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[10px] text-amber-300 font-bold hover:bg-amber-500/30 transition-all flex items-center gap-1"
+                          className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[11px] text-amber-300 font-bold hover:bg-amber-500/30 transition-all flex items-center gap-1"
                           title="Click to recapture complete response from AI chat tab"
                         >
                           <Camera className="w-3 h-3 text-amber-400" />
@@ -295,8 +295,8 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                     onClick={() => setAiPanelOpenId(aiPanelOpenId === page.id ? null : page.id)}
                                     className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all ${
                                       aiPanelOpenId === page.id 
-                                        ? 'bg-[#FF6B2B] text-white border-[#FF6B2B]' 
-                                        : 'bg-[#FF6B2B]/10 hover:bg-[#FF6B2B]/20 text-[#FF884D] border-[#FF6B2B]/30'
+                                        ? 'bg-accent text-on-accent border-accent' 
+                                        : 'bg-accent/10 hover:bg-accent/20 text-accent-light border-accent/30'
                                     }`}
                                     title="Ask Gemini or Explain Extracted Content"
                                 >
@@ -316,7 +316,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                 )}
                                 <button 
                                     onClick={() => onRetry(page.id)}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-400 hover:text-[#FF884D] text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-400 hover:text-accent-light text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
                                     title="Reprocess Page"
                                 >
                                     <RefreshCw className="w-3.5 h-3.5" />
@@ -354,7 +354,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                    <textarea
                      value={editText}
                      onChange={(e) => setEditText(e.target.value)}
-                     className="w-full h-full bg-[#08090D] text-slate-100 p-3 rounded-xl border border-white/[0.1] font-mono text-xs focus:outline-none focus:border-[#FF6B2B] focus:ring-1 focus:ring-[#FF6B2B]/50 resize-none leading-relaxed"
+                     className="w-full h-full bg-canvas text-slate-100 p-3 rounded-xl border border-white/[0.1] font-mono text-xs focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/50 resize-none leading-relaxed"
                      placeholder="Edit extracted content..."
                      autoFocus
                    />
@@ -384,7 +384,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                           </>
                       ) : page.status === 'processing' ? (
                           <div className="flex flex-col items-center justify-center h-48 gap-3 text-slate-400">
-                             <Loader2 className="w-7 h-7 text-[#FF6B2B] animate-spin" />
+                             <Loader2 className="w-7 h-7 text-accent animate-spin" />
                              <span className="text-xs font-medium tracking-wide">Transcribing layout, math & text...</span>
                           </div>
                       ) : page.status === 'error' ? (

@@ -28,7 +28,7 @@ export const HtmlLatexField: React.FC<{
   singleLine?: boolean;
   placeholder?: string;
   textClassName?: string;
-}> = ({ value, onChange, rows = 3, singleLine = false, placeholder, textClassName = 'text-white' }) => {
+}> = ({ value, onChange, rows = 3, singleLine = false, placeholder, textClassName = 'text-ink' }) => {
   const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
 
   const insert = (s: Snippet) => {
@@ -47,13 +47,13 @@ export const HtmlLatexField: React.FC<{
     });
   };
 
-  const baseInput = `w-full p-2 bg-black/60 border border-white/[0.1] rounded-lg text-xs font-mono focus:outline-none focus:border-amber-500/50 ${textClassName}`;
+  const baseInput = `w-full px-2.5 py-2 bg-canvas border border-line-strong rounded-lg text-[13px] leading-relaxed font-mono focus:outline-none focus:border-accent ${textClassName}`;
   const hasContent = !!(value && value.trim());
 
   return (
     <div className="space-y-1.5 w-full min-w-0">
       {!singleLine && (
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1" role="toolbar" aria-label="Insert formatting">
           {SNIPPETS.map(s => (
             <button
               key={s.label}
@@ -61,7 +61,7 @@ export const HtmlLatexField: React.FC<{
               onMouseDown={e => e.preventDefault()}
               onClick={() => insert(s)}
               title={s.title}
-              className="min-w-[24px] px-1.5 py-0.5 rounded bg-white/[0.05] hover:bg-amber-500/20 border border-white/[0.08] hover:border-amber-500/40 text-[10px] font-bold text-slate-300 hover:text-amber-200 transition-colors"
+              className="min-w-[28px] h-7 px-2 rounded-md bg-surface-2 hover:bg-surface-3 border border-line hover:border-line-strong text-xs font-semibold text-ink-2 hover:text-ink transition-colors"
             >
               {s.label}
             </button>
@@ -88,11 +88,11 @@ export const HtmlLatexField: React.FC<{
         />
       )}
       {hasContent && (
-        <div className="rounded-lg border border-dashed border-white/[0.1] bg-white/[0.02] px-2 py-1.5">
-          <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
-            <Eye className="w-2.5 h-2.5" /> KaTeX preview
+        <div className="rounded-lg border border-dashed border-line-strong bg-white/[0.02] px-2.5 py-2">
+          <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-ink-3 mb-1">
+            <Eye className="w-3 h-3" /> Preview
           </div>
-          <LatexRenderer content={value} inline={singleLine} className="text-slate-200" />
+          <LatexRenderer content={value} inline={singleLine} className="text-ink" />
         </div>
       )}
     </div>

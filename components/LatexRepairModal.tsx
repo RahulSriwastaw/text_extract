@@ -143,17 +143,17 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px]">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="relative w-full max-w-5xl max-h-[92vh] flex flex-col bg-gradient-to-b from-[#18181B] to-[#121214] border border-white/15 rounded-2xl shadow-2xl shadow-black/80 overflow-hidden text-slate-100"
+          className="relative w-full max-w-5xl max-h-[92vh] flex flex-col bg-surface border border-line-strong rounded-2xl shadow-2xl overflow-hidden text-ink"
         >
           {/* Top Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/[0.03]">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-300">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300">
                 <Sigma className="w-5 h-5" />
               </div>
               <div>
@@ -193,7 +193,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
                   disabled={loading}
                   className={`px-3 py-1 rounded-lg font-bold capitalize transition-all ${
                     scope === sc
-                      ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
+                      ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                       : 'bg-white/5 text-slate-300 hover:bg-white/10 border border-white/5'
                   }`}
                 >
@@ -209,7 +209,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
                 onClick={() => setShowRawCode(!showRawCode)}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors ${
                   showRawCode
-                    ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                    ? 'bg-white/[0.04] border-line-strong text-ink-2'
                     : 'bg-white/5 border-white/10 text-slate-400 hover:text-slate-200'
                 }`}
                 title="Toggle raw LaTeX code display"
@@ -259,8 +259,8 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
                   </div>
                 )}
                 {currentStatus === 'fixed' && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-bold">
-                    <Sparkles className="w-4 h-4 text-cyan-400" />
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] border border-line-strong text-ink-2 text-xs font-bold">
+                    <Sparkles className="w-4 h-4 text-ink-3" />
                     <span>AI Repaired — Syntax normalized to KaTeX</span>
                   </div>
                 )}
@@ -273,7 +273,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
 
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 bg-white/5 px-2 py-1 rounded-lg">
                   <span className="font-medium">Confidence:</span>
-                  <span className="font-extrabold text-slate-200">{confidencePercent}%</span>
+                  <span className="font-semibold text-slate-200">{confidencePercent}%</span>
                   <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
                     <div 
                       className={`h-full rounded-full transition-all duration-500 ${
@@ -298,7 +298,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
             {/* Changes list if present */}
             {repairResult?.changes && repairResult.changes.length > 0 && (
               <div className="mt-2 text-xs text-slate-300 bg-black/30 p-2 rounded-lg border border-white/5 space-y-1">
-                <span className="font-bold text-slate-400 uppercase text-[10px] tracking-wider block">Detected Changes & Fixes:</span>
+                <span className="font-bold text-slate-400 uppercase text-[11px] tracking-wider block">Detected Changes & Fixes:</span>
                 <ul className="list-disc list-inside space-y-0.5 text-slate-300">
                   {repairResult.changes.map((c, i) => (
                     <li key={i} className="leading-snug">{c}</li>
@@ -353,11 +353,11 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
               {(viewMode === 'split' || viewMode === 'before') && (
                 <div className="flex flex-col bg-black/40 border border-white/10 rounded-xl p-4 shadow-sm">
                   <div className="flex items-center justify-between pb-2 mb-3 border-b border-white/10">
-                    <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-slate-500" />
                       Original (Before)
                     </span>
-                    <span className="text-[10px] text-slate-500 font-mono">Unmodified</span>
+                    <span className="text-[11px] text-slate-500 font-mono">Unmodified</span>
                   </div>
 
                   <div className="space-y-4 text-xs">
@@ -453,11 +453,11 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
               {(viewMode === 'split' || viewMode === 'after') && (
                 <div className="flex flex-col bg-emerald-950/10 border border-emerald-500/20 rounded-xl p-4 shadow-sm">
                   <div className="flex items-center justify-between pb-2 mb-3 border-b border-emerald-500/20">
-                    <span className="text-xs font-extrabold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                       Suggested Repair (After)
                     </span>
-                    <span className="text-[10px] text-emerald-400 font-mono font-bold">KaTeX Standard</span>
+                    <span className="text-[11px] text-emerald-400 font-mono font-bold">KaTeX Standard</span>
                   </div>
 
                   <div className="space-y-4 text-xs">
@@ -554,11 +554,11 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
             <div className="p-4 rounded-xl bg-black/50 border border-white/10 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-300">
+                  <div className="p-1.5 rounded-lg bg-white/[0.04] border border-line-strong text-ink-2">
                     <Code className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-extrabold text-white uppercase tracking-wider">
+                    <h4 className="text-xs font-semibold text-white uppercase tracking-wider">
                       Interactive Manual Formula Editor
                     </h4>
                     <p className="text-[11px] text-slate-400">
@@ -573,7 +573,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
                   <select
                     value={manualField}
                     onChange={(e) => setManualField(e.target.value as keyof MockTestMcqItem)}
-                    className="px-2.5 py-1 rounded bg-black/80 border border-white/15 text-slate-200 font-medium text-xs focus:outline-none focus:border-amber-500"
+                    className="px-2.5 py-1 rounded bg-black/80 border border-white/15 text-slate-200 font-medium text-xs focus:outline-none focus:border-accent"
                   >
                     <option value="question_hi">Question (Hindi)</option>
                     <option value="question_en">Question (English)</option>
@@ -593,7 +593,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
 
               {/* Quick Math Symbol Insertion Chips */}
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <span className="text-[10px] uppercase font-bold text-slate-400 mr-1">Quick Palette:</span>
+                <span className="text-[11px] uppercase font-bold text-slate-400 mr-1">Quick Palette:</span>
                 {MATH_CHIPS.map((chip, idx) => (
                   <button
                     key={idx}
@@ -613,7 +613,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
                   value={manualText}
                   onChange={(e) => handleManualTextChange(e.target.value)}
                   rows={3}
-                  className="w-full p-2.5 rounded-lg bg-black/90 border border-white/15 text-slate-100 font-mono text-xs focus:outline-none focus:border-amber-500 transition-all resize-y"
+                  className="w-full p-2.5 rounded-lg bg-black/90 border border-white/15 text-slate-100 font-mono text-xs focus:outline-none focus:border-accent transition-all resize-y"
                   placeholder="Enter or edit LaTeX formulas with $...$ or $$...$$"
                 />
               </div>
@@ -621,7 +621,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
               {/* Live Render & Real-time Validation Box */}
               <div className="flex flex-col md:flex-row gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/10">
                 <div className="flex-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                     Live KaTeX Render:
                   </span>
                   <div className="min-h-[36px] flex items-center p-2 rounded bg-black/50 border border-white/5 text-xs text-slate-200">
@@ -630,7 +630,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
                 </div>
 
                 <div className="w-full md:w-64 flex flex-col justify-center">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                     Syntax Validation:
                   </span>
                   {manualValidation.valid ? (
@@ -672,7 +672,7 @@ export const LatexRepairModal: React.FC<LatexRepairModalProps> = ({
                   onClose();
                 }}
                 disabled={loading}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50"
+                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-semibold bg-accent hover:bg-accent-hover text-on-accent shadow-lg transition-all disabled:opacity-50"
               >
                 <Check className="w-4 h-4" />
                 <span>Apply Repair</span>

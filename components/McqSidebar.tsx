@@ -418,26 +418,26 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-[#0B0D13]/70 backdrop-blur-md z-50"
+            className="fixed inset-0 bg-[rgb(4_5_8/0.6)] backdrop-blur-[2px] z-50"
           />
           <motion.div
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 26, stiffness: 220 }}
-            className="fixed inset-y-0 right-0 w-full max-w-md bg-[#11141F] z-50 flex flex-col border-l border-white/[0.08] shadow-2xl"
+            className="fixed inset-y-0 right-0 w-full max-w-md bg-surface z-50 flex flex-col border-l border-line-strong shadow-2xl"
           >
             <div className="flex flex-col gap-3 p-4 bg-white/[0.02] border-b border-white/[0.08]">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-bold text-white font-display">MCQ Question Bank</h2>
-                  <p className="text-[10px] text-slate-400">{mcqs.length} questions digitized</p>
+                  <p className="text-[11px] text-slate-400">{mcqs.length} questions digitized</p>
                 </div>
                 <div className="flex items-center gap-1.5">
                   {authStatus !== 'none' ? (
                     <button
                       onClick={() => setShowSettingsModal(true)}
-                      className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-lg text-[10px] font-bold transition-all"
+                      className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-emerald-400 rounded-lg text-[11px] font-bold transition-all"
                     >
                       <CheckCircle2 className="w-3 h-3" />
                       <span>Gemini ✓</span>
@@ -445,7 +445,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                   ) : (
                     <button
                       onClick={() => setShowConnectModal(true)}
-                      className="flex items-center gap-1 px-2 py-1 bg-[#FF6B2B]/10 hover:bg-[#FF6B2B]/20 border border-[#FF6B2B]/30 text-[#FF884D] rounded-lg text-[10px] font-bold transition-all"
+                      className="flex items-center gap-1 px-2 py-1 bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent-light rounded-lg text-[11px] font-bold transition-all"
                     >
                       <Sparkles className="w-3 h-3" />
                       <span>Connect Gemini</span>
@@ -499,7 +499,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
 
                   <button 
                     onClick={() => setShowMocktestModal(true)}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 border border-emerald-500/30 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                    className="w-full flex items-center justify-center gap-1.5 py-2 bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition-all shadow-sm"
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
                     Open in MockTest Studio (18-Col CSV)
@@ -508,7 +508,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                   <button 
                     onClick={handleProofread}
                     disabled={isProofreading}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] text-white hover:shadow-lg hover:shadow-[#FF6B2B]/25 rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-accent text-on-accent hover:shadow-lg rounded-xl text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isProofreading ? (
                       <>
@@ -526,7 +526,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                   {manualMcqs && (
                     <button 
                       onClick={() => setManualMcqs(null)}
-                      className="text-[10px] text-slate-500 hover:text-slate-300 text-center underline"
+                      className="text-[11px] text-slate-500 hover:text-slate-300 text-center underline"
                     >
                       Reset to auto-extracted version
                     </button>
@@ -554,14 +554,14 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                     {/* Top Row */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-lg bg-[#FF6B2B]/15 border border-[#FF6B2B]/30 text-[#FF884D] flex items-center justify-center text-xs font-bold font-mono">
+                        <div className="w-6 h-6 rounded-lg bg-accent/15 border border-accent/30 text-accent-light flex items-center justify-center text-xs font-bold font-mono">
                           {idx + 1}
                         </div>
-                        <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        <span className="text-[11px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full uppercase tracking-wider">
                           Page {mcq.pageNumber}
                         </span>
                       </div>
-                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase">
+                      <span className="text-[11px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase">
                         {mcq.status}
                       </span>
                     </div>
@@ -575,7 +575,7 @@ const McqSidebar: React.FC<McqSidebarProps> = ({ isOpen, onClose, pages, mcqMode
                     <div className="space-y-1.5 pt-1">
                       {mcq.options.map((opt, oIdx) => (
                         <div key={oIdx} className="flex items-start gap-2 text-xs bg-white/[0.02] p-1.5 rounded-lg border border-white/[0.04]">
-                          <span className="font-bold text-[#FF884D] w-4 font-mono">({opt.label.toLowerCase()})</span>
+                          <span className="font-bold text-accent-light w-4 font-mono">({opt.label.toLowerCase()})</span>
                           <span className="text-slate-300">{opt.text}</span>
                         </div>
                       ))}

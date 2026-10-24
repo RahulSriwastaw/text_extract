@@ -13,7 +13,7 @@ import { signInWithGoogle } from '../services/authService';
 
 const FEATURES = [
   {
-    icon: <Zap className="w-4 h-4 text-[#FF884D]" />,
+    icon: <Zap className="w-4 h-4 text-accent-light" />,
     text: 'Zero-token AI extraction via your own browser session',
   },
   {
@@ -57,10 +57,10 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0D13] text-slate-100 overflow-hidden relative flex items-center justify-center px-4 py-12 selection:bg-[#FF6B2B]/30">
+    <div className="min-h-screen bg-canvas text-slate-100 overflow-hidden relative flex items-center justify-center px-4 py-12 selection:bg-accent/30">
       {/* Ambient animated glows */}
       <motion.div
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-[520px] bg-gradient-to-b from-[#FF6B2B]/20 via-purple-600/10 to-transparent blur-[140px] pointer-events-none rounded-full"
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-[520px] bg-accent/10 blur-[140px] pointer-events-none rounded-full"
         animate={{ opacity: [0.6, 1, 0.6] }}
         transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
       />
@@ -95,13 +95,13 @@ const LoginPage: React.FC = () => {
         <motion.div variants={itemVariants} className="flex flex-col items-center text-center mb-8">
           <motion.div
             whileHover={{ scale: 1.05, rotate: 4 }}
-            className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] shadow-xl shadow-[#FF6B2B]/30 flex items-center justify-center mb-4"
+            className="w-16 h-16 rounded-2xl bg-accent shadow-xl flex items-center justify-center mb-4"
           >
             <Sparkles className="w-8 h-8 text-white" />
           </motion.div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight font-display text-white">
-            Text<span className="text-[#FF6B2B]">Extract</span>{' '}
-            <span className="px-2 py-0.5 rounded-md text-[11px] font-black uppercase tracking-widest bg-[#FF6B2B]/15 text-[#FF884D] border border-[#FF6B2B]/30 align-middle">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight font-display text-white">
+            Text<span className="text-accent">Extract</span>{' '}
+            <span className="px-2 py-0.5 rounded-md text-[11px] font-bold uppercase tracking-widest bg-accent/15 text-accent-light border border-accent/30 align-middle">
               PRO
             </span>
           </h1>
@@ -113,7 +113,7 @@ const LoginPage: React.FC = () => {
         {/* Card */}
         <motion.div
           variants={itemVariants}
-          className="bg-[#121524]/90 backdrop-blur-xl border border-white/[0.08] rounded-3xl shadow-2xl p-6 sm:p-8"
+          className="bg-surface/90 backdrop-blur-xl border border-white/[0.08] rounded-2xl shadow-2xl p-6 sm:p-8"
         >
           <motion.button
             type="button"

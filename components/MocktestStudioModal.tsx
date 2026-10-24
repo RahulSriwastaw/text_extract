@@ -284,27 +284,27 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px]">
         <motion.div 
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.96 }}
-          className="relative w-full max-w-7xl h-[94vh] bg-[#0E111A] border border-white/[0.08] rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200"
+          className="relative w-full max-w-7xl h-[94vh] bg-surface border border-line-strong rounded-2xl shadow-2xl flex flex-col overflow-hidden text-ink"
         >
           {/* Header Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-white/[0.08] bg-white/[0.02]">
+          <div className="modal-header flex-wrap">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#FF6B2B] to-[#FF884D] flex items-center justify-center shadow-lg shadow-[#FF6B2B]/20">
-                <FileSpreadsheet className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-lg bg-accent/10 border border-accent/25 flex items-center justify-center">
+                <FileSpreadsheet className="w-5 h-5 text-accent-light" />
               </div>
               <div>
-                <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <h2 className="modal-title flex items-center gap-2">
                   MockTest MCQ Studio
-                  <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                  <span className="badge badge-neutral">
                     18-Field CSV Format
                   </span>
                 </h2>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-xs text-ink-3">
                   Bilingual HTML & LaTeX MCQs, step-by-step deep explanations, RFC 4180 CSV export
                 </p>
               </div>
@@ -314,7 +314,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopyCsv}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] rounded-xl text-xs font-semibold transition-all"
+                className="btn btn-ghost btn-sm"
                 title="Copy entire CSV to clipboard"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
@@ -323,18 +323,18 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
               <button
                 onClick={handleDownload}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all"
+                className="btn btn-primary btn-sm"
               >
-                <Download className="w-3.5 h-3.5" />
+                <Download />
                 Download CSV ({items.length})
               </button>
 
               {/* DOCX Download with language selector */}
-              <div className="flex items-center gap-0">
+              <div className="btn-group">
                 <select
                   value={docxLang}
                   onChange={e => setDocxLang(e.target.value as 'hi' | 'en' | 'both')}
-                  className="h-8 px-2 text-[10px] font-bold bg-indigo-700/80 text-white border border-indigo-500/40 rounded-l-xl focus:outline-none cursor-pointer"
+                  className="select select-sm w-auto rounded-r-none"
                   title="Language for DOCX"
                 >
                   <option value="both">Hi+En</option>
@@ -344,7 +344,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                 <button
                   onClick={handleDownloadDocx}
                   disabled={isGeneratingDocx || items.length === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-r-xl text-xs font-bold shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-50"
+                  className="btn btn-secondary btn-sm rounded-l-none -ml-px"
                   title="Download as Word DOCX with native LaTeX math equations"
                 >
                   {isGeneratingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
@@ -354,7 +354,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
               <button
                 onClick={onClose}
-                className="p-1.5 hover:bg-white/[0.08] text-slate-400 hover:text-white rounded-xl transition-all"
+                className="btn btn-ghost btn-icon btn-sm"
+                aria-label="Close"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -362,11 +363,11 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
           </div>
 
           {/* Sub-toolbar / Settings Controls */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-2.5 bg-white/[0.01] border-b border-white/[0.06] text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-2.5 border-b border-line text-xs">
             <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
               {/* Set Name Input */}
-              <div className="flex items-center gap-2 bg-white/[0.03] border border-white/[0.08] px-2.5 py-1 rounded-xl">
-                <span className="text-[10px] uppercase font-bold text-slate-500">Set Name:</span>
+              <div className="input-group h-8">
+                <span className="text-[11px] uppercase font-semibold tracking-wide text-ink-3 shrink-0">Set Name:</span>
                 <input
                   type="text"
                   value={setName}
@@ -377,8 +378,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
               </div>
 
               {/* Bulk Difficulty Selector */}
-              <div className="flex items-center gap-2 bg-white/[0.03] border border-white/[0.08] px-2.5 py-1 rounded-xl">
-                <span className="text-[10px] uppercase font-bold text-slate-500">Difficulty:</span>
+              <div className="input-group h-8">
+                <span className="text-[11px] uppercase font-semibold tracking-wide text-ink-3 shrink-0">Difficulty:</span>
                 <select
                   value={selectedDifficulty}
                   onChange={(e) => handleBulkDifficulty(e.target.value as DifficultyLevel)}
@@ -391,31 +392,32 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
               </div>
 
               {/* Answer Key Format: Letters vs Numbers */}
-              <div className="flex items-center gap-1.5 bg-white/[0.03] border border-white/[0.08] p-0.5 rounded-xl">
-                <span className="text-[10px] uppercase font-bold text-slate-500 px-2">Answer Key:</span>
+              <div className="seg seg-sm" role="group" aria-label="Answer key">
+                <span className="text-[11px] uppercase font-semibold tracking-wide text-ink-3 px-2">Answer key</span>
                 <button
                   onClick={() => setAnswerFormat('letters')}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${answerFormat === 'letters' ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                  aria-pressed={answerFormat === 'letters'}
+                  className="seg-item"
                 >
                   A, B, C, D, E
                 </button>
                 <button
                   onClick={() => setAnswerFormat('numbers')}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${answerFormat === 'numbers' ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                  aria-pressed={answerFormat === 'numbers'}
+                  className="seg-item"
                 >
                   1, 2, 3, 4, 5
                 </button>
               </div>
 
               {/* 4 Options vs 5 Options Selector */}
-              <div className="flex items-center gap-1 bg-white/[0.03] border border-white/[0.08] p-0.5 rounded-xl">
-                <span className="text-[10px] uppercase font-bold text-slate-500 px-1.5">Options:</span>
+              <div className="seg seg-sm" role="group" aria-label="Options">
+                <span className="text-[11px] uppercase font-semibold tracking-wide text-ink-3 px-2">Options</span>
                 <button
                   type="button"
                   onClick={() => setOptionCountMode('4_options')}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${
-                    optionCountMode === '4_options' ? 'bg-[#FF6B2B] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-                  }`}
+                  aria-pressed={optionCountMode === '4_options'}
+                  className="seg-item"
                   title="4 options (Option A to D)"
                 >
                   4 (A-D)
@@ -423,9 +425,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setOptionCountMode('5_options')}
-                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all ${
-                    optionCountMode === '5_options' ? 'bg-amber-500 text-black shadow-sm font-extrabold' : 'text-slate-400 hover:text-white'
-                  }`}
+                  aria-pressed={optionCountMode === '5_options'}
+                  className="seg-item"
                   title="5 options (Option A to E / e.g. BPSC, Bank PO, State PSCs)"
                 >
                   5 (A-E)
@@ -439,13 +440,13 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowPasteCsvModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-teal-600/20 transition-all"
+                className="btn btn-secondary btn-sm"
                 title="Paste CSV from clipboard to fill missing question gaps or append new questions"
               >
                 <ClipboardPaste className="w-3.5 h-3.5" />
                 <span>Paste CSV / Missing</span>
                 {missingGaps.length > 0 && (
-                  <span className="px-1.5 py-0.2 bg-amber-400 text-black font-extrabold text-[10px] rounded-full animate-pulse">
+                  <span className="badge badge-warning h-5 px-1.5">
                     {missingGaps.length} missing
                   </span>
                 )}
@@ -454,7 +455,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
               <button
                 onClick={handleSolveAll}
                 disabled={isSolvingAll || items.length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-[#FF6B2B] to-[#FF884D] hover:from-[#FF5500] hover:to-[#FF7733] text-white rounded-xl text-xs font-bold shadow-lg shadow-[#FF6B2B]/20 transition-all disabled:opacity-50"
+                className="btn btn-secondary btn-sm"
               >
                 {isSolvingAll ? (
                   <>
@@ -471,10 +472,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.08] text-slate-300 rounded-xl text-xs font-medium transition-all"
+                className="btn btn-ghost btn-sm"
                 title="Import existing CSV"
               >
-                <Upload className="w-3.5 h-3.5 text-blue-400" />
+                <Upload />
                 Import File
               </button>
               <input
@@ -487,15 +488,15 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
               <button
                 onClick={handleAddQuestion}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.08] text-slate-300 rounded-xl text-xs font-medium transition-all"
+                className="btn btn-ghost btn-sm"
               >
-                <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                <Plus />
                 Add Q
               </button>
 
               <button
                 onClick={() => setShowAddQuestionModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+                className="btn btn-secondary btn-sm"
                 title="Add question via AI prompt or paste screenshot (Ctrl+V)"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -504,36 +505,30 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
               {/* KaTeX Preview vs Source Edit Toggle (for Cards) */}
               {activeTab === 'cards' && (
-                <div className="flex items-center bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.06]">
+                <div className="seg seg-sm">
                   <button
                     onClick={() => setViewMode('preview')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                      viewMode === 'preview'
-                        ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-300 shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
+                    aria-pressed={viewMode === 'preview'}
+                    className="seg-item"
                     title="Render mathematical equations with KaTeX & formatted HTML"
                   >
-                    <Eye className="w-3.5 h-3.5 text-amber-400" />
-                    <span>KaTeX View</span>
+                    <Eye />
+                    <span>KaTeX view</span>
                   </button>
                   <button
                     onClick={() => setViewMode('edit')}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                      viewMode === 'edit'
-                        ? 'bg-white/[0.1] text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
+                    aria-pressed={viewMode === 'edit'}
+                    className="seg-item"
                     title="Direct edit raw text, HTML tags, and LaTeX commands"
                   >
-                    <Edit3 className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Edit Source</span>
+                    <Edit3 />
+                    <span>Edit source</span>
                   </button>
                 </div>
               )}
 
               {/* View Switcher: Cards vs Table */}
-              <div className="flex items-center bg-white/[0.04] p-0.5 rounded-xl border border-white/[0.06]">
+              <div className="seg seg-sm">
                 <button
                   onClick={() => setActiveTab('cards')}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${activeTab === 'cards' ? 'bg-white/[0.1] text-white' : 'text-slate-400 hover:text-white'}`}
@@ -562,10 +557,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                 <div className="flex items-center gap-2 mt-2">
                   <button
                     onClick={handleAddQuestion}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FF6B2B] text-white rounded-xl text-xs font-bold shadow-md shadow-[#FF6B2B]/20"
+                    className="btn btn-secondary btn-sm"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add First Question
+                    <Plus />
+                    Add first question
                   </button>
                 </div>
               </div>
@@ -592,7 +587,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                   <tbody className="divide-y divide-white/[0.04]">
                     {items.map((item, idx) => (
                       <tr key={item.id} className="hover:bg-white/[0.02] transition-colors">
-                        <td className="p-2.5 font-bold font-mono text-[#FF884D]">{item.question_r || idx + 1}</td>
+                        <td className="p-2.5 font-bold font-mono text-accent-light">{item.question_r || idx + 1}</td>
                         <td className="p-2.5 font-bold text-amber-300 bg-amber-500/5">{item.subject || 'Current Affairs'}</td>
                         <td className="p-2.5 text-slate-300">{item.subject_level || '—'}</td>
                         <td className="p-2.5 max-w-xs truncate" title={item.question_hi}>{item.question_hi}</td>
@@ -600,10 +595,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                         <td className="p-2.5 max-w-xs truncate text-emerald-300" title={item.solution_hi}>{item.solution_hi || '—'}</td>
                         <td className="p-2.5 max-w-xs truncate" title={item.question_en}>{item.question_en}</td>
                         <td className="p-2.5 max-w-xs truncate">{item.option1_en} | {item.option2_en} | {item.option3_en} | {item.option4_en}{item.option5_en ? ` | ${item.option5_en}` : ''}</td>
-                        <td className="p-2.5 max-w-xs truncate text-teal-300" title={item.solution_en}>{item.solution_en || '—'}</td>
+                        <td className="p-2.5 max-w-xs truncate text-ink-2" title={item.solution_en}>{item.solution_en || '—'}</td>
                         <td className="p-2.5 font-bold font-mono text-white bg-white/[0.02] text-center">{item.answer}</td>
                         <td className="p-2.5">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${item.difficulty_level === 'easy' ? 'bg-emerald-500/15 text-emerald-400' : item.difficulty_level === 'hard' ? 'bg-rose-500/15 text-rose-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-bold uppercase ${item.difficulty_level === 'easy' ? 'bg-emerald-500/15 text-emerald-400' : item.difficulty_level === 'hard' ? 'bg-rose-500/15 text-rose-400' : 'bg-amber-500/15 text-amber-400'}`}>
                             {item.difficulty_level}
                           </span>
                         </td>
@@ -637,24 +632,24 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                       key={item.id}
                       className={`glass-panel p-4 rounded-xl border transition-all flex flex-col gap-3 ${
                         issues.hasIssues
-                          ? 'border-amber-500/60 shadow-lg shadow-amber-500/10 ring-1 ring-amber-500/30 bg-black/60'
+                          ? 'border-amber-500/60 shadow-lg ring-1 ring-amber-500/30 bg-black/60'
                           : 'border-white/[0.08] hover:border-white/[0.14]'
                       }`}
                     >
                       {/* Top Row: Q Number, Type, Answer, Difficulty, AI Solve, Delete */}
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] pb-2.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg bg-[#FF6B2B]/20 border border-[#FF6B2B]/40 text-[#FF884D] flex items-center justify-center text-xs font-bold font-mono">
+                          <div className="w-7 h-7 rounded-lg bg-accent/20 border border-accent/40 text-accent-light flex items-center justify-center text-xs font-bold font-mono">
                             Q{item.question_r || idx + 1}
                           </div>
 
                           {/* STRICT ACADEMIC SUBJECT SELECTOR */}
                           <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg text-xs">
-                            <span className="text-amber-400 font-bold text-[10px] uppercase">Subject:</span>
+                            <span className="text-amber-400 font-bold text-[11px] uppercase">Subject:</span>
                             <select
                               value={item.subject || 'Current Affairs'}
                               onChange={(e) => handleUpdateItem(item.id, { subject: normalizeStrictSubject(e.target.value) })}
-                              className="bg-transparent text-amber-300 font-extrabold text-xs focus:outline-none cursor-pointer"
+                              className="bg-transparent text-amber-300 font-semibold text-xs focus:outline-none cursor-pointer"
                             >
                               {STANDARD_SUBJECTS.map((s) => (
                                 <option key={s} value={s} className="bg-slate-900 text-slate-200">{s}</option>
@@ -664,7 +659,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
                           {/* Subject Level */}
                           <div className="flex items-center gap-1 bg-white/[0.04] border border-white/[0.08] px-2 py-0.5 rounded-lg text-xs">
-                            <span className="text-slate-400 font-bold text-[10px] uppercase">Level:</span>
+                            <span className="text-slate-400 font-bold text-[11px] uppercase">Level:</span>
                             <input
                               type="text"
                               value={item.subject_level || ''}
@@ -687,7 +682,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
                           {/* Answer Key Input */}
                           <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-lg">
-                            <span className="text-[10px] font-bold text-emerald-400 uppercase">Answer:</span>
+                            <span className="text-[11px] font-bold text-emerald-400 uppercase">Answer:</span>
                             <input
                               type="text"
                               value={item.answer}
@@ -701,7 +696,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                           <select
                             value={item.difficulty_level}
                             onChange={(e) => handleUpdateItem(item.id, { difficulty_level: e.target.value as DifficultyLevel })}
-                            className="bg-white/[0.04] border border-white/[0.08] text-[10px] font-bold px-2 py-1 rounded-lg focus:outline-none text-slate-300"
+                            className="bg-white/[0.04] border border-white/[0.08] text-[11px] font-bold px-2 py-1 rounded-lg focus:outline-none text-slate-300"
                           >
                             <option value="easy" className="bg-slate-900">Easy</option>
                             <option value="medium" className="bg-slate-900">Medium</option>
@@ -716,9 +711,9 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                             type="button"
                             onClick={() => handleAiRepairSingle(item)}
                             disabled={isRepairing || solvingId === item.id}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold transition-all disabled:opacity-50 ${
+                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 ${
                               issues.hasIssues
-                                ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-md shadow-amber-500/20'
+                                ? 'bg-accent hover:bg-accent-hover text-on-accent shadow-md '
                                 : 'bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300'
                             }`}
                             title="Auto-fill missing options and step-by-step solution"
@@ -730,7 +725,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                           <button
                             onClick={() => handleSolveSingle(item)}
                             disabled={solvingId === item.id || isRepairing}
-                            className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-blue-600/30 to-indigo-600/30 hover:from-blue-600/50 hover:to-indigo-600/50 border border-blue-500/30 text-blue-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
+                            className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-500/10 hover:bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-lg text-xs font-semibold transition-all disabled:opacity-50"
                           >
                             {solvingId === item.id ? (
                               <>
@@ -749,10 +744,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                           <button
                             type="button"
                             onClick={() => setActiveChatQuestion(item)}
-                            className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-violet-600/30 to-indigo-600/30 hover:from-violet-600/50 hover:to-indigo-600/50 border border-violet-500/30 text-violet-300 hover:text-white rounded-lg text-xs font-semibold transition-all shadow-sm"
+                            className="flex items-center gap-1.5 px-2.5 py-1 bg-white/[0.04] hover:bg-white/[0.07] border border-line-strong text-ink-2 hover:text-white rounded-lg text-xs font-semibold transition-all shadow-sm"
                             title="Chat with AI to fix, modify, re-calculate, or improve this question"
                           >
-                            <MessageSquare className="w-3.5 h-3.5 text-violet-400" />
+                            <MessageSquare className="w-3.5 h-3.5 text-ink-3" />
                             <span>AI Chat</span>
                           </button>
 
@@ -795,13 +790,13 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
                       {/* WARNING MESSAGE BANNER FOR MISSING/BLANK FIELDS */}
                       {issues.hasIssues && (
-                        <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/40 rounded-xl text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-amber-500/10 border border-amber-500/40 rounded-xl text-xs">
                           <div className="flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 animate-bounce" />
+                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 " />
                             <div>
-                              <div className="font-extrabold text-amber-300 flex items-center gap-1.5">
+                              <div className="font-semibold text-amber-300 flex items-center gap-1.5">
                                 <span>⚠️ चेतावनी: रिक्त विकल्प व फ़ील्ड (Blank Fields Detected)</span>
-                                <span className="px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 text-[10px]">Action Required</span>
+                                <span className="px-1.5 py-px rounded bg-amber-500/30 text-amber-200 text-[11px]">Action Required</span>
                               </div>
                               <div className="text-slate-300 text-[11px] mt-0.5 font-medium">
                                 {issues.issueSummary} — इस प्रश्न के विकल्प खाली हैं। कृपया <strong>⚡ Auto-Fill</strong> दबाएं।
@@ -812,7 +807,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                             type="button"
                             onClick={() => handleAiRepairSingle(item)}
                             disabled={isRepairing}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold rounded-lg text-xs shadow-md shadow-amber-500/20 transition-all disabled:opacity-50"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover text-on-accent font-semibold rounded-lg text-xs shadow-md transition-all disabled:opacity-50"
                           >
                             {isRepairing ? (
                               <>
@@ -838,7 +833,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               <span className="w-2 h-2 rounded-full bg-amber-400"></span>
                               Hindi Version (question_hi)
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono">
+                            <span className="text-[11px] text-slate-500 font-mono">
                               {isCardEditing(item.id) ? 'Edit Mode' : 'KaTeX Rendered'}
                             </span>
                           </div>
@@ -849,7 +844,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               value={item.question_hi}
                               onChange={(e) => handleUpdateItem(item.id, { question_hi: e.target.value })}
                               placeholder="<p>यहाँ हिंदी प्रश्न लिखें...</p>"
-                              className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-[#FF6B2B]/60 custom-scrollbar"
+                              className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-accent/60 custom-scrollbar"
                             />
                           ) : (
                             <div className="p-3 bg-black/40 rounded-xl border border-white/[0.06] text-slate-100 min-h-[52px]">
@@ -859,14 +854,14 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
                           {/* Hindi Options */}
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-amber-400/80 uppercase">
+                            <span className="text-[11px] font-bold text-amber-400/80 uppercase">
                               Options ({hiOptionKeys.length}):
                             </span>
                             {isCardEditing(item.id) && !is5OptQuestion && (
                               <button
                                 type="button"
                                 onClick={() => handleUpdateItem(item.id, { option5_hi: '<p>विकल्प E</p>', option5_en: '<p>Option E</p>' })}
-                                className="text-[10px] font-bold text-amber-300 hover:text-amber-200 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded transition-all"
+                                className="text-[11px] font-bold text-amber-300 hover:text-amber-200 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded transition-all"
                                 title="Add 5th option (Option E)"
                               >
                                 <Plus className="w-3 h-3" />
@@ -895,7 +890,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                         : 'bg-black/30 border-white/[0.06]'
                                     }`}
                                   >
-                                    <span className={`text-[10px] font-bold w-4 text-center font-mono shrink-0 ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
+                                    <span className={`text-[11px] font-bold w-4 text-center font-mono shrink-0 ${isBlank ? 'text-amber-400' : 'text-accent-light'}`}>({label})</span>
                                     <input
                                       type="text"
                                       value={item[key] || ''}
@@ -928,8 +923,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                       : 'bg-black/30 border-white/[0.06] text-slate-300'
                                   }`}
                                 >
-                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold shrink-0 mt-0.5 ${
-                                    isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-[#FF884D]'
+                                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-semibold shrink-0 mt-0.5 ${
+                                    isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-accent-light'
                                   }`}>
                                     {label}
                                   </span>
@@ -959,7 +954,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
                           {/* Hindi Solution */}
                           <div className="flex flex-col gap-1 mt-1">
-                            <span className="text-[10px] font-bold text-amber-400/80 uppercase">
+                            <span className="text-[11px] font-bold text-amber-400/80 uppercase">
                               Detailed Solution (solution_hi):
                             </span>
                             {isCardEditing(item.id) ? (
@@ -985,7 +980,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               <span className="w-2 h-2 rounded-full bg-blue-400"></span>
                               English Version (question_en)
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono">
+                            <span className="text-[11px] text-slate-500 font-mono">
                               {isCardEditing(item.id) ? 'Edit Mode' : 'KaTeX Rendered'}
                             </span>
                           </div>
@@ -996,7 +991,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                               value={item.question_en}
                               onChange={(e) => handleUpdateItem(item.id, { question_en: e.target.value })}
                               placeholder="<p>Write English question here...</p>"
-                              className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-[#FF6B2B]/60 custom-scrollbar"
+                              className="w-full p-2.5 bg-black/40 border border-white/[0.08] rounded-xl text-xs font-medium text-white focus:outline-none focus:border-accent/60 custom-scrollbar"
                             />
                           ) : (
                             <div className="p-3 bg-black/40 rounded-xl border border-white/[0.06] text-slate-100 min-h-[52px]">
@@ -1006,14 +1001,14 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
                           {/* English Options */}
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-blue-400/80 uppercase">
+                            <span className="text-[11px] font-bold text-blue-400/80 uppercase">
                               Options ({enOptionKeys.length}):
                             </span>
                             {isCardEditing(item.id) && !is5OptQuestion && (
                               <button
                                 type="button"
                                 onClick={() => handleUpdateItem(item.id, { option5_hi: '<p>विकल्प E</p>', option5_en: '<p>Option E</p>' })}
-                                className="text-[10px] font-bold text-blue-300 hover:text-blue-200 flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-0.5 rounded transition-all"
+                                className="text-[11px] font-bold text-blue-300 hover:text-blue-200 flex items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 px-2 py-0.5 rounded transition-all"
                                 title="Add 5th option (Option E)"
                               >
                                 <Plus className="w-3 h-3" />
@@ -1042,7 +1037,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                         : 'bg-black/30 border-white/[0.06]'
                                     }`}
                                   >
-                                    <span className={`text-[10px] font-bold w-4 text-center font-mono shrink-0 ${isBlank ? 'text-amber-400' : 'text-[#FF884D]'}`}>({label})</span>
+                                    <span className={`text-[11px] font-bold w-4 text-center font-mono shrink-0 ${isBlank ? 'text-amber-400' : 'text-accent-light'}`}>({label})</span>
                                     <input
                                       type="text"
                                       value={item[key] || ''}
@@ -1075,8 +1070,8 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                       : 'bg-black/30 border-white/[0.06] text-slate-300'
                                   }`}
                                 >
-                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold shrink-0 mt-0.5 ${
-                                    isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-[#FF884D]'
+                                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-semibold shrink-0 mt-0.5 ${
+                                    isCorrect ? 'bg-emerald-500 text-black' : isBlank ? 'bg-amber-500/20 text-amber-300' : 'bg-white/[0.08] text-accent-light'
                                   }`}>
                                     {label}
                                   </span>
@@ -1106,7 +1101,7 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
 
                           {/* English Solution */}
                           <div className="flex flex-col gap-1 mt-1">
-                            <span className="text-[10px] font-bold text-teal-400/80 uppercase">
+                            <span className="text-[11px] font-bold text-teal-400/80 uppercase">
                               Detailed Solution (solution_en):
                             </span>
                             {isCardEditing(item.id) ? (
@@ -1115,10 +1110,10 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
                                 value={item.solution_en}
                                 onChange={(e) => handleUpdateItem(item.id, { solution_en: e.target.value })}
                                 placeholder="<p>Step-by-step derivation & formulas...</p>"
-                                className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-teal-300 focus:outline-none focus:border-teal-500/60 custom-scrollbar"
+                                className="w-full p-2 bg-black/40 border border-white/[0.08] rounded-xl text-xs text-ink-2 focus:outline-none focus:border-accent custom-scrollbar"
                               />
                             ) : (
-                              <div className="p-3 bg-teal-500/[0.03] border border-teal-500/20 rounded-xl">
+                              <div className="p-3 bg-white/[0.04] border border-line-strong rounded-xl">
                                 <LatexRenderer content={item.solution_en || '<p>No explanation available</p>'} className="text-teal-100/90 text-xs leading-relaxed" />
                               </div>
                             )}
@@ -1133,32 +1128,32 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
           </div>
 
           {/* Footer Status Bar */}
-          <div className="flex items-center justify-between px-5 py-2.5 border-t border-white/[0.08] bg-white/[0.02] text-xs text-slate-400">
+          <div className="modal-footer justify-between flex-wrap text-xs text-ink-3">
             <div className="flex items-center gap-3">
               <span>Total Questions: <strong className="text-white">{items.length}</strong></span>
               <span>With Solutions: <strong className="text-emerald-400">{items.filter(i => i.solution_hi || i.solution_en).length}</strong></span>
-              <span>Set Name: <strong className="text-blue-400">{setName}</strong></span>
+              <span>Set: <strong className="text-ink">{setName}</strong></span>
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-[11px] text-slate-500">
+              <span className="hidden lg:inline text-[11px] text-ink-3">
                 UTF-8 BOM + RFC 4180 Escaped for Excel & MockTest Web Applications
               </span>
               <button
                 onClick={handleDownload}
-                className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-all"
+                className="btn btn-primary btn-sm"
               >
-                <Download className="w-3.5 h-3.5" />
-                Export .CSV
+                <Download />
+                Export CSV
               </button>
               <button
                 onClick={handleDownloadDocx}
                 disabled={isGeneratingDocx || items.length === 0}
-                className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs transition-all disabled:opacity-50"
+                className="btn btn-secondary btn-sm"
                 title="Download Word DOCX with LaTeX math"
               >
                 {isGeneratingDocx ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
-                Export .DOCX
+                Export DOCX
               </button>
             </div>
           </div>

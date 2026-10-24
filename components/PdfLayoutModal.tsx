@@ -123,17 +123,17 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
-      <div className="relative w-full max-w-4xl bg-[#12151F] border border-white/10 rounded-2xl shadow-2xl overflow-hidden my-6 flex flex-col text-slate-100 animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[rgb(4_5_8/0.75)] backdrop-blur-[3px] overflow-y-auto">
+      <div className="relative w-full max-w-4xl bg-surface border border-line-strong rounded-2xl shadow-2xl overflow-hidden my-6 flex flex-col text-ink animate-in fade-in zoom-in-95 duration-150">
         
         {/* MODAL HEADER */}
-        <div className="px-6 py-4 border-b border-white/[0.08] bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/40 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-white/[0.08] bg-accent/10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20">
+            <div className="p-2 rounded-xl bg-accent/10 border border-accent/25 text-accent-light ">
               <Grid className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-black text-white tracking-tight">
+              <h2 className="text-lg font-bold text-white tracking-tight">
                 PDF Page Layout & N-Up Export
               </h2>
               <p className="text-xs text-slate-400">
@@ -152,10 +152,10 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
         </div>
 
         {/* INFO CALLOUT BANNER (Replicating PDF24 Blue Info Box) */}
-        <div className="mx-6 mt-4 p-3.5 bg-blue-500/10 border border-blue-400/30 rounded-xl flex items-start gap-3 text-xs text-blue-200 leading-relaxed shadow-sm">
-          <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+        <div className="mx-6 mt-4 p-3.5 bg-accent/10 border border-accent/40 rounded-xl flex items-start gap-3 text-xs text-accent-light leading-relaxed shadow-sm">
+          <Info className="w-5 h-5 text-accent shrink-0 mt-0.5" />
           <div>
-            <span className="font-bold text-blue-100">Define a new PDF layout</span> (e.g. multiple pages per sheet like 2-Up, 4-Up, 8-Up) or change an existing layout (e.g. from A3 to A4, add sheet borders, and customize margins).
+            <span className="font-bold text-accent-light">Define a new PDF layout</span> (e.g. multiple pages per sheet like 2-Up, 4-Up, 8-Up) or change an existing layout (e.g. from A3 to A4, add sheet borders, and customize margins).
           </div>
         </div>
 
@@ -179,7 +179,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                 <select
                   value={config.layoutMode}
                   onChange={(e) => setConfig(p => ({ ...p, layoutMode: e.target.value as any }))}
-                  className="w-full bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
+                  className="w-full bg-surface-2 border border-white/15 focus:border-accent/40 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
                 >
                   <option value="readable">Readable auto adjust (Recommended)</option>
                   <option value="multiple">Multiple pages per sheet</option>
@@ -188,7 +188,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               </div>
 
               {isReadable && (
-                <div className="space-y-2 text-xs text-blue-200 leading-relaxed">
+                <div className="space-y-2 text-xs text-accent-light leading-relaxed">
                   <p>Each snippet uses the full page width. Longer content moves to the next page instead of shrinking. Very tall content continues on another page with a small overlap.</p>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={config.withBorder} onChange={e => setConfig(p => ({ ...p, withBorder: e.target.checked }))} />
@@ -212,7 +212,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                           customCols: p.customCols || 2,
                         }));
                       }}
-                      className="w-56 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
+                      className="w-56 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
                     >
                       <option value={1}>1 page per sheet</option>
                       <option value={2}>2 pages per sheet</option>
@@ -229,7 +229,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                         type="checkbox"
                         checked={config.withBorder}
                         onChange={(e) => setConfig(p => ({ ...p, withBorder: e.target.checked }))}
-                        className="w-4 h-4 rounded text-blue-600 bg-white/10 border-white/20 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                        className="w-4 h-4 rounded text-accent bg-white/10 border-white/20 focus:ring-0 focus:ring-offset-0 cursor-pointer"
                       />
                       <span>with border</span>
                     </label>
@@ -237,10 +237,10 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
 
                   {/* CUSTOM GRID CONTROLS (Rows × Columns) */}
                   {config.pagesPerSheet === 'custom' && (
-                    <div className="p-3 bg-blue-950/25 border border-blue-500/30 rounded-xl space-y-2.5 animate-in fade-in duration-200">
+                    <div className="p-3 bg-accent/10 border border-accent/40 rounded-xl space-y-2.5 animate-in fade-in duration-200">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-blue-300 flex items-center gap-1.5">
-                          <Grid className="w-3.5 h-3.5 text-blue-400" />
+                        <span className="font-bold text-accent-light flex items-center gap-1.5">
+                          <Grid className="w-3.5 h-3.5 text-accent" />
                           <span>Custom Grid Configuration</span>
                         </span>
                         <span className="text-[11px] font-mono font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
@@ -250,7 +250,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
 
                       <div className="grid grid-cols-2 gap-3">
                         <div className="flex flex-col gap-1">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rows (Horizontal)</label>
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Rows (Horizontal)</label>
                           <div className="flex items-center gap-1.5">
                             <input
                               type="number"
@@ -261,13 +261,13 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                                 const val = Math.max(1, Math.min(12, parseInt(e.target.value, 10) || 1));
                                 setConfig(p => ({ ...p, customRows: val }));
                               }}
-                              className="w-full bg-[#131622] border border-white/15 focus:border-blue-500 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono font-bold text-center outline-none"
+                              className="w-full bg-surface border border-white/15 focus:border-accent/40 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono font-bold text-center outline-none"
                             />
                             <div className="flex flex-col gap-0.5">
                               <button
                                 type="button"
                                 onClick={() => setConfig(p => ({ ...p, customRows: Math.min(12, (p.customRows || 2) + 1) }))}
-                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[9px] text-white"
+                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[11px] text-white"
                                 title="Increase rows"
                               >
                                 ▲
@@ -275,7 +275,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setConfig(p => ({ ...p, customRows: Math.max(1, (p.customRows || 2) - 1) }))}
-                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[9px] text-white"
+                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[11px] text-white"
                                 title="Decrease rows"
                               >
                                 ▼
@@ -285,7 +285,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                         </div>
 
                         <div className="flex flex-col gap-1">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Columns (Vertical)</label>
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Columns (Vertical)</label>
                           <div className="flex items-center gap-1.5">
                             <input
                               type="number"
@@ -296,13 +296,13 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                                 const val = Math.max(1, Math.min(12, parseInt(e.target.value, 10) || 1));
                                 setConfig(p => ({ ...p, customCols: val }));
                               }}
-                              className="w-full bg-[#131622] border border-white/15 focus:border-blue-500 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono font-bold text-center outline-none"
+                              className="w-full bg-surface border border-white/15 focus:border-accent/40 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono font-bold text-center outline-none"
                             />
                             <div className="flex flex-col gap-0.5">
                               <button
                                 type="button"
                                 onClick={() => setConfig(p => ({ ...p, customCols: Math.min(12, (p.customCols || 2) + 1) }))}
-                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[9px] text-white"
+                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[11px] text-white"
                                 title="Increase columns"
                               >
                                 ▲
@@ -310,7 +310,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setConfig(p => ({ ...p, customCols: Math.max(1, (p.customCols || 2) - 1) }))}
-                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[9px] text-white"
+                                className="px-1.5 py-0.5 bg-white/10 hover:bg-white/20 rounded text-[11px] text-white"
                                 title="Decrease columns"
                               >
                                 ▼
@@ -322,7 +322,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
 
                       {/* Quick preset buttons */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/5">
-                        <span className="text-[10px] text-slate-400 font-medium">Quick Grids:</span>
+                        <span className="text-[11px] text-slate-400 font-medium">Quick Grids:</span>
                         {[
                           { r: 1, c: 2, label: '1 × 2 (2)' },
                           { r: 2, c: 1, label: '2 × 1 (2)' },
@@ -337,9 +337,9 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                             key={preset.label}
                             type="button"
                             onClick={() => setConfig(p => ({ ...p, customRows: preset.r, customCols: preset.c }))}
-                            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all border ${
+                            className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all border ${
                               (config.customRows === preset.r && config.customCols === preset.c)
-                                ? 'bg-blue-600 text-white border-blue-400'
+                                ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                                 : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
                             }`}
                           >
@@ -358,7 +358,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               <div
                 className={`w-28 p-2 rounded-xl border bg-black/40 shadow-inner flex flex-col items-center justify-center transition-all ${
                   isLandscape ? 'h-20' : 'h-28'
-                } ${config.withBorder ? 'border-blue-500/40 shadow-blue-500/5' : 'border-white/10'}`}
+                } ${config.withBorder ? 'border-accent/40 ' : 'border-white/10'}`}
                 title={isReadable ? 'Full-width content flows onto additional pages as needed.' : `Reading order preview: ${rows} rows × ${cols} cols (${isLandscape ? 'Landscape' : 'Portrait'}). Final placement auto-fits each page to fill the sheet.`}
               >
                 <div
@@ -371,9 +371,9 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                   {previewSlots.slice(0, rows * cols).map((s) => (
                     <div
                       key={s.index}
-                      className={`flex items-center justify-center rounded text-[10px] font-black transition-all ${
+                      className={`flex items-center justify-center rounded text-[11px] font-bold transition-all ${
                         config.withBorder
-                          ? 'border border-amber-400/60 bg-gradient-to-tr from-amber-500/20 to-orange-500/20 text-amber-200'
+                          ? 'border border-amber-400/60 bg-amber-500/10 text-amber-200'
                           : 'bg-white/10 text-slate-300 border border-white/5'
                       }`}
                     >
@@ -401,7 +401,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                 <select
                   value={config.readingDirection}
                   onChange={(e) => setConfig(p => ({ ...p, readingDirection: e.target.value as any }))}
-                  className="bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
+                  className="bg-surface-2 border border-white/15 focus:border-accent/40 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
                 >
                   <option value="row-by-row">Row by row (Horizontal)</option>
                   <option value="col-by-col">Column by column (Vertical)</option>
@@ -410,7 +410,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                 <select
                   value={config.readingOrder}
                   onChange={(e) => setConfig(p => ({ ...p, readingOrder: e.target.value as any }))}
-                  className="bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
+                  className="bg-surface-2 border border-white/15 focus:border-accent/40 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
                 >
                   <option value="ltr">Left to right</option>
                   <option value="rtl">Right to left</option>
@@ -438,7 +438,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               <select
                 value={config.pageSize}
                 onChange={(e) => setConfig(p => ({ ...p, pageSize: e.target.value as any }))}
-                className="w-28 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
+                className="w-28 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
               >
                 <option value="A4">A4</option>
                 <option value="A3">A3</option>
@@ -450,7 +450,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               <select
                 value={config.orientation}
                 onChange={(e) => setConfig(p => ({ ...p, orientation: e.target.value as any }))}
-                className="w-60 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
+                className="w-60 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-xl px-3 py-2 text-xs font-semibold text-white outline-none cursor-pointer"
               >
                 <option value="auto">Automatic orientation (Standard)</option>
                 <option value="portrait">Portrait (Vertical)</option>
@@ -465,7 +465,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                     ? isReadable ? 'Portrait' : 'Auto-fit'
                     : isLandscape ? 'Landscape' : 'Portrait'})
                 </span>
-                <span className="text-[10px] text-slate-500">
+                <span className="text-[11px] text-slate-500">
                   {Math.round(sheetW)} × {Math.round(sheetH)} pt
                 </span>
               </div>
@@ -498,7 +498,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                       const v = Math.max(0, Number(e.target.value));
                       setConfig(p => ({ ...p, outerMargin: { ...p.outerMargin, top: v } }));
                     }}
-                    className="w-16 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
+                    className="w-16 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
                   />
                   <span className="text-[11px] text-slate-400">mm</span>
                 </div>
@@ -516,13 +516,13 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                         const v = Math.max(0, Number(e.target.value));
                         setConfig(p => ({ ...p, outerMargin: { ...p.outerMargin, left: v } }));
                       }}
-                      className="w-16 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
+                      className="w-16 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
                     />
                     <span className="text-[11px] text-slate-400">mm</span>
                   </div>
 
-                  <div className="w-12 h-14 border border-dashed border-blue-400/40 rounded bg-blue-500/5 flex items-center justify-center">
-                    <span className="text-[9px] text-blue-300 font-bold uppercase">Page</span>
+                  <div className="w-12 h-14 border border-dashed border-accent/40 rounded bg-accent/10 flex items-center justify-center">
+                    <span className="text-[11px] text-accent-light font-bold uppercase">Page</span>
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -536,7 +536,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                         const v = Math.max(0, Number(e.target.value));
                         setConfig(p => ({ ...p, outerMargin: { ...p.outerMargin, right: v } }));
                       }}
-                      className="w-16 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
+                      className="w-16 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
                     />
                     <span className="text-[11px] text-slate-400">mm</span>
                   </div>
@@ -554,7 +554,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                       const v = Math.max(0, Number(e.target.value));
                       setConfig(p => ({ ...p, outerMargin: { ...p.outerMargin, bottom: v } }));
                     }}
-                    className="w-16 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
+                    className="w-16 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-lg px-2 py-1 text-xs text-center text-white outline-none"
                   />
                   <span className="text-[11px] text-slate-400">mm</span>
                 </div>
@@ -584,7 +584,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
                     const v = Math.max(0, Number(e.target.value));
                     setConfig(p => ({ ...p, innerMargin: v }));
                   }}
-                  className="w-20 bg-[#1A1E2C] border border-white/15 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-center font-semibold text-white outline-none"
+                  className="w-20 bg-surface-2 border border-white/15 focus:border-accent/40 rounded-xl px-3 py-2 text-xs text-center font-semibold text-white outline-none"
                 />
                 <span className="text-xs text-slate-300 font-bold">mm</span>
                 <span className="text-xs text-slate-400 italic">
@@ -603,7 +603,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
             </div>
 
             <div className="md:col-span-8">
-              <div className="flex items-center gap-2 px-3 py-2 bg-[#1A1E2C] border border-white/15 focus-within:border-blue-500 rounded-xl shadow-inner">
+              <div className="flex items-center gap-2 px-3 py-2 bg-surface-2 border border-white/15 focus-within:border-accent/40 rounded-xl shadow-inner">
                 <FileText className="w-4 h-4 text-red-400 shrink-0" />
                 <input
                   type="text"
@@ -621,16 +621,16 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
           <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-between text-xs text-slate-300 flex-wrap gap-2">
             <div>
               <span className="text-slate-400">Total Cards:</span>{' '}
-              <span className="font-extrabold text-white">{totalItemsCount}</span>
+              <span className="font-semibold text-white">{totalItemsCount}</span>
               <span className="mx-2 text-white/20">|</span>
               <span className="text-slate-400">Layout:</span>{' '}
-              <span className="font-extrabold text-blue-300">
+              <span className="font-semibold text-accent-light">
                 {isReadable ? 'Readable auto adjust' : numPagesPerSheet === 1 ? '1-Up (Standard)' : `${numPagesPerSheet}-Up (${rows}×${cols})`}
               </span>
             </div>
             <div>
               <span className="text-slate-400">Resulting PDF:</span>{' '}
-              <span className="font-black text-emerald-400 text-sm">
+              <span className="font-bold text-emerald-400 text-sm">
                 {isReadable ? `As many ${config.pageSize} pages as needed` : `~${estimatedSheets} Sheets (${config.pageSize})`}
               </span>
             </div>
@@ -638,19 +638,19 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
 
           {/* PROGRESS BAR (DURING EXPORT) */}
           {isExporting && exportProgress && (
-            <div className="space-y-2 p-3.5 bg-blue-500/10 border border-blue-500/30 rounded-xl">
-              <div className="flex items-center justify-between text-xs text-blue-200">
+            <div className="space-y-2 p-3.5 bg-accent/10 border border-accent/40 rounded-xl">
+              <div className="flex items-center justify-between text-xs text-accent-light">
                 <span className="font-bold flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                  <Loader2 className="w-4 h-4 animate-spin text-accent" />
                   Generating & Compiling PDF...
                 </span>
-                <span className="font-black">
+                <span className="font-bold">
                   {exportProgress.current} / {exportProgress.total} Pages ({Math.round((exportProgress.current / exportProgress.total) * 100)}%)
                 </span>
               </div>
               <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-150"
+                  className="h-full bg-accent rounded-full transition-all duration-150"
                   style={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
                 />
               </div>
@@ -660,7 +660,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
         </div>
 
         {/* MODAL FOOTER */}
-        <div className="px-6 py-4 border-t border-white/[0.08] bg-[#0E111A] flex items-center justify-between flex-wrap gap-3">
+        <div className="px-6 py-4 border-t border-white/[0.08] bg-surface flex items-center justify-between flex-wrap gap-3">
           <button
             type="button"
             onClick={onClose}
@@ -675,7 +675,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               type="button"
               onClick={onApplyPreview}
               disabled={isExporting}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all disabled:opacity-30"
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-semibold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all disabled:opacity-30"
               title="Apply these settings and show the exact output preview"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -686,7 +686,7 @@ export const PdfLayoutModal: React.FC<PdfLayoutModalProps> = ({
               type="button"
               onClick={handleStartExport}
               disabled={isExporting}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold rounded-xl text-xs transition-all shadow-lg shadow-blue-600/30 disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-on-accent font-semibold rounded-xl text-xs transition-all shadow-lg disabled:opacity-50"
             >
               {isExporting ? (
                 <>

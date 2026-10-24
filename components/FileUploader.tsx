@@ -81,10 +81,10 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`relative group border-2 border-dashed rounded-3xl p-6 sm:p-10 text-center transition-all duration-300 ease-in-out ${
+        className={`relative group border-2 border-dashed rounded-2xl p-6 sm:p-10 text-center transition-all duration-300 ease-in-out ${
           isDragActive 
-            ? 'border-[#FF6B2B] bg-[#FF6B2B]/10 scale-[1.01] shadow-2xl shadow-[#FF6B2B]/20' 
-            : 'border-white/[0.12] bg-[#11141F]/80 backdrop-blur-xl hover:border-[#FF6B2B]/60 hover:bg-[#141824]'
+            ? 'border-accent bg-accent/10 scale-[1.01] shadow-2xl ' 
+            : 'border-white/[0.12] bg-surface/80 backdrop-blur-xl hover:border-accent/60 hover:bg-surface'
         } ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
       >
         <input
@@ -99,8 +99,8 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
         <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center gap-4">
           <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-xl ${
             isDragActive 
-              ? 'bg-gradient-to-tr from-[#FF6B2B] to-[#FF884D] text-white scale-110 shadow-[#FF6B2B]/40' 
-              : 'bg-white/[0.05] border border-white/[0.08] text-slate-400 group-hover:text-white group-hover:bg-[#FF6B2B]/15 group-hover:border-[#FF6B2B]/30'
+              ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' 
+              : 'bg-white/[0.05] border border-white/[0.08] text-slate-400 group-hover:text-white group-hover:bg-accent/15 group-hover:border-accent/30'
           }`}>
             <Upload className="w-7 h-7" />
           </div>
@@ -110,11 +110,11 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
               Drop your documents or exam papers here
             </h3>
             <p className="text-slate-400 text-xs sm:text-sm">
-              or <span className="text-[#FF884D] font-semibold underline decoration-[#FF6B2B]/50 underline-offset-4 hover:text-[#FF6B2B]">browse your device</span>
+              or <span className="text-accent-light font-semibold underline decoration-accent/50 underline-offset-4 hover:text-accent">browse your device</span>
             </p>
             <p className="text-slate-500 text-xs pt-1 flex items-center justify-center gap-1.5">
               <span>Paste directly using</span> 
-              <kbd className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.1] rounded-md text-slate-300 font-mono text-[10px] shadow-sm">Ctrl+V</kbd> / <kbd className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.1] rounded-md text-slate-300 font-mono text-[10px] shadow-sm">Cmd+V</kbd>
+              <kbd className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.1] rounded-md text-slate-300 font-mono text-[11px] shadow-sm">Ctrl+V</kbd> / <kbd className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.1] rounded-md text-slate-300 font-mono text-[11px] shadow-sm">Cmd+V</kbd>
             </p>
           </div>
 
@@ -139,7 +139,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-[#FF6B2B]/10 rounded-3xl pointer-events-none border-2 border-[#FF6B2B]"
+              className="absolute inset-0 bg-accent/10 rounded-2xl pointer-events-none border-2 border-accent"
             />
           )}
         </AnimatePresence>

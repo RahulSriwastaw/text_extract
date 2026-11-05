@@ -182,7 +182,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; text: string } | null>(null);
 
   // Engine Mode & Concurrency Batch Size (default to direct API to avoid bridge 503 errors)
-  const [aiEngine, setAiEngine] = useState<'bridge' | 'api'>('api');
+  // Bridge is the default; a run falls back to the direct API by itself when the bridge is not connected.
+  const [aiEngine, setAiEngine] = useState<'bridge' | 'api'>('bridge');
   const [batchSize, setBatchSize] = useState<number>(3);
   const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
   // Active document session for AI Bridge (1 document = 1 continuous chat thread)
@@ -1141,21 +1142,15 @@ Rules:
 
     let activeEngine = aiEngine;
     if (activeEngine === 'bridge') {
-      const ping = await pingStudyAiExtension(1500);
-      if (!ping.connected) {
-        const useApiInstead = confirm(
-          'TextExtract Pro Bridge Extension se connection nahi mil pa raha hai.\n\n' +
-          'Kya aap Direct Gemini API (23 Rotating Keys) se bina extension ke turant extraction karna chahte hain?\n\n' +
-          '• [OK] dabayein: Direct Gemini API se turant extraction shuru karein (No extension needed).\n' +
-          '• [Cancel] dabayein: Extension connection modal kholein.'
+      setLiveStatusText('Checking TextExtract Pro Bridge connection…');
+      const ping = await pingStudyAiExtension(2500);
+      if (!ping.connected || ping.protocolVersion !== 2) {
+        // No dialog: shift to the direct API for this run and say so. The engine setting stays
+        // on Bridge, so the next run uses it again once the extension is back.
+        activeEngine = 'api';
+        setLiveStatusText(
+          `Bridge not connected (${ping.error || 'extension did not respond'}) — switched to Direct Gemini API for this run.`
         );
-        if (useApiInstead) {
-          activeEngine = 'api';
-          setAiEngine('api');
-        } else {
-          setShowConnectModal(true);
-          return;
-        }
       }
     }
 

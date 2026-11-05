@@ -471,15 +471,15 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     setErrorMsg(null);
     setBridgeProgressMsg(null);
     
-    // Check if using Study AI Bridge extension (Zero Token Mode)
-    const useBridge = aiEngine === 'extension';
+    // Bridge is the default engine. When it is not connected the run shifts to the direct API by
+    // itself (no dialog); the engine setting stays on Bridge for the next run.
+    let useBridge = aiEngine === 'extension';
     if (useBridge) {
+      setBridgeProgressMsg('Checking TextExtract Pro Bridge connection…');
       const status = await pingStudyAiExtension(3000);
       if (!status.connected || status.protocolVersion !== 2) {
-        setErrorMsg(status.error || 'Reload TextExtract Pro Bridge 2.5 and refresh this page to reconnect.');
-        setShowGeminiConnect(true);
-        setAppState(AppState.ERROR);
-        return;
+        useBridge = false;
+        setBridgeProgressMsg(`Bridge not connected (${status.error || 'extension did not respond'}) — using Direct Gemini API for this run.`);
       }
     }
 

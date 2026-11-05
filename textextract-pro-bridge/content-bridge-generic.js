@@ -4,7 +4,7 @@
  */
 
 (function () {
-  const EXT_VER = "2.5.15";
+  const EXT_VER = "2.5.16";
   if (window.__tfStudyAiGenericVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGenericVer = EXT_VER;
@@ -1432,7 +1432,8 @@
             " " +
             (b.textContent || "")
           ).toLowerCase();
-          return /attach|upload|file|image|add content/i.test(t);
+          // Never the chip's own remove/close button: that deletes the file attached a moment ago.
+          return /attach|upload|file|image|add content/i.test(t) && !/remove|close|delete|cancel|clear|uploaded|preview|lightbox/i.test(t);
         });
         for (const b of attachBtns.slice(0, 2)) {
           try {

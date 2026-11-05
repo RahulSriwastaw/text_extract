@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.15";
+  const EXT_VER = "2.5.16";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -835,11 +835,14 @@
         // "Show the uploaded image in a lightbox" on the previous turn, opened the lightbox and never
         // found a file input — which is why pages after the first stalled on "Attaching page image".
         const label = b => ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("mattooltip") || "") + " " + (b.title || "")).toLowerCase();
+        // "Close attachment" (the chip's remove button) also contains "attach": clicking it deleted
+        // the image attached a moment earlier, which broke every multi-image batch.
         const isUploadBtn = b => /upload|attach|add file|from device|insert|अपलोड/i.test(label(b))
-          && !/uploaded|lightbox|show|open|remove|delete|preview|हटा/i.test(label(b))
+          && !/uploaded|lightbox|show|open|remove|delete|close|cancel|clear|preview|हटा|बंद/i.test(label(b))
           && !b.closest('model-response, user-query, [data-message-author-role], .conversation-container');
-        const scoped = deepQueryAll('button, [role="button"]', composerContainer()).filter(isUploadBtn);
-        const btns = scoped.length ? scoped : deepQueryAll('button, [role="button"]').filter(isUploadBtn);
+        const byPriority = list => list.sort((a, b) => (/^upload/i.test(label(b).trim()) ? 1 : 0) - (/^upload/i.test(label(a).trim()) ? 1 : 0));
+        const scoped = byPriority(deepQueryAll('button, [role="button"]', composerContainer()).filter(isUploadBtn));
+        const btns = scoped.length ? scoped : byPriority(deepQueryAll('button, [role="button"]').filter(isUploadBtn));
         for (const b of btns.slice(0, 3)) {
           try { b.click(); } catch {}
           openedMenu = true;

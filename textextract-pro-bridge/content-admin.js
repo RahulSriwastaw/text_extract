@@ -4,7 +4,7 @@
   window.__studyAiAdminV2 = true;
   const PAGE = 'tf-study-ai';
   const EXT = 'tf-study-ai-extension';
-  const VERSION = '2.5.15';
+  const VERSION = '2.5.16';
   const post = payload => window.postMessage({ ...payload, source: EXT }, window.location.origin);
   // The DOM is shared with the page (isolated worlds share the document), so the app can tell
   // "extension not injected here" apart from "extension injected but its worker is silent".

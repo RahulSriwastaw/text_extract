@@ -469,6 +469,8 @@ html .katex-display {
   border-radius: 8px;
   margin: 2px 0;
 }
+/* Safety net: an SVG image without an intrinsic size must never collapse to 0×0 */
+img[src^="data:image/svg+xml"] { min-width: 8rem; min-height: 3rem; }
 .mcq-html img.svg-figure { display: block; max-height: 18rem; width: auto; }
 .mcq-html-inline img.svg-figure { display: inline-block; max-height: 9rem; vertical-align: middle; }
 .mcq-html-inline { display: inline; }

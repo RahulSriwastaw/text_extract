@@ -22,6 +22,7 @@ import {
   FigureTargetField,
   CropPercentageBox
 } from '../services/figureStorageService';
+import { fixSvgDataUri } from '../services/htmlLatex';
 
 export interface StagedCropItem {
   id: string;
@@ -4181,7 +4182,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 {qFigUrls.map((url, uIdx) => (
                                                   <div key={uIdx} className="relative group/qfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
                                                     <img 
-                                                      src={url} 
+                                                      src={fixSvgDataUri(url)} 
                                                       alt={`Question Figure ${uIdx + 1}`} 
                                                       className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
                                                       onClick={() => setPreviewLightboxUrl(url)}
@@ -4284,7 +4285,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 {optFigUrls.map((url, uIdx) => (
                                                   <div key={uIdx} className="relative group/optfig rounded-lg bg-white p-1 border border-white/20 shadow-md inline-block">
                                                     <img
-                                                      src={url}
+                                                      src={fixSvgDataUri(url)}
                                                       alt={`Option ${optLetter} Diagram`}
                                                       className="max-h-20 max-w-[140px] object-contain rounded cursor-pointer hover:scale-105 transition-transform"
                                                       onClick={() => setPreviewLightboxUrl(url)}
@@ -4367,7 +4368,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                   {solFigUrls.map((url, uIdx) => (
                                                     <div key={uIdx} className="relative group/solfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
                                                       <img 
-                                                        src={url} 
+                                                        src={fixSvgDataUri(url)} 
                                                         alt={`Solution Figure ${uIdx + 1}`} 
                                                         className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
                                                         onClick={() => setPreviewLightboxUrl(url)}
@@ -4452,7 +4453,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 {qFigUrls.map((url, uIdx) => (
                                                   <div key={uIdx} className="relative group/qfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
                                                     <img 
-                                                      src={url} 
+                                                      src={fixSvgDataUri(url)} 
                                                       alt={`Question Figure ${uIdx + 1}`} 
                                                       className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
                                                       onClick={() => setPreviewLightboxUrl(url)}
@@ -4555,7 +4556,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                 {optFigUrls.map((url, uIdx) => (
                                                   <div key={uIdx} className="relative group/optfig rounded-lg bg-white p-1 border border-white/20 shadow-md inline-block">
                                                     <img 
-                                                      src={url} 
+                                                      src={fixSvgDataUri(url)} 
                                                       alt={`Option ${optLetter} Diagram`} 
                                                       className="max-h-20 max-w-[140px] object-contain rounded cursor-pointer hover:scale-105 transition-transform"
                                                       onClick={() => setPreviewLightboxUrl(url)}
@@ -4638,7 +4639,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                                   {solFigUrls.map((url, uIdx) => (
                                                     <div key={uIdx} className="relative group/solfig rounded-lg bg-white p-1.5 border border-white/20 shadow-md inline-block">
                                                       <img 
-                                                        src={url} 
+                                                        src={fixSvgDataUri(url)} 
                                                         alt={`Solution Figure ${uIdx + 1}`} 
                                                         className="max-h-36 max-w-full object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
                                                         onClick={() => setPreviewLightboxUrl(url)}
@@ -4972,7 +4973,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
             </div>
             <div className="bg-white rounded-xl p-3 max-h-[75vh] max-w-full flex items-center justify-center overflow-auto shadow-inner">
               <img 
-                src={previewLightboxUrl} 
+                src={fixSvgDataUri(previewLightboxUrl)}
                 alt="Figure Full Size" 
                 className="max-h-[70vh] max-w-full object-contain rounded select-none"
               />

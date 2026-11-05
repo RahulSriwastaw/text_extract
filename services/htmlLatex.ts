@@ -133,6 +133,14 @@ function svgToDataUri(svg: string): string {
   s = s.replace(/<\/(?:rect|circle|ellipse|line|polyline|polygon|path|use|stop|image)\s*>/gi, '');
   const open = s.match(/^<svg\b[^>]*>/i)?.[0] || '<svg>';
   let head = open;
+  // As an <img>, an SVG sized "100%"/"auto" (or with no size) has no intrinsic size and collapses to 0×0.
+  // Drop relative sizes so the absolute size from the viewBox is used instead.
+  head = head.replace(/\s(width|height)\s*=\s*(["'])\s*(?:[\d.]+%|auto|)\s*\2/gi, '');
+  const vb = head.match(/\sviewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*["']/i);
+  if (vb) {
+    if (!/\swidth\s*=/i.test(head)) head = head.replace(/^<svg/i, `<svg width="${vb[1]}"`);
+    if (!/\sheight\s*=/i.test(head)) head = head.replace(/^<svg/i, `<svg height="${vb[2]}"`);
+  }
   if (!/\sxmlns\s*=/i.test(head)) head = head.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
   if (/xlink:/i.test(s) && !/xmlns:xlink/i.test(head)) head = head.replace(/^<svg/i, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
   if (!/\sviewBox\s*=/i.test(head)) {
@@ -147,6 +155,24 @@ function svgToDataUri(svg: string): string {
   s = head + s.slice(open.length);
   const enc = encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
   return `data:image/svg+xml;charset=utf-8,${enc}`;
+}
+
+const SVG_DATA_URI_RE = /^data:image\/svg\+xml(;charset=[\w-]+)?(;base64)?,/i;
+
+/**
+ * Re-normalizes an existing SVG data URI (e.g. one stored before the sizing fix, whose SVG had width="100%"
+ * and so rendered as a 0×0 image). Non-SVG URLs are returned unchanged.
+ */
+export function fixSvgDataUri(url: string): string {
+  const m = url && url.match(SVG_DATA_URI_RE);
+  if (!m) return url;
+  try {
+    const body = url.slice(m[0].length);
+    const svg = m[2] ? new TextDecoder().decode(Uint8Array.from(atob(body), c => c.charCodeAt(0))) : decodeURIComponent(body);
+    return /^\s*<svg\b/i.test(svg) ? svgToDataUri(svg) : url;
+  } catch {
+    return url;
+  }
 }
 
 /** Finds every SVG (proper, entity-escaped, or wrapper-less) and hands it to `emit` as a data URI. */

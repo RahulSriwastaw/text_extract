@@ -75,11 +75,13 @@ import {
 } from '../services/mocktestService';
 import { cleanMocktestText } from '../services/textCleanService';
 import { 
-  extractWithStudyAiBridge, 
+  extractWithStudyAiBridge,
   captureFromStudyAiBridge,
   resetStudyAiBridgeSession,
+  disconnectStudyAiBridge,
+  withBridgeRetry,
   parseExtensionOutputToElements,
-  pingStudyAiExtension, 
+  pingStudyAiExtension,
   subscribeToExtensionStatus,
   getStoredAiProvider,
   setStoredAiProvider,
@@ -829,38 +831,56 @@ Rules:
 
         // A chat that keeps growing makes uploads and the composer unreliable, so start a fresh
         // one every few pages. Split-question context still carries over: it travels in the prompt.
-        const startNewChat = shouldStartNewChat(pageIndex, chatRotation);
-        if (startNewChat && pageIndex > 0) {
+        const rotateToNewChat = shouldStartNewChat(pageIndex, chatRotation);
+        if (rotateToNewChat && pageIndex > 0) {
           setDocumentChatUrl(null);
           setLiveStatusText(`[Page ${page.pageNumber}] Starting a fresh AI chat (every ${chatRotation} pages)...`);
         }
+        // A transient bridge failure (lost job, stuck tab, timeout) is retried in a fresh chat with a
+        // new marker, instead of ending the whole run on the first hiccup.
+        let freshChatOnRetry = false;
 
-        const initialMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${crypto.randomUUID()}---`;
-        page.expectedMarker = initialMarker;
-        setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: initialMarker } : p));
+        const bridgeRes = await withBridgeRetry(async attempt => {
+          const startNewChat = rotateToNewChat || freshChatOnRetry;
+          const initialMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${crypto.randomUUID()}---`;
+          page.expectedMarker = initialMarker;
+          setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: initialMarker } : p));
+          const attemptTag = attempt > 1 ? ` · retry ${attempt - 1}` : '';
 
-        const bridgeRes = await extractWithStudyAiBridge({
-          base64Image: page.imageUrl || undefined,
-          fileName: pageFileName,
-          mimeType: page.imageUrl ? imgMime : 'text/plain',
-          skipPdf: !page.imageUrl,
-          prompt,
-          provider: selectedProvider || getStoredAiProvider() || 'gemini',
-          continueChat: !startNewChat,
-          chatUrl: startNewChat ? undefined : (documentChatUrlRef.current || undefined),
-          pageNumber: page.pageNumber,
-          totalPages: pages.length,
-          expectedMarker: initialMarker,
-          silent: true,
-          signal: abortController.signal,
-          onProgress: (step, detail, chatUrl) => {
-            if (chatUrl) {
-              setDocumentChatUrl(chatUrl);
+          return extractWithStudyAiBridge({
+            base64Image: page.imageUrl || undefined,
+            fileName: pageFileName,
+            mimeType: page.imageUrl ? imgMime : 'text/plain',
+            skipPdf: !page.imageUrl,
+            prompt,
+            provider: selectedProvider || getStoredAiProvider() || 'gemini',
+            continueChat: !startNewChat,
+            chatUrl: startNewChat ? undefined : (documentChatUrlRef.current || undefined),
+            pageNumber: page.pageNumber,
+            totalPages: pages.length,
+            expectedMarker: initialMarker,
+            silent: true,
+            signal: abortController.signal,
+            onProgress: (step, detail, chatUrl) => {
+              if (chatUrl) {
+                setDocumentChatUrl(chatUrl);
+              }
+              const msg = detail || `${step.toUpperCase()}...`;
+              setLiveStatusText(`[Page ${page.pageNumber}${attemptTag}] ${msg}`);
+              setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
             }
-            const msg = detail || `${step.toUpperCase()}...`;
+          });
+        }, {
+          retries: 2,
+          signal: abortController.signal,
+          onRetry: ({ attempt, maxAttempts, error }) => {
+            freshChatOnRetry = true;
+            setDocumentChatUrl(null);
+            const msg = `Attempt ${attempt}/${maxAttempts} failed: ${error.message} — retrying in a fresh chat…`;
+            console.warn(`[Bridge] Page ${page.pageNumber}: ${msg}`);
             setLiveStatusText(`[Page ${page.pageNumber}] ${msg}`);
             setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
-          }
+          },
         });
 
         if (bridgeRes.chatUrl) {
@@ -2507,9 +2527,17 @@ Rules:
         <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-2.5 border-t border-line bg-white/[0.015]">
           <span className="text-xs font-semibold text-ink-3 mr-1">Run settings</span>
           {aiEngine === 'bridge' ? (
-            <span className={`badge ${bridgeStatus.connected ? 'badge-success' : 'badge-warning'}`}>
+            <span
+              className={`badge ${bridgeStatus.connected ? 'badge-success' : bridgeStatus.state === 'error' ? 'badge-danger' : 'badge-warning'}`}
+              title={!bridgeStatus.connected && bridgeStatus.error ? bridgeStatus.error : undefined}
+            >
               <span className="dot" />
-              Bridge · {selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)} · {bridgeStatus.connected ? 'connected' : 'not connected'}
+              Bridge · {selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)} · {
+                bridgeStatus.connected ? 'connected'
+                : bridgeStatus.state === 'connecting' || bridgeStatus.checking ? 'connecting…'
+                : bridgeStatus.state === 'error' ? 'error — refresh page'
+                : bridgeStatus.manual ? 'disconnected'
+                : 'not connected'}
             </span>
           ) : (
             <span className="badge badge-info"><Key /> Direct Gemini API</span>
@@ -2569,9 +2597,9 @@ Rules:
                       {bridgeStatus.connected ? (
                         <button
                           type="button"
-                          onClick={() => setAiEngine('api')}
+                          onClick={() => { void disconnectStudyAiBridge(); setAiEngine('api'); }}
                           className="btn btn-ghost btn-sm"
-                          title="Disconnect Bridge"
+                          title="Disconnect Bridge (stops auto-reconnect until you connect again)"
                         >
                           Disconnect
                         </button>

@@ -23,8 +23,25 @@ export interface BridgeSessionInfo {
   openJobs?: number;
 }
 
+/**
+ * Explicit connection lifecycle.
+ * - connecting: a handshake (PING) is in flight and nothing is connected yet
+ * - connected: the extension's service worker answered a PING; heartbeats keep checking it
+ * - disconnected: no answer (extension missing / asleep / page loaded first) or the user disconnected
+ * - error: the extension answered but cannot work (e.g. it was reloaded and this page needs a refresh)
+ */
+export type BridgeConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
+
 export interface BridgeStatus {
   connected: boolean;
+  /** Lifecycle state; `connected` is kept for existing callers and always agrees with it. */
+  state?: BridgeConnectionState;
+  /** A PING is in flight (while connected this is a heartbeat check, not a reconnect). */
+  checking?: boolean;
+  /** True after disconnectStudyAiBridge(): automatic reconnects stay off until connectStudyAiBridge(). */
+  manual?: boolean;
+  /** Automatic reconnect attempts made since the bridge was last seen. */
+  reconnectAttempt?: number;
   protocolVersion?: number;
   error?: string;
   version?: string;
@@ -32,6 +49,18 @@ export interface BridgeStatus {
   provider?: AiProvider;
   openProviders?: AiProvider[];
   lastPingTime?: number;
+}
+
+/** Error thrown by the bridge with an explicit retry hint for queue/retry helpers. */
+export class BridgeError extends Error {
+  retryable: boolean;
+  code?: string;
+  constructor(message: string, options: { retryable?: boolean; code?: string } = {}) {
+    super(message);
+    this.name = 'BridgeError';
+    this.retryable = !!options.retryable;
+    this.code = options.code;
+  }
 }
 
 export interface ExtractWithBridgeOptions {
@@ -54,7 +83,7 @@ export interface ExtractWithBridgeOptions {
 }
 
 const providers: AiProvider[] = ['gemini', 'deepseek', 'chatgpt', 'claude'];
-let cachedStatus: BridgeStatus = { connected: false, provider: getStoredAiProvider(), openProviders: [] };
+let cachedStatus: BridgeStatus = { connected: false, state: 'disconnected', provider: getStoredAiProvider(), openProviders: [] };
 const statusListeners = new Set<(status: BridgeStatus) => void>();
 let pendingPing: Promise<BridgeStatus> | null = null;
 const post = (payload: Record<string, unknown>) => window.postMessage({ ...payload, source: PAGE_SOURCE }, window.location.origin);
@@ -69,41 +98,87 @@ const RECONNECT_MAX_DELAY = 15000;
 // Bounded so a page without the extension installed does not poll forever. Focus, tab visibility,
 // a tool mounting, or any explicit ping re-arms the loop.
 const RECONNECT_MAX_ATTEMPTS = 6;
+// While connected, a periodic PING notices a reloaded/disabled extension or a sleeping worker
+// before the user clicks Extract and gets a 5-minute silent wait.
+let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+const HEARTBEAT_MS = 30000;
+const HEARTBEAT_TIMEOUT_MS = 4000;
+// Set by disconnectStudyAiBridge(). Automatic pings (reconnect loop, focus, visibility,
+// BRIDGE_READY, heartbeat) stay off until connectStudyAiBridge() is called.
+let manuallyDisconnected = false;
+const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
+function clearReconnect() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+}
+function clearHeartbeat() {
+  if (heartbeatTimer) { clearTimeout(heartbeatTimer); heartbeatTimer = null; }
+}
 
 function scheduleReconnect() {
-  if (typeof window === 'undefined' || reconnectTimer || cachedStatus.connected) return;
+  if (typeof window === 'undefined' || reconnectTimer || cachedStatus.connected || manuallyDisconnected) return;
   if (reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) return;
   reconnectAttempts++;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     // A hidden tab cannot help the user; the visibility listener re-arms this.
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (isHidden()) return;
     void pingStudyAiExtension();
   }, reconnectDelay);
 }
 
+function scheduleHeartbeat() {
+  clearHeartbeat();
+  if (typeof window === 'undefined' || !cachedStatus.connected || manuallyDisconnected) return;
+  heartbeatTimer = setTimeout(() => {
+    heartbeatTimer = null;
+    if (!cachedStatus.connected || manuallyDisconnected) return;
+    // Nobody is looking at a hidden tab; check again when it becomes visible.
+    if (isHidden()) { scheduleHeartbeat(); return; }
+    void pingStudyAiExtension(HEARTBEAT_TIMEOUT_MS);
+  }, HEARTBEAT_MS);
+}
+
 /** Re-arm the bounded reconnect loop; used wherever the user shows interest in the bridge. */
 function rearmReconnect(pingNow: boolean) {
+  if (manuallyDisconnected) return;
   reconnectAttempts = 0;
   reconnectDelay = 1000;
   if (pingNow) void pingStudyAiExtension();
   else scheduleReconnect();
 }
 
-function publishStatus(status: BridgeStatus) {
+/** Notify subscribers without touching reconnect/heartbeat timers (transient states). */
+function emitStatus(status: BridgeStatus) {
   cachedStatus = status;
   statusListeners.forEach(fn => { try { fn(status); } catch {} });
-  if (status.connected) {
+}
+
+/**
+ * Publish a handshake verdict. `fromPing` means the verdict came from a real PING attempt, which is
+ * the only thing that should grow the reconnect backoff.
+ */
+function publishStatus(status: BridgeStatus, fromPing = false) {
+  const connected = !!status.connected;
+  const state: BridgeConnectionState = status.state || (connected ? 'connected' : 'disconnected');
+  emitStatus({ ...status, connected, state, checking: false, manual: manuallyDisconnected, reconnectAttempt: reconnectAttempts });
+  if (connected) {
     reconnectDelay = 1000;
     reconnectAttempts = 0;
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    clearReconnect();
+    scheduleHeartbeat();
   } else {
-    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_DELAY);
+    clearHeartbeat();
+    if (fromPing) reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_DELAY);
     scheduleReconnect();
   }
 }
 function fromExtension(event: MessageEvent) {
   return event.source === window && event.origin === window.location.origin && event.data?.source === EXT_SOURCE;
+}
+/** Current cached bridge status (synchronous; use subscribeToExtensionStatus for updates). */
+export function getBridgeStatus(): BridgeStatus {
+  return cachedStatus;
 }
 export function getStoredAiProvider(): AiProvider {
   try {
@@ -143,7 +218,7 @@ export function shouldStartNewChat(pageIndex: number, interval = getChatRotation
 export function setStoredAiProvider(provider: AiProvider): void {
   if (typeof window === 'undefined' || !providers.includes(provider)) return;
   localStorage.setItem('study_ai_provider', provider);
-  publishStatus({ ...cachedStatus, provider, session: null });
+  emitStatus({ ...cachedStatus, provider, session: null });
   // Each request supplies its provider. Changing a preference never resets an active job.
   void pingStudyAiExtension();
 }
@@ -154,34 +229,75 @@ export function subscribeToExtensionStatus(callback: (status: BridgeStatus) => v
   if (!cachedStatus.connected) rearmReconnect(false);
   return () => { statusListeners.delete(callback); };
 }
-export function pingStudyAiExtension(timeoutMs = 2500): Promise<BridgeStatus> {
-  if (typeof window === 'undefined') return Promise.resolve({ connected: false });
+/**
+ * Handshake with the extension. Concurrent callers share one in-flight PING, so Connect buttons,
+ * mount effects and the reconnect loop can all call this without duplicate traffic.
+ * After disconnectStudyAiBridge() this resolves with the cached disconnected status unless
+ * `force` is set (connectStudyAiBridge does that).
+ */
+export function pingStudyAiExtension(timeoutMs = 2500, options: { force?: boolean } = {}): Promise<BridgeStatus> {
+  if (typeof window === 'undefined') return Promise.resolve({ connected: false, state: 'disconnected' });
+  if (manuallyDisconnected && !options.force) return Promise.resolve(cachedStatus);
   if (pendingPing) return pendingPing;
   pendingPing = new Promise<BridgeStatus>(resolve => {
     const requestId = requestIdFor('ping');
     const provider = getStoredAiProvider();
+    emitStatus({ ...cachedStatus, checking: true, state: cachedStatus.connected ? 'connected' : 'connecting' });
     const finish = (status: BridgeStatus) => {
       clearTimeout(timer);
       clearInterval(retry);
       window.removeEventListener('message', handler);
-      publishStatus(status);
-      resolve(status);
+      publishStatus(status, true);
+      resolve(cachedStatus);
     };
     const handler = (event: MessageEvent) => {
       if (!fromExtension(event) || event.data.type !== 'PONG' || event.data.requestId !== requestId) return;
       const data = event.data;
-      finish({ connected: !!data.ok, version: data.version, protocolVersion: data.protocolVersion,
-        error: data.error, session: data.session || null, provider: getStoredAiProvider(),
+      const ok = !!data.ok;
+      // The content script answered but the worker cannot serve us (typically "Extension reloaded.
+      // Refresh this page"): that is an error the user must act on, not a transient disconnect.
+      finish({ connected: ok, state: ok ? 'connected' : (data.error ? 'error' : 'disconnected'),
+        version: data.version, protocolVersion: data.protocolVersion,
+        error: ok ? undefined : (data.error || 'Extension refused the handshake.'), session: data.session || null, provider: getStoredAiProvider(),
         openProviders: (data.openProviders || []).filter((p: AiProvider) => providers.includes(p)), lastPingTime: Date.now() });
     };
     const send = () => post({ type: 'PING', requestId, provider });
-    const timer = setTimeout(() => finish({ ...cachedStatus, connected: false, session: null,
-      error: 'Extension did not respond. Reload the extension and refresh this page.' }), timeoutMs);
+    const timer = setTimeout(() => finish({ ...cachedStatus, connected: false, state: 'disconnected', session: null,
+      error: cachedStatus.connected
+        ? 'Bridge stopped responding. Check that TextExtract Pro Bridge is still enabled in chrome://extensions, then refresh this page.'
+        : 'Extension did not respond. Reload the extension and refresh this page.' }), timeoutMs);
     const retry = setInterval(send, Math.max(300, Math.floor(timeoutMs / 3)));
     window.addEventListener('message', handler);
     send();
   }).finally(() => { pendingPing = null; });
   return pendingPing;
+}
+/**
+ * Explicit connect for a Connect button. Idempotent: repeated clicks share the in-flight PING.
+ * Clears a manual disconnect and resets the reconnect backoff.
+ */
+export function connectStudyAiBridge(timeoutMs = 3000): Promise<BridgeStatus> {
+  manuallyDisconnected = false;
+  reconnectAttempts = 0;
+  reconnectDelay = 1000;
+  return pingStudyAiExtension(timeoutMs, { force: true });
+}
+/**
+ * Explicit disconnect for a Disconnect button. Idempotent. Stops heartbeat and reconnect timers,
+ * publishes `disconnected` with `manual: true`, and asks the extension to forget the chat session
+ * so the next connect starts clean. Running extractions are not cancelled here; their owners hold
+ * the AbortSignal.
+ */
+export async function disconnectStudyAiBridge(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const wasConnected = cachedStatus.connected;
+  manuallyDisconnected = true;
+  clearReconnect();
+  clearHeartbeat();
+  reconnectAttempts = 0;
+  reconnectDelay = 1000;
+  emitStatus({ ...cachedStatus, connected: false, state: 'disconnected', checking: false, manual: true, session: null, error: undefined });
+  if (wasConnected) { try { await resetStudyAiSession(); } catch {} }
 }
 export function resetStudyAiSession(): Promise<boolean> {
   if (typeof window === 'undefined') return Promise.resolve(false);
@@ -198,12 +314,16 @@ export function resetStudyAiSession(): Promise<boolean> {
 }
 if (typeof window !== 'undefined') {
   window.addEventListener('message', event => {
-    if (fromExtension(event) && event.data.type === 'BRIDGE_READY') void pingStudyAiExtension();
+    if (fromExtension(event) && event.data.type === 'BRIDGE_READY' && !manuallyDisconnected) void pingStudyAiExtension();
   });
-  window.addEventListener('focus', () => { rearmReconnect(true); });
+  // Focus/visibility are the user coming back: re-check whether connected or not (a connected
+  // verdict may be stale after the laptop slept), but never override a manual disconnect.
+  window.addEventListener('focus', () => { if (!cachedStatus.connected) rearmReconnect(true); else scheduleHeartbeat(); });
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && !cachedStatus.connected) rearmReconnect(true);
+      if (document.visibilityState !== 'visible') return;
+      if (!cachedStatus.connected) rearmReconnect(true);
+      else void pingStudyAiExtension(HEARTBEAT_TIMEOUT_MS);
     });
   }
   setTimeout(() => { void pingStudyAiExtension(); }, 300);
@@ -386,11 +506,18 @@ export async function extractWithStudyAiBridge(
   if (options.signal?.aborted) throw new DOMException('Extraction stopped by user.', 'AbortError');
   const isAvailable = await pingStudyAiExtension(3000);
   if (!isAvailable.connected) {
-    throw new Error(
-      'TextExtract Pro Bridge Extension se connect nahi ho pa raha hai. Kripya is page ko ek baar Refresh (F5) karein aur chrome://extensions par extension check karein.'
+    if (isAvailable.manual) {
+      throw new BridgeError('Bridge is disconnected. Click "Connect bridge" to reconnect, then retry.', { code: 'disconnected' });
+    }
+    throw new BridgeError(
+      isAvailable.state === 'error' && isAvailable.error
+        ? isAvailable.error
+        : 'TextExtract Pro Bridge Extension se connect nahi ho pa raha hai. Kripya is page ko ek baar Refresh (F5) karein aur chrome://extensions par extension check karein.',
+      // A disconnect can be the worker waking up late; a reload error needs the user.
+      { retryable: isAvailable.state !== 'error', code: 'not_connected' }
     );
   }
-  if (isAvailable.protocolVersion !== 2) throw new Error('Reload TextExtract Pro Bridge 2.5 in chrome://extensions, then refresh this page.');
+  if (isAvailable.protocolVersion !== 2) throw new BridgeError('Reload TextExtract Pro Bridge 2.5 in chrome://extensions, then refresh this page.', { code: 'protocol' });
   const pNum = options.pageNumber;
   const requestId = requestIdFor('req');
   const expectedMarker = options.expectedMarker || (pNum 
@@ -411,15 +538,24 @@ export async function extractWithStudyAiBridge(
   }
 
   return new Promise((resolve, reject) => {
-    let timer: NodeJS.Timeout | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
     let poll: ReturnType<typeof setInterval> | null = null;
     let connectionMisses = 0;
+    // Nothing (ACCEPTED / PROGRESS / STATUS / RESULT) has come back for this request yet. Without
+    // this guard a request posted while the extension was reloading waited the full 5-minute
+    // deadline in silence. The first resend is safe: the worker reserves the request ID and
+    // treats a duplicate START as the same job.
+    let sawExtension = false;
+    let acceptResend: ReturnType<typeof setTimeout> | null = null;
+    let acceptDeadline: ReturnType<typeof setTimeout> | null = null;
 
     const cleanup = () => {
       window.removeEventListener('message', messageHandler);
       if (timer) clearTimeout(timer);
       if (poll) clearInterval(poll);
+      if (acceptResend) clearTimeout(acceptResend);
+      if (acceptDeadline) clearTimeout(acceptDeadline);
       if (options.signal) {
         options.signal.removeEventListener('abort', onAbort);
       }
@@ -450,12 +586,13 @@ export async function extractWithStudyAiBridge(
       if (!fromExtension(event)) return;
       const data = event.data;
       if (data.source !== EXT_SOURCE) return;
+      if (data.requestId === requestId) sawExtension = true;
 
       if (data.type === 'STUDY_AI_STATUS' && data.requestId === requestId && !data.ok) {
         if (data.transportError && ++connectionMisses < 3) return;
         completed = true; cleanup();
         post({ type: 'CANCEL_REQUEST', requestId });
-        reject(new Error(data.error || 'Extension lost this request. Retry this page.'));
+        reject(new BridgeError(data.error || 'Extension lost this request. Retry this page.', { retryable: true, code: 'lost' }));
         return;
       }
       if (['STUDY_AI_PROGRESS', 'STUDY_AI_STATUS'].includes(data.type) && data.requestId === requestId) {
@@ -472,7 +609,8 @@ export async function extractWithStudyAiBridge(
 
         post({ type: 'RESULT_ACK', requestId });
         if (!data.ok) {
-          return reject(new Error(data.error || 'Extension extraction failed.'));
+          const message = data.error || 'Extension extraction failed.';
+          return reject(new BridgeError(message, { retryable: isRetryableBridgeMessage(message), code: 'failed' }));
         }
 
         const rawText = data.text || '';
@@ -489,7 +627,7 @@ export async function extractWithStudyAiBridge(
         cleanup();
         post({ type: 'CANCEL_REQUEST', requestId });
         reject(
-          new Error('Extraction timed out waiting for AI chat reply. Check the open AI tab in Chrome.')
+          new BridgeError('Extraction timed out waiting for AI chat reply. Check the open AI tab in Chrome.', { retryable: true, code: 'timeout' })
         );
       }
     }, timeoutMs);
@@ -526,7 +664,223 @@ export async function extractWithStudyAiBridge(
 
     post(payload);
     poll = setInterval(() => post({ type: 'REQUEST_STATUS', requestId }), 10000);
+    acceptResend = setTimeout(() => { if (!completed && !sawExtension) post(payload); }, ACCEPT_RESEND_MS);
+    acceptDeadline = setTimeout(() => {
+      if (completed || sawExtension) return;
+      completed = true;
+      cleanup();
+      post({ type: 'CANCEL_REQUEST', requestId });
+      reject(new BridgeError(
+        'The extension did not accept the request. Reload TextExtract Pro Bridge in chrome://extensions and refresh this page, then retry.',
+        { retryable: true, code: 'not_accepted' }
+      ));
+    }, ACCEPT_DEADLINE_MS);
   });
+}
+
+const ACCEPT_RESEND_MS = 4000;
+const ACCEPT_DEADLINE_MS = 15000;
+
+// Failures the extension itself labels as transient or asks the user to "retry this page".
+// Login, oversize replies, unreadable JSON and user aborts need a person, not another attempt.
+const RETRYABLE_MESSAGE = /did not respond|not responding|stopped responding|did not accept|lost this request|retry this page|interrupted|busy with another|reloaded or disconnected|tab load timed out|tab was closed|did not acknowledge|job missing|timed out|deadline reached|could not attach|upload not confirmed|attachment disappeared|still generating|transport/i;
+const FATAL_MESSAGE = /stopped by user|too large|login|log in|composer not found|kept getting cleared|no mcqs|belongs to another tab|unknown ai provider|prompt is empty|protocol|reload textextract pro bridge 2\.5/i;
+
+function isRetryableBridgeMessage(message: string): boolean {
+  if (FATAL_MESSAGE.test(message)) return false;
+  return RETRYABLE_MESSAGE.test(message);
+}
+
+/** True when a bridge failure is worth another attempt (transient transport, lost job, timeout). */
+export function isRetryableBridgeError(error: unknown): boolean {
+  if (!error) return false;
+  if (isAbort(error)) return false;
+  if (error instanceof BridgeError || typeof (error as BridgeError).retryable === 'boolean') return !!(error as BridgeError).retryable;
+  return isRetryableBridgeMessage(String((error as { message?: string }).message || error));
+}
+
+function abortError() {
+  return new DOMException('Extraction stopped by user.', 'AbortError');
+}
+// Keep the original error object whenever it looks like one; `instanceof Error` is false for
+// errors created in another realm (iframes, test VMs) and would hide an AbortError's name.
+const toError = (error: unknown): Error =>
+  (error && typeof error === 'object' && 'message' in error) ? (error as Error) : new Error(String(error));
+const isAbort = (error: unknown) => (error as { name?: string } | null)?.name === 'AbortError';
+
+/** Abortable sleep. Resolves early (rejecting with AbortError) when the signal fires. */
+export function bridgeDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError());
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(t); reject(abortError()); };
+    const t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export interface BridgeRetryInfo {
+  /** Attempt that just failed (1-based). */
+  attempt: number;
+  /** Total attempts allowed (retries + 1). */
+  maxAttempts: number;
+  error: Error;
+  /** Delay before the next attempt starts. */
+  delayMs: number;
+}
+
+export interface BridgeRetryOptions {
+  /** Extra attempts after the first failure. Default 2. */
+  retries?: number;
+  /** First retry delay; doubles each time up to maxDelayMs. Default 1500 ms. */
+  baseDelayMs?: number;
+  maxDelayMs?: number;
+  signal?: AbortSignal;
+  isRetryable?: (error: unknown) => boolean;
+  /** Called before each retry; may be async (e.g. reset the chat URL, update the UI). */
+  onRetry?: (info: BridgeRetryInfo) => void | Promise<void>;
+}
+
+/**
+ * Run a bridge task with bounded retries on transient failures. The task receives the attempt
+ * number (1-based) so a caller can start a fresh chat or a new marker on a retry.
+ * Aborts and non-retryable errors are rethrown immediately.
+ */
+export async function withBridgeRetry<T>(task: (attempt: number) => Promise<T>, options: BridgeRetryOptions = {}): Promise<T> {
+  const retries = Math.max(0, Math.floor(options.retries ?? 2));
+  const baseDelay = Math.max(0, options.baseDelayMs ?? 1500);
+  const maxDelay = Math.max(baseDelay, options.maxDelayMs ?? 10000);
+  const retryable = options.isRetryable || isRetryableBridgeError;
+  const maxAttempts = retries + 1;
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    if (options.signal?.aborted) throw abortError();
+    try {
+      return await task(attempt);
+    } catch (error) {
+      const err = toError(error);
+      if (attempt >= maxAttempts || options.signal?.aborted || isAbort(err) || !retryable(err)) throw err;
+      const delayMs = Math.min(baseDelay * 2 ** (attempt - 1), maxDelay);
+      if (options.onRetry) await options.onRetry({ attempt, maxAttempts, error: err, delayMs });
+      await bridgeDelay(delayMs, options.signal);
+    }
+  }
+}
+
+export type BridgeQueueItemStatus = 'running' | 'retrying' | 'done' | 'failed' | 'skipped';
+
+export interface BridgeQueueProgress {
+  index: number;
+  total: number;
+  /** Attempt in progress or just finished (1-based). */
+  attempt: number;
+  status: BridgeQueueItemStatus;
+  error?: Error;
+  done: number;
+  failed: number;
+}
+
+export interface BridgeQueueResult<R> {
+  index: number;
+  status: 'done' | 'failed' | 'skipped';
+  value?: R;
+  error?: Error;
+  attempts: number;
+}
+
+export interface BridgeQueueContext<R> {
+  index: number;
+  total: number;
+  attempt: number;
+  signal?: AbortSignal;
+  /** Result of the previous item that completed, for continuation context. */
+  previous?: R;
+}
+
+export interface BridgeQueueOptions<R> extends Omit<BridgeRetryOptions, 'onRetry'> {
+  /** Stop the queue at the first item that exhausts its retries (default true). */
+  stopOnError?: boolean;
+  /** Settle time between items (default 1200 ms) so the AI tab and chat can catch up. */
+  pauseBetweenMs?: number;
+  /** Polled before each item; while it returns true the queue waits (Pause button). */
+  shouldPause?: () => boolean;
+  onProgress?: (progress: BridgeQueueProgress) => void;
+  onRetry?: (index: number, info: BridgeRetryInfo) => void | Promise<void>;
+  /** Called after an item succeeds, before the next starts. */
+  onItemDone?: (index: number, value: R) => void | Promise<void>;
+}
+
+/**
+ * Send items through the bridge one at a time. Guarantees: items run strictly in order, no item
+ * runs again after it succeeded, every index gets exactly one result, failures are retried per
+ * item with backoff, and an abort stops the queue with remaining items marked `skipped`.
+ * The worker is the bridge call (e.g. extractWithStudyAiBridge) plus the caller's own bookkeeping.
+ */
+export async function runBridgeQueue<I, R>(
+  items: readonly I[],
+  worker: (item: I, ctx: BridgeQueueContext<R>) => Promise<R>,
+  options: BridgeQueueOptions<R> = {}
+): Promise<BridgeQueueResult<R>[]> {
+  const total = items.length;
+  const results: BridgeQueueResult<R>[] = [];
+  const stopOnError = options.stopOnError !== false;
+  const pauseBetween = Math.max(0, options.pauseBetweenMs ?? 1200);
+  let done = 0;
+  let failed = 0;
+  let previous: R | undefined;
+  let stopped = false;
+  const report = (progress: Omit<BridgeQueueProgress, 'total' | 'done' | 'failed'>) => {
+    try { options.onProgress?.({ ...progress, total, done, failed }); } catch {}
+  };
+  for (let index = 0; index < total; index++) {
+    if (stopped || options.signal?.aborted) {
+      results.push({ index, status: 'skipped', attempts: 0 });
+      report({ index, attempt: 0, status: 'skipped' });
+      continue;
+    }
+    try {
+      while (options.shouldPause?.()) await bridgeDelay(250, options.signal);
+    } catch (error) {
+      // Aborted while paused: skip this and the rest.
+      stopped = true;
+      results.push({ index, status: 'skipped', attempts: 0, error: error as Error });
+      report({ index, attempt: 0, status: 'skipped' });
+      continue;
+    }
+    let attempts = 0;
+    try {
+      const value = await withBridgeRetry(async attempt => {
+        attempts = attempt;
+        report({ index, attempt, status: attempt > 1 ? 'retrying' : 'running' });
+        return worker(items[index], { index, total, attempt, signal: options.signal, previous });
+      }, {
+        retries: options.retries,
+        baseDelayMs: options.baseDelayMs,
+        maxDelayMs: options.maxDelayMs,
+        signal: options.signal,
+        isRetryable: options.isRetryable,
+        onRetry: info => options.onRetry?.(index, info),
+      });
+      done++;
+      previous = value;
+      results.push({ index, status: 'done', value, attempts });
+      report({ index, attempt: attempts, status: 'done' });
+      try { await options.onItemDone?.(index, value); } catch {}
+    } catch (error) {
+      const err = toError(error);
+      const aborted = isAbort(err);
+      failed++;
+      results.push({ index, status: 'failed', error: err, attempts });
+      report({ index, attempt: attempts, status: 'failed', error: err });
+      if (aborted || stopOnError) stopped = true;
+      continue;
+    }
+    if (index < total - 1 && pauseBetween > 0) {
+      try { await bridgeDelay(pauseBetween, options.signal); } catch { stopped = true; }
+    }
+  }
+  return results;
 }
 
 /**

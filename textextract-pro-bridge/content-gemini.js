@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.7";
+  const EXT_VER = "2.5.8";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -13,7 +13,7 @@
   const COMPLETE_MARKER = "---STUDY_AI_COMPLETE---";
   const sleep = ms => runtime.sleep(ms);
   function isOurPromptText(text) {
-    return /Universal Document Digitizer|PDF-to-Text OCR Specialist|COMPLETE TEXT of this PDF page|You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|You are a professional Document Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF|---STUDY_AI_COMPLETE---|YOUR_TEST_SERIES_JSON_COMPLETED/i.test(text || "");
+    return /Universal Document Digitizer|PDF-to-Text OCR Specialist|COMPLETE TEXT of this PDF page|You are an expert Indian exam-paper|You are a professional Exam Paper Digitizer|You are a professional Document Digitizer|STRICT REQUIREMENT: You MUST fill ALL fields|COMPLETION \(CRITICAL|Schema per item|ADMIN EXTRA:|Continue in THIS same chat with the SAME PDF|Continue SAME chat \+ SAME PDF/i.test(text || "");
   }
   let port = null;
   function connectKeepalive() {
@@ -1370,9 +1370,8 @@
         return blob;
       }
       if (stableFor >= 15000 && json === null) {
-        if (!isGenerating() && blob && blob.length > 30) {
-          return blob;
-        }
+        // Never hand back a stalled, cut-off stream as a page result: the app would parse a partial
+        // array as a complete page. The app retries the page or the user recaptures.
         throw new Error("AI reply was found but its JSON format could not be read yet. After generation finishes, use Recapture or paste the code block with Paste CSV / JSON.");
       }
     }

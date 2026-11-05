@@ -25,8 +25,9 @@ import {
   parseExtensionOutputToElements,
   buildBridgePrompt, 
   pingStudyAiExtension, 
-  subscribeToExtensionStatus, 
-  BridgeStatus, 
+  subscribeToExtensionStatus,
+  withBridgeRetry,
+  BridgeStatus,
   getStoredAiProvider,
   setStoredAiProvider,
   shouldStartNewChat,
@@ -537,36 +538,54 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           const pageAborter = new AbortController();
           pageAborters.current.set(page.id, pageAborter);
 
-          // Pin this page to its own reply. Without a marker the adapter falls back to guessing
-          // which chat turn belongs to which page, which breaks as soon as a page is retried.
-          const pageMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${generateId()}---`;
-          setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: pageMarker } : p));
+          // A transient bridge failure (lost job, stuck tab, timeout) is retried in a fresh chat with a
+          // new marker, instead of ending the whole run on the first hiccup.
+          let freshChatOnRetry = false;
+          const bridgeRes = await withBridgeRetry(async attempt => {
+            // Pin this page to its own reply. Without a marker the adapter falls back to guessing
+            // which chat turn belongs to which page, which breaks as soon as a page is retried.
+            const pageMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${generateId()}---`;
+            setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: pageMarker } : p));
+            const startNewChat = shouldStartNewChat(i) || freshChatOnRetry;
+            const attemptTag = attempt > 1 ? ` (retry ${attempt - 1})` : '';
 
-          const bridgeRes = await extractWithStudyAiBridge({
-            base64Image: page.imageUrl,
-            fileName: `${fileName}_page_${page.pageNumber}.png`,
-            mimeType: 'image/png',
-            prompt,
-            expectedMarker: pageMarker,
-            responseFormat: mcqMode ? 'json' : 'text',
+            return extractWithStudyAiBridge({
+              base64Image: page.imageUrl,
+              fileName: `${fileName}_page_${page.pageNumber}.png`,
+              mimeType: 'image/png',
+              prompt,
+              expectedMarker: pageMarker,
+              responseFormat: mcqMode ? 'json' : 'text',
+              signal: pageAborter.signal,
+              provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
+              // Rotate to a fresh chat every few pages: a long chat makes upload and the composer
+              // unreliable. Continuation context travels in the prompt, not the chat history.
+              continueChat: !startNewChat,
+              chatUrl: startNewChat ? undefined : activeChatUrl,
+              pageNumber: page.pageNumber,
+              totalPages: pages.length,
+              silent: true,
+              onProgress: (step, detail, chatUrl) => {
+                if (chatUrl) { activeChatUrl = chatUrl; setPdfChatUrl(chatUrl); }
+                const msg = detail || `${step.toUpperCase()}...`;
+                setBridgeProgressMsg(`Page ${i + 1}/${pagesToProcess.length}${attemptTag}: ${msg}`);
+                setPages(prev => prev.map(p => p.id === page.id ? {
+                  ...p,
+                  errorMessage: msg
+                } : p));
+              }
+            });
+          }, {
+            retries: 2,
             signal: pageAborter.signal,
-            provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
-            // Rotate to a fresh chat every few pages: a long chat makes upload and the composer
-            // unreliable. Continuation context travels in the prompt, not the chat history.
-            continueChat: !shouldStartNewChat(i),
-            chatUrl: shouldStartNewChat(i) ? undefined : activeChatUrl,
-            pageNumber: page.pageNumber,
-            totalPages: pages.length,
-            silent: true,
-            onProgress: (step, detail, chatUrl) => {
-              if (chatUrl) { activeChatUrl = chatUrl; setPdfChatUrl(chatUrl); }
-              const msg = detail || `${step.toUpperCase()}...`;
+            onRetry: ({ attempt, maxAttempts, error }) => {
+              freshChatOnRetry = true;
+              activeChatUrl = undefined;
+              const msg = `Attempt ${attempt}/${maxAttempts} failed: ${error.message} — retrying in a fresh chat…`;
+              console.warn(`[Bridge] Page ${page.pageNumber}: ${msg}`);
               setBridgeProgressMsg(`Page ${i + 1}/${pagesToProcess.length}: ${msg}`);
-              setPages(prev => prev.map(p => p.id === page.id ? {
-                ...p,
-                errorMessage: msg
-              } : p));
-            }
+              setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
+            },
           });
 
           if (bridgeRes.chatUrl) {
@@ -1422,11 +1441,17 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                                 }
                                             }}
                                             className="seg-item"
-                                            title={bridgeStatus.connected ? "Zero Token Extension Mode Active" : "Extension not detected - click to connect"}
+                                            title={bridgeStatus.connected
+                                                ? "Zero Token Extension Mode Active"
+                                                : bridgeStatus.state === 'connecting' || bridgeStatus.checking ? "Connecting to the extension…"
+                                                : bridgeStatus.error || "Extension not detected - click to connect"}
                                         >
                                             <Bot />
                                             <span>Free bridge</span>
-                                            <span className={`dot ${bridgeStatus.connected ? 'text-emerald-400' : 'text-amber-400'}`} />
+                                            <span className={`dot ${bridgeStatus.connected ? 'text-emerald-400'
+                                                : bridgeStatus.state === 'error' ? 'text-rose-400'
+                                                : bridgeStatus.state === 'connecting' || bridgeStatus.checking ? 'text-sky-400 animate-pulse'
+                                                : 'text-amber-400'}`} />
                                         </button>
                                         <button
                                             type="button"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Key, 
@@ -23,13 +23,14 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { getAiSettings, saveAiSettings, clearAiCredentials, AiSettings } from '../services/aiDbService';
 import { testGeminiApiKey, parseUserApiKeys } from '../services/userGeminiService';
-import { 
-  pingStudyAiExtension, 
-  getStoredAiProvider, 
-  setStoredAiProvider, 
+import {
+  connectStudyAiBridge,
+  subscribeToExtensionStatus,
+  getStoredAiProvider,
+  setStoredAiProvider,
   resetStudyAiSession,
-  BridgeStatus, 
-  AiProvider 
+  BridgeStatus,
+  AiProvider
 } from '../services/studyAiBridgeService';
 
 interface GeminiConnectModalProps {
@@ -81,18 +82,31 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
   const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
   const [isCheckingBridge, setIsCheckingBridge] = useState(false);
+  // The connect handshake outlives a quick close of the modal; never set state after unmount.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
-    if (isOpen) {
-      loadSettings();
-      checkBridge();
-    }
+    if (!isOpen) return;
+    loadSettings();
+    checkBridge();
+    // Live state (connecting / connected / disconnected / error) while the modal is open, so the
+    // badge follows heartbeats and automatic reconnects, not only the button click.
+    const unsub = subscribeToExtensionStatus(status => {
+      if (mountedRef.current) setBridgeStatus(status);
+    });
+    return unsub;
   }, [isOpen]);
 
+  // Idempotent: repeated clicks share one in-flight handshake inside the service.
   const checkBridge = async () => {
     setIsCheckingBridge(true);
     try {
-      const status = await pingStudyAiExtension(1200);
+      const status = await connectStudyAiBridge(3000);
+      if (!mountedRef.current) return;
       setBridgeStatus(status);
       const stored = getStoredAiProvider();
       if (stored) {
@@ -100,12 +114,18 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
       } else if (status.provider) {
         setSelectedProvider(status.provider);
       }
-    } catch {
-      setBridgeStatus({ connected: false });
+    } catch (e: any) {
+      if (mountedRef.current) setBridgeStatus({ connected: false, state: 'error', error: e?.message || 'Bridge check failed.' });
     } finally {
-      setIsCheckingBridge(false);
+      if (mountedRef.current) setIsCheckingBridge(false);
     }
   };
+
+  const bridgeStateLabel = bridgeStatus.connected ? 'Extension Active ✓'
+    : bridgeStatus.state === 'connecting' || bridgeStatus.checking ? 'Connecting…'
+    : bridgeStatus.state === 'error' ? 'Extension Error'
+    : bridgeStatus.manual ? 'Disconnected'
+    : 'Setup Required';
 
   const handleProviderSelect = (provider: AiProvider) => {
     setSelectedProvider(provider);
@@ -463,13 +483,20 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                           How to load TextExtract Pro Bridge Extension:
                         </span>
                         <span className={`text-[11px] px-2 py-0.5 rounded font-bold ${
-                          bridgeStatus.connected 
-                            ? 'bg-emerald-500/20 text-emerald-300' 
-                            : 'bg-amber-500/20 text-amber-300'
+                          bridgeStatus.connected
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : bridgeStatus.state === 'error'
+                              ? 'bg-rose-500/20 text-rose-300'
+                              : 'bg-amber-500/20 text-amber-300'
                         }`}>
-                          {bridgeStatus.connected ? 'Extension Active ✓' : 'Setup Required'}
+                          {bridgeStateLabel}
                         </span>
                       </div>
+                      {!bridgeStatus.connected && bridgeStatus.error && (
+                        <p className="text-[11px] text-rose-300/90 bg-rose-500/10 border border-rose-500/20 rounded-lg px-2.5 py-1.5" role="alert">
+                          {bridgeStatus.error}
+                        </p>
+                      )}
 
                       <ol className="text-[11px] text-slate-300 space-y-1.5 list-decimal list-inside leading-relaxed">
                         <li>

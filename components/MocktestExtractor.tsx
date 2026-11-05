@@ -87,7 +87,6 @@ import {
   getStoredAiProvider,
   setStoredAiProvider,
   getChatRotationInterval,
-  setChatRotationInterval,
   shouldStartNewChat,
   BridgeStatus,
   AiProvider
@@ -194,11 +193,19 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     setDocumentChatUrlState(url);
   };
   const [documentSessionId, setDocumentSessionId] = useState<string>(() => `doc_${Date.now()}`);
-  // Pages per AI chat before the bridge opens a fresh one (0 = one chat for the whole document).
-  const [chatRotation, setChatRotationState] = useState<number>(() => getChatRotationInterval());
-  const setChatRotation = (pages: number) => {
-    setChatRotationInterval(pages);
-    setChatRotationState(getChatRotationInterval());
+  // Requests per AI chat before the bridge opens a fresh one (0 = one chat for the whole document).
+  const [chatRotation] = useState<number>(() => getChatRotationInterval());
+  // Bridge batch size: consecutive page images sent in ONE request. 1 = one page per request.
+  const PAGES_PER_REQUEST_KEY = 'study_ai_pages_per_request';
+  const [pagesPerRequest, setPagesPerRequestState] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem(PAGES_PER_REQUEST_KEY));
+      return [1, 2, 3, 5].includes(stored) ? stored : 1;
+    } catch { return 1; }
+  });
+  const setPagesPerRequest = (count: number) => {
+    setPagesPerRequestState(count);
+    try { localStorage.setItem(PAGES_PER_REQUEST_KEY, String(count)); } catch {}
   };
 
   // Direct Text Input state
@@ -782,6 +789,196 @@ Rules:
     }
   };
 
+  // Bridge batch mode: several consecutive page images in ONE request. The model tags every item
+  // with "source_pages" so the reply can be split back onto its pages; a question that spans two
+  // attached pages comes back as one merged item. Only the batch's last page can leave a question
+  // hanging for the next request.
+  const processPageBatchSequential = async (
+    batch: PageQueueItem[],
+    pendingContext: PendingMcqContext | null,
+    startIndex: number,
+    totalPages: number,
+    isLastBatch: boolean,
+    requestIndex: number
+  ): Promise<{ nextPendingContext: PendingMcqContext | null }> => {
+    const first = batch[0];
+    const last = batch[batch.length - 1];
+    const ids = new Set(batch.map(p => p.id));
+    const label = `Pages ${first.pageNumber}–${last.pageNumber}`;
+    setActivePageIndex(startIndex);
+    setPages(prev => prev.map(p => ids.has(p.id) ? { ...p, status: 'processing', errorMessage: undefined } : p));
+
+    const abortController = new AbortController();
+    batch.forEach(p => activeAbortControllersRef.current.set(p.id, abortController));
+
+    try {
+      const prompt = buildMockTestBridgePrompt(setName, pendingContext, first.pageNumber) +
+        `\n\nBATCH OF ${batch.length} PAGES (CRITICAL):\n` +
+        `- ${batch.length} page images are attached IN ORDER: ${batch.map((p, i) => `Image ${i + 1} = Page ${p.pageNumber}`).join(', ')}.\n` +
+        `- Extract ALL MCQs from ALL attached pages in reading order (Page ${first.pageNumber} first, Page ${last.pageNumber} last). Never skip a page.\n` +
+        `- For EVERY item set "source_pages" to the page number of the image it appears on (e.g. "${first.pageNumber}").\n` +
+        `- A question that starts on one attached page and finishes on the next: output ONE merged item with "source_pages" like "${first.pageNumber}, ${first.pageNumber + 1}".`;
+
+      const rotateToNewChat = shouldStartNewChat(requestIndex, chatRotation);
+      if (rotateToNewChat && requestIndex > 0) setDocumentChatUrl(null);
+      let freshChatOnRetry = false;
+
+      const bridgeRes = await withBridgeRetry(async attempt => {
+        const startNewChat = rotateToNewChat || freshChatOnRetry;
+        const marker = `---STUDY_AI_COMPLETE_P${first.pageNumber}_${crypto.randomUUID()}---`;
+        setPages(prev => prev.map(p => ids.has(p.id) ? { ...p, expectedMarker: marker } : p));
+        const attemptTag = attempt > 1 ? ` · retry ${attempt - 1}` : '';
+        return extractWithStudyAiBridge({
+          base64Images: batch.map(p => p.imageUrl),
+          fileNames: batch.map(p => `mocktest_page_${p.pageNumber}.png`),
+          fileName: `mocktest_pages_${first.pageNumber}-${last.pageNumber}.png`,
+          mimeType: 'image/png',
+          prompt,
+          provider: selectedProvider || getStoredAiProvider() || 'gemini',
+          continueChat: !startNewChat,
+          chatUrl: startNewChat ? undefined : (documentChatUrlRef.current || undefined),
+          pageNumber: first.pageNumber,
+          totalPages: pages.length,
+          expectedMarker: marker,
+          silent: true,
+          signal: abortController.signal,
+          // Several pages per reply need more time than a single page.
+          timeoutMs: 300000 + 120000 * (batch.length - 1),
+          onProgress: (step, detail, chatUrl) => {
+            if (chatUrl) setDocumentChatUrl(chatUrl);
+            const msg = detail || `${step.toUpperCase()}...`;
+            setLiveStatusText(`[${label}${attemptTag}] ${msg}`);
+            setPages(prev => prev.map(p => ids.has(p.id) ? { ...p, errorMessage: msg } : p));
+          }
+        });
+      }, {
+        retries: 2,
+        signal: abortController.signal,
+        onRetry: ({ attempt, maxAttempts, error }) => {
+          freshChatOnRetry = true;
+          setDocumentChatUrl(null);
+          const msg = `Attempt ${attempt}/${maxAttempts} failed: ${error.message} — retrying in a fresh chat…`;
+          console.warn(`[Bridge] ${label}: ${msg}`);
+          setLiveStatusText(`[${label}] ${msg}`);
+          setPages(prev => prev.map(p => ids.has(p.id) ? { ...p, errorMessage: msg } : p));
+        },
+      });
+
+      if (bridgeRes.chatUrl) {
+        setDocumentChatUrl(bridgeRes.chatUrl);
+        setPages(prev => prev.map(p => ids.has(p.id) ? { ...p, chatUrl: bridgeRes.chatUrl } : p));
+      }
+      const { rawText, elements } = bridgeRes;
+      let rawItems = parseAiOutputToMockTestItems(rawText, setName, extractedMcqs.length + 1);
+      if (rawItems.length === 0 && elements && elements.length > 0) rawItems = convertElementsToMockTestItems(elements, setName);
+      if (rawItems.length === 0) throw new Error(`${label}: No MCQs could be extracted. Please check the page images.`);
+
+      const { mergedPendingItems, freshPageItems, logMessage } = mergePendingCarryOver(rawItems, pendingContext, first.pageNumber);
+      console.log(`[Batch Engine] ${logMessage}`);
+      setLiveStatusText(logMessage);
+      if (mergedPendingItems.length > 0 && pendingContext) {
+        setPages(prev => {
+          const nextPages = prev.map(p => {
+            if (p.pageNumber === pendingContext.sourcePageNumber || p.id === pendingContext.sourcePageId) {
+              const updatedItems = (p.items || []).map(existing => mergedPendingItems.find(m => m.id === existing.id) || existing);
+              for (const m of mergedPendingItems) if (!updatedItems.some(it => it.id === m.id)) updatedItems.push(m);
+              return { ...p, items: updatedItems, mcqCount: updatedItems.length, errorMessage: undefined };
+            }
+            return p;
+          });
+          setExtractedMcqs(nextPages.flatMap(p => p.items || []).map((it, idx) => ({ ...it, question_r: idx + 1 })));
+          return nextPages;
+        });
+      }
+
+      // Split by the page number the model reported; an item without one stays with the page of
+      // the item before it (reading order), starting at the batch's first page.
+      const byPage = new Map<string, MockTestMcqItem[]>(batch.map(p => [p.id, [] as MockTestMcqItem[]]));
+      let current = first;
+      for (const item of freshPageItems) {
+        const reported = parseInt(String((item as any).source_pages || '').match(/\d+/)?.[0] || '', 10);
+        const hit = batch.find(p => p.pageNumber === reported);
+        if (hit) current = hit;
+        byPage.get(current.id)!.push({
+          ...item,
+          pageNumber: current.pageNumber,
+          pageId: current.id,
+          set_name: setName,
+          difficulty_level: difficulty,
+          source_pages: (item as any).source_pages || String(current.pageNumber),
+        } as MockTestMcqItem);
+      }
+      const { completeItems: lastComplete, pendingItems } = separateCompleteAndPendingItems(byPage.get(last.id)!, isLastBatch);
+      console.log(`[Batch Engine] ${label}: ${freshPageItems.length} items, ${pendingItems.length} pending on Page ${last.pageNumber}.`);
+
+      const solveDeep = async (items: MockTestMcqItem[]): Promise<MockTestMcqItem[]> => {
+        if (!autoDeepSolveAll || items.length === 0) return items;
+        setLiveStatusText(`[${label}] Deep-researching solutions for ${items.length} MCQs...`);
+        return Promise.all(items.map(async item => {
+          if (abortController.signal.aborted) return item;
+          if (item.solution_hi && item.solution_hi.length > 35 && item.solution_en && item.solution_en.length > 35) return item;
+          try {
+            const solRes = await generateDeepSolutionForItem(item);
+            return { ...item, solution_hi: solRes.solution_hi || item.solution_hi, solution_en: solRes.solution_en || item.solution_en, difficulty_level: solRes.difficulty_level || item.difficulty_level };
+          } catch (e) {
+            console.warn(`Deep research failed for Q#${item.question_r}:`, e);
+            return item;
+          }
+        }));
+      };
+      const finalByPage = new Map<string, MockTestMcqItem[]>();
+      for (const p of batch) {
+        const items = p.id === last.id ? [...(await solveDeep(lastComplete)), ...pendingItems] : await solveDeep(byPage.get(p.id)!);
+        finalByPage.set(p.id, items);
+      }
+      if (abortController.signal.aborted) throw new DOMException('Extraction stopped by user.', 'AbortError');
+
+      setPages(prev => {
+        const nextPages: PageQueueItem[] = prev.map(p => finalByPage.has(p.id) ? {
+          ...p,
+          status: 'ready' as const,
+          mcqCount: finalByPage.get(p.id)!.length,
+          items: finalByPage.get(p.id)!,
+          errorMessage: (p.id === last.id && pendingItems.length > 0 && !isLastBatch) ? `Question continues on Page ${last.pageNumber + 1}` : undefined
+        } : p);
+        const formattedMcqs = nextPages.flatMap(p => p.items || []).map((it, idx) => ({ ...it, question_r: idx + 1 }));
+        setExtractedMcqs(formattedMcqs);
+        if (formattedMcqs.length > 0) {
+          const currentUid = user?.uid || 'guest';
+          if (!currentSessionSetIdRef.current) {
+            currentSessionSetIdRef.current = 'mock_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          }
+          addMocktestHistoryItem(currentUid, {
+            id: currentSessionSetIdRef.current,
+            userId: currentUid,
+            setName: outputFileName || setName || 'Mock Test Paper',
+            timestamp: Date.now(),
+            questionCount: formattedMcqs.length,
+            questions: formattedMcqs,
+            pages: nextPages,
+          }).catch(() => {});
+        }
+        return nextPages;
+      });
+
+      return {
+        nextPendingContext: (pendingItems.length > 0 && !isLastBatch)
+          ? { sourcePageNumber: last.pageNumber, sourcePageId: last.id, pendingItems }
+          : null
+      };
+    } catch (err: any) {
+      const isAborted = err?.name === 'AbortError' || err?.message?.includes('stopped by user') || err?.message?.includes('aborted');
+      setPages(prev => prev.map(p => ids.has(p.id) ? {
+        ...p,
+        status: isAborted ? ((p.items && p.items.length > 0) ? 'ready' : 'pending') : 'error',
+        errorMessage: isAborted ? 'Extraction stopped by user' : (err.message || 'Extraction failed')
+      } : p));
+      throw err;
+    } finally {
+      batch.forEach(p => activeAbortControllersRef.current.delete(p.id));
+    }
+  };
+
   // Process a single page item sequentially with carry-over context
   const processPageItemSequential = async (
     page: PageQueueItem,
@@ -1172,7 +1369,11 @@ Rules:
         };
       }
 
-      for (let i = 0; i < selectedPages.length; i++) {
+      // Bridge batch mode: up to `pagesPerRequest` consecutive image pages travel in one request.
+      // Text pages, non-consecutive pages and "similar" mode always go one page at a time.
+      const perRequest = activeEngine === 'bridge' && mode !== 'similar' ? Math.max(1, pagesPerRequest) : 1;
+      let requestIndex = 0;
+      for (let i = 0; i < selectedPages.length;) {
         if (pauseRef.current) {
           setLiveStatusText('Processing paused by user.');
           return;
@@ -1180,7 +1381,15 @@ Rules:
 
         const page = selectedPages[i];
         if (carriedPendingContext && carriedPendingContext.sourcePageNumber + 1 !== page.pageNumber) carriedPendingContext = null;
-        const isLast = (i === selectedPages.length - 1);
+        const batch: PageQueueItem[] = [page];
+        while (perRequest > 1 && batch.length < perRequest && i + batch.length < selectedPages.length) {
+          const next = selectedPages[i + batch.length];
+          const prevInBatch = batch[batch.length - 1];
+          if (!page.imageUrl || page.rawTextContent || !next.imageUrl || next.rawTextContent) break;
+          if (next.pageNumber !== prevInBatch.pageNumber + 1) break;
+          batch.push(next);
+        }
+        const isLast = (i + batch.length >= selectedPages.length);
 
         const carryInfo = carriedPendingContext && carriedPendingContext.pendingItems.length > 0
           ? ` (Carrying ${carriedPendingContext.pendingItems.length} pending MCQ from P.${carriedPendingContext.sourcePageNumber})`
@@ -1188,20 +1397,36 @@ Rules:
         setLiveStatusText(
           mode === 'similar'
             ? `[Sequential ${i + 1}/${selectedPages.length}] Page ${page.pageNumber}: 🧠 Generating NEW similar MCQs from reference page...${carryInfo}`
-            : `[Sequential ${i + 1}/${selectedPages.length}] Processing Page ${page.pageNumber}...${carryInfo}`
+            : batch.length > 1
+              ? `[Batch ${i + 1}-${i + batch.length}/${selectedPages.length}] Pages ${page.pageNumber}–${batch[batch.length - 1].pageNumber} in one request...${carryInfo}`
+              : `[Sequential ${i + 1}/${selectedPages.length}] Processing Page ${page.pageNumber}...${carryInfo}`
         );
 
         try {
-          const { nextPendingContext } = await processPageItemSequential(
-            page,
-            carriedPendingContext,
-            i,
-            selectedPages.length,
-            isLast,
-            mode,
-            activeEngine
-          );
-          carriedPendingContext = nextPendingContext;
+          if (batch.length > 1) {
+            const { nextPendingContext } = await processPageBatchSequential(
+              batch,
+              carriedPendingContext,
+              i,
+              selectedPages.length,
+              isLast,
+              requestIndex
+            );
+            carriedPendingContext = nextPendingContext;
+          } else {
+            const { nextPendingContext } = await processPageItemSequential(
+              page,
+              carriedPendingContext,
+              i,
+              selectedPages.length,
+              isLast,
+              mode,
+              activeEngine
+            );
+            carriedPendingContext = nextPendingContext;
+          }
+          i += batch.length;
+          requestIndex++;
         } catch (pageErr: any) {
           const isAborted = pageErr?.name === 'AbortError' || pageErr?.message?.includes('stopped by user') || pageErr?.message?.includes('aborted');
           if (isAborted) {
@@ -2540,7 +2765,7 @@ Rules:
           )}
           <span className="badge badge-neutral">{extractionMode === 'exact' ? 'Exact PDF' : 'Ref mode (new MCQs)'}</span>
           <span className="badge badge-neutral">
-            {aiEngine === 'api' ? `${batchSize} page${batchSize > 1 ? 's' : ''} in parallel` : chatRotation === 0 ? 'Single chat' : `New chat every ${chatRotation}P`}
+            {aiEngine === 'api' ? `${batchSize} page${batchSize > 1 ? 's' : ''} in parallel` : pagesPerRequest > 1 ? `${pagesPerRequest} pages per request` : 'One page per request'}
           </span>
           {autoDeepSolveAll && <span className="badge badge-neutral">Auto-fill all 34 fields</span>}
           <span className="badge badge-neutral">{answerFormat === 'letters' ? 'A–D' : '1–4'} · {difficulty}</span>
@@ -2661,20 +2886,20 @@ Rules:
                   </div>
                 ) : (
                   <div>
-                    <span className="field-label" title="Extension Bridge browser chat tab me 1-by-1 sequentially page send aur extract karta hai.">New chat every</span>
-                    <div className="seg" role="group" aria-label="New chat every N pages">
-                      {[2, 3, 5, 10, 0].map((count) => (
+                    <span className="field-label" title="Ek request me kitne consecutive page images ek saath AI chat ko bhejein. Kam questions wale pages ke liye 3P / 5P kaafi tez hai.">Pages per request</span>
+                    <div className="seg" role="group" aria-label="Pages per request">
+                      {[1, 2, 3, 5].map((count) => (
                         <button
                           key={count}
                           type="button"
-                          aria-pressed={chatRotation === count}
-                          onClick={() => setChatRotation(count)}
+                          aria-pressed={pagesPerRequest === count}
+                          onClick={() => setPagesPerRequest(count)}
                           className="seg-item"
-                          title={count === 0
-                            ? 'Poore document ke liye ek hi chat (lambe run me upload fail ho sakta hai)'
-                            : `Har ${count} page ke baad fresh AI chat — upload aur composer reliable rehte hain`}
+                          title={count === 1
+                            ? 'Har page alag request (sabse reliable)'
+                            : `${count} consecutive pages ek hi message me attach — fast; AI har question ko uske page number se tag karta hai`}
                         >
-                          {count === 0 ? 'Off' : `${count}P`}
+                          {count}P
                         </button>
                       ))}
                     </div>

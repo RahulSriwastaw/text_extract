@@ -4,7 +4,7 @@
  */
 
 (function () {
-  const EXT_VER = "2.5.14";
+  const EXT_VER = "2.5.15";
   if (window.__tfStudyAiGenericVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGenericVer = EXT_VER;
@@ -1370,7 +1370,22 @@
     return false;
   }
 
+  // Batch mode: several page images in one request, attached in order and each verified.
   async function pastePdf(job) {
+    const images = Array.isArray(job?.fileBase64) ? job.fileBase64.filter(Boolean) : (job?.fileBase64 ? [job.fileBase64] : []);
+    if (!images.length) return false;
+    const names = Array.isArray(job.fileNames) ? job.fileNames : [];
+    for (let i = 0; i < images.length; i++) {
+      runtime.check();
+      const fileName = names[i] || (images.length > 1
+        ? String(job.fileName || "page.png").replace(/(\.[a-z0-9]+)?$/i, `_${i + 1}$1`)
+        : job.fileName);
+      if (!await pastePdfOne({ ...job, fileBase64: images[i], fileName }, i > 0)) return false;
+      if (images.length > 1) await sleep(500);
+    }
+    return true;
+  }
+  async function pastePdfOne(job, keepExisting) {
     if (!job?.fileBase64) return false;
     try {
       const raw = String(job.fileBase64).replace(/^data:[^;]+;base64,/, "");
@@ -1404,7 +1419,7 @@
         type: detectedMime,
       });
 
-      await clearComposerAttachments();
+      if (!keepExisting) await clearComposerAttachments();
 
       // 1. Try file input assign first (cleanest React file upload)
       let inputs = deepQueryAll('input[type="file"]');
@@ -1583,6 +1598,9 @@
       // An image-less send wastes the turn and answers about the previous page's image.
       if (needsImage && countAttachments() < 1) {
         throw new Error("Image attachment disappeared before sending. Retry this page.");
+      }
+      if (needsImage && Array.isArray(job.fileBase64) && countAttachments() < job.fileBase64.length) {
+        throw new Error(`Only ${countAttachments()} of ${job.fileBase64.length} page images are attached. Retry this page.`);
       }
       progress(requestId, "send", "Sending…", adminTabId);
       await clickSendOrEnter(findComposer() || el);

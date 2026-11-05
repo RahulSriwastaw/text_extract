@@ -65,6 +65,10 @@ export class BridgeError extends Error {
 
 export interface ExtractWithBridgeOptions {
   base64Image?: string;
+  /** Several page images in one request (batch mode). Attached in order; overrides base64Image. */
+  base64Images?: string[];
+  /** Optional names matching base64Images. */
+  fileNames?: string[];
   fileName?: string;
   mimeType?: string;
   prompt: string;
@@ -648,13 +652,15 @@ export async function extractWithStudyAiBridge(
       }
     }, timeoutMs);
 
-    // Prepare payload
-    let cleanBase64 = options.base64Image || null;
-    if (cleanBase64 && cleanBase64.includes(';base64,')) {
-      cleanBase64 = cleanBase64.split(';base64,')[1];
-    }
+    // Prepare payload. A batch sends an array; the worker stores it as-is and adapters attach each.
+    const strip = (b64: string) => (b64.includes(';base64,') ? b64.split(';base64,')[1] : b64);
+    const batch = (options.base64Images || []).filter(Boolean).map(strip);
+    const cleanBase64: string | string[] | null = batch.length > 1 ? batch
+      : batch.length === 1 ? batch[0]
+      : options.base64Image ? strip(options.base64Image) : null;
 
     const payload = {
+      fileNames: batch.length > 1 ? (options.fileNames || null) : null,
       source: PAGE_SOURCE,
       type: 'EXTRACT_REQUEST',
       requestId,

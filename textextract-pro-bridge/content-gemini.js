@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.14";
+  const EXT_VER = "2.5.15";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -332,7 +332,7 @@
       }
       // Last check before the turn is spent: an image-less or prompt-less send wastes the page
       // and returns an answer about the previous image.
-      if (needsImage && countAttachments() < 1) {
+      if (needsImage && countAttachments() < Math.max(1, jobImageList(job).length)) {
         throw new Error("Image attachment disappeared before sending. Retry this page.");
       }
       progress(requestId, "send", "Sending to Gemini…", adminTabId);
@@ -607,6 +607,13 @@
       } catch { return false; }
     };
     const notHistory = chip => !chip.closest('model-response, user-query, [data-message-author-role], .conversation-container');
+    // Per-file elements first: the preview wrapper is one element however many files it holds,
+    // and batch mode needs the real count.
+    const perFile = deepQueryAll('uploader-file-preview, uploader-file-card, gem-media-attachment, [class*="file-preview-chip"]', container)
+      .filter(visible)
+      .filter(notHistory);
+    const perFileOuter = perFile.filter((chip, _i, arr) => !arr.some(other => other !== chip && other.contains(chip)));
+    if (perFileOuter.length) return perFileOuter;
     const chips = deepQueryAll(ATTACHMENT_CHIP_SELECTOR, container)
       .filter(visible)
       .filter(notHistory);
@@ -711,12 +718,33 @@
     }
   }
 
+  // Batch mode sends several page images in one request; attach them in order, each one verified.
+  function jobImageList(job) {
+    const list = Array.isArray(job?.fileBase64) ? job.fileBase64 : (job?.fileBase64 ? [job.fileBase64] : []);
+    return list.filter(Boolean);
+  }
+  function jobImageName(job, index, total) {
+    const names = Array.isArray(job?.fileNames) ? job.fileNames : [];
+    if (names[index]) return names[index];
+    const base = job?.fileName || "page.png";
+    if (total <= 1) return base;
+    return base.replace(/(\.[a-z0-9]+)?$/i, `_${index + 1}$1`);
+  }
   async function pastePdfIntoComposer(el, job) {
-    const file = base64ToFile(job.fileBase64, job.fileName, job.mimeType || "image/png");
-    if (!file) return false;
-
+    const images = jobImageList(job);
+    if (!images.length) return false;
     // Start from a known-empty composer so a leftover chip can never be mistaken for this page.
     await clearComposerAttachments();
+    for (let i = 0; i < images.length; i++) {
+      runtime.check();
+      const file = base64ToFile(images[i], jobImageName(job, i, images.length), job.mimeType || "image/png");
+      if (!file) return false;
+      if (!await attachOneFile(el, file)) return false;
+      if (images.length > 1) await sleep(500);
+    }
+    return true;
+  }
+  async function attachOneFile(el, file) {
     const baseline = countAttachments();
 
     el.scrollIntoView({ block: "center" });
@@ -803,7 +831,15 @@
       // every page left menus stacked open, which is what broke later pages.
       let input = findFileInput();
       if (!input) {
-        const btns = deepQueryAll('button, [role="button"]').filter(b => /upload|attach|add file|from device|insert/i.test(b.getAttribute("aria-label") || ""));
+        // Only the composer's own upload button. In a chat with history, a plain /upload/ match hit
+        // "Show the uploaded image in a lightbox" on the previous turn, opened the lightbox and never
+        // found a file input — which is why pages after the first stalled on "Attaching page image".
+        const label = b => ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("mattooltip") || "") + " " + (b.title || "")).toLowerCase();
+        const isUploadBtn = b => /upload|attach|add file|from device|insert|अपलोड/i.test(label(b))
+          && !/uploaded|lightbox|show|open|remove|delete|preview|हटा/i.test(label(b))
+          && !b.closest('model-response, user-query, [data-message-author-role], .conversation-container');
+        const scoped = deepQueryAll('button, [role="button"]', composerContainer()).filter(isUploadBtn);
+        const btns = scoped.length ? scoped : deepQueryAll('button, [role="button"]').filter(isUploadBtn);
         for (const b of btns.slice(0, 3)) {
           try { b.click(); } catch {}
           openedMenu = true;

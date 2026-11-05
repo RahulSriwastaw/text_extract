@@ -27,28 +27,144 @@ export const HTML_LATEX_FORMAT_RULES = `- OUTPUT FORMAT = CLEAN HTML + LaTeX (th
 // ---------------------------------------------------------------------------
 
 const SVG_BLOCK_RE = /<svg\b[\s\S]*?<\/svg\s*>/gi;
+/** SVG-only element names (none of these is meaningful HTML in MCQ content). */
+const SVG_TAGS = 'svg|rect|circle|ellipse|line|polyline|polygon|path|text|tspan|g|defs|marker|use|symbol|clipPath|linearGradient|radialGradient|stop|foreignObject|image|pattern|mask|textPath';
+const SVG_TAG_RE = new RegExp(`<\\/?(?:${SVG_TAGS})\\b`, 'i');
+/** `&lt;rect ...&gt;` → `<rect ...>` — but only for SVG tag names, so escaped prose like "&lt;y" stays text. */
+const ESCAPED_SVG_TAG_RE = new RegExp(`&lt;(\\/?)(${SVG_TAGS})\\b((?:(?!&gt;)[\\s\\S])*?)&gt;`, 'gi');
+const SVG_CHILD_RE = new RegExp(`^(?:${SVG_TAGS.replace('svg|', '')})$`, 'i');
+const ANY_TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\b[^<>]*>/g;
+
+function decodeEscapedSvgTags(text: string): string {
+  if (!/&lt;\/?(?:svg|rect|circle|line|path|polygon|polyline|ellipse|text|g)\b/i.test(text)) return text;
+  return text.replace(ESCAPED_SVG_TAG_RE, (_m, slash, name, attrs) => {
+    const a = String(attrs).replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&');
+    return `<${slash}${name}${a}>`;
+  });
+}
+
+/** Rough drawing bounds from the numbers in geometric attributes, for a missing viewBox. */
+function guessViewBox(inner: string): { w: number; h: number } {
+  let maxX = 0;
+  let maxY = 0;
+  const num = (v: string) => parseFloat(v) || 0;
+  const attr = (tag: string, name: string) => {
+    const m = tag.match(new RegExp(`\\b${name}\\s*=\\s*["']?(-?[\\d.]+)`, 'i'));
+    return m ? num(m[1]) : undefined;
+  };
+  const tagRe = /<[a-zA-Z][^<>]*>/g;
+  let t: RegExpExecArray | null;
+  while ((t = tagRe.exec(inner)) !== null) {
+    const tag = t[0];
+    const x = attr(tag, 'x') ?? 0, y = attr(tag, 'y') ?? 0;
+    const w = attr(tag, 'width') ?? 0, h = attr(tag, 'height') ?? 0;
+    const cx = attr(tag, 'cx'), cy = attr(tag, 'cy'), r = attr(tag, 'r') ?? attr(tag, 'rx') ?? 0;
+    const ry = attr(tag, 'ry') ?? r;
+    maxX = Math.max(maxX, x + w, attr(tag, 'x1') ?? 0, attr(tag, 'x2') ?? 0, cx !== undefined ? cx + r : 0);
+    maxY = Math.max(maxY, y + h, attr(tag, 'y1') ?? 0, attr(tag, 'y2') ?? 0, cy !== undefined ? cy + ry : 0);
+    if (/^<text\b/i.test(tag)) maxX = Math.max(maxX, x + 60);
+    const pts = tag.match(/\bpoints\s*=\s*["']([^"']*)/i);
+    if (pts) {
+      const nums = pts[1].split(/[\s,]+/).filter(Boolean).map(num);
+      nums.forEach((n, i) => (i % 2 === 0 ? (maxX = Math.max(maxX, n)) : (maxY = Math.max(maxY, n))));
+    }
+    const d = tag.match(/\bd\s*=\s*["']([^"']*)/i);
+    if (d) {
+      const nums = d[1].match(/-?\d+(?:\.\d+)?/g) || [];
+      nums.forEach((n, i) => (i % 2 === 0 ? (maxX = Math.max(maxX, num(n))) : (maxY = Math.max(maxY, num(n)))));
+    }
+  }
+  return { w: Math.ceil(maxX) + 10 || 300, h: Math.ceil(maxY) + 10 || 150 };
+}
+
+/**
+ * Wraps "headless" SVG fragments (a run of <rect>/<circle>/<line>/<text>… with no <svg> around them —
+ * what older sanitizer versions left behind) into a proper <svg> element.
+ */
+function wrapHeadlessSvg(text: string): string {
+  if (/<svg\b/i.test(text) || !SVG_TAG_RE.test(text)) return text;
+  const tokens: Array<{ start: number; end: number; name: string; closing: boolean }> = [];
+  ANY_TAG_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = ANY_TAG_RE.exec(text)) !== null) {
+    tokens.push({ start: m.index, end: ANY_TAG_RE.lastIndex, name: m[2], closing: m[1] === '/' });
+  }
+  const isSvg = (i: number) => SVG_CHILD_RE.test(tokens[i].name);
+  const isFiller = (i: number) => /^(?:br|p)$/i.test(tokens[i].name);
+  // Text between tags is allowed only as <text>/<tspan> content or whitespace
+  const gapOk = (a: number, b: number) => {
+    const gap = text.slice(tokens[a].end, tokens[b].start);
+    if (!gap.trim()) return true;
+    return /^(?:text|tspan|title)$/i.test(tokens[a].name) && !tokens[a].closing;
+  };
+
+  const out: string[] = [];
+  let cursor = 0;
+  let i = 0;
+  while (i < tokens.length) {
+    if (!isSvg(i)) { i++; continue; }
+    let j = i;
+    while (j + 1 < tokens.length && (isSvg(j + 1) || isFiller(j + 1)) && gapOk(j, j + 1)) j++;
+    while (j > i && isFiller(j)) j--;
+    const count = tokens.slice(i, j + 1).filter((_, k) => isSvg(i + k)).length;
+    if (count >= 2) {
+      const inner = text.slice(tokens[i].start, tokens[j].end).replace(/<\/?(?:br|p)\b[^<>]*>/gi, '\n');
+      const { w, h } = guessViewBox(inner);
+      out.push(text.slice(cursor, tokens[i].start));
+      out.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${inner}</svg>`);
+      cursor = tokens[j].end;
+    }
+    i = j + 1;
+  }
+  out.push(text.slice(cursor));
+  return out.join('');
+}
 
 function svgToDataUri(svg: string): string {
   let s = svg.trim();
   // Never keep active content; an <img> data URI cannot run scripts anyway, this is belt and braces.
   s = s.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '');
   s = s.replace(/&nbsp;/g, '&#160;');
-  if (!/^<svg[^>]*\sxmlns\s*=/i.test(s)) s = s.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
-  if (/xlink:/i.test(s) && !/xmlns:xlink/i.test(s)) s = s.replace(/^<svg/i, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+  // Bare "&" is invalid XML and makes the browser reject the whole image
+  s = s.replace(/&(?!(?:[a-zA-Z][a-zA-Z0-9]{1,31}|#\d{1,7}|#x[0-9a-fA-F]{1,6});)/g, '&amp;');
+  // Fix empty elements written HTML-style: "<rect ...></rect>" or "<rect ...>" with no "/>"
+  s = s.replace(/<(rect|circle|ellipse|line|polyline|polygon|path|use|stop|image)\b([^<>]*?)\/?>\s*<\/\1\s*>/gi, '<$1$2/>');
+  s = s.replace(/<(rect|circle|ellipse|line|polyline|polygon|path|use|stop|image)\b([^<>]*?)(?<!\/)>/gi, '<$1$2/>');
+  s = s.replace(/<\/(?:rect|circle|ellipse|line|polyline|polygon|path|use|stop|image)\s*>/gi, '');
+  const open = s.match(/^<svg\b[^>]*>/i)?.[0] || '<svg>';
+  let head = open;
+  if (!/\sxmlns\s*=/i.test(head)) head = head.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  if (/xlink:/i.test(s) && !/xmlns:xlink/i.test(head)) head = head.replace(/^<svg/i, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+  if (!/\sviewBox\s*=/i.test(head)) {
+    const wm = head.match(/\swidth\s*=\s*["']?([\d.]+)/i);
+    const hm = head.match(/\sheight\s*=\s*["']?([\d.]+)/i);
+    const { w, h } = wm && hm ? { w: parseFloat(wm[1]), h: parseFloat(hm[1]) } : guessViewBox(s.slice(open.length));
+    head = head.replace(/^<svg/i, `<svg viewBox="0 0 ${w} ${h}"`);
+    if (!wm) head = head.replace(/^<svg/i, `<svg width="${w}"`);
+    if (!hm) head = head.replace(/^<svg/i, `<svg height="${h}"`);
+  }
+  // Drawings default to black strokes; give them an explicit light background so they read on dark cards too
+  s = head + s.slice(open.length);
   const enc = encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
   return `data:image/svg+xml;charset=utf-8,${enc}`;
 }
 
+/** Finds every SVG (proper, entity-escaped, or wrapper-less) and hands it to `emit` as a data URI. */
+function replaceSvg(text: string, emit: (uri: string) => string): string {
+  if (!text || !/(?:<|&lt;)\/?(?:svg|rect|circle|line|path|polygon|polyline|ellipse|text|g)\b/i.test(text)) return text;
+  const prepared = wrapHeadlessSvg(decodeEscapedSvgTags(text));
+  if (!/<svg\b/i.test(prepared)) return text;
+  return prepared.replace(SVG_BLOCK_RE, svg => emit(svgToDataUri(svg)));
+}
+
 /** Converts inline <svg>…</svg> blocks into <img> tags with an SVG data URI (renders safely everywhere). */
 export function svgBlocksToImg(text: string): string {
-  if (!text || !/<svg\b/i.test(text)) return text;
-  return text.replace(SVG_BLOCK_RE, svg => `<img src="${svgToDataUri(svg)}" alt="figure" class="svg-figure">`);
+  return replaceSvg(text, uri => `<img src="${uri}" alt="figure" class="svg-figure">`);
 }
 
 /** Same as svgBlocksToImg but emits Markdown image syntax (for ReactMarkdown previews). */
 export function svgBlocksToMarkdown(text: string): string {
-  if (!text || !/<svg\b/i.test(text)) return text;
-  return text.replace(SVG_BLOCK_RE, svg => `\n\n![figure](${svgToDataUri(svg)})\n\n`);
+  return replaceSvg(text, uri => `\n\n![figure](${uri})\n\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +258,7 @@ const DROP_WITH_CONTENT_RE = /<(script|style|iframe|object|embed|noscript|title|
 const DROP_SINGLE_RE = /<\/?(?:script|style|iframe|object|embed|noscript|title|head|template|textarea|select|button|input|form|svg|math)\b[^<>]*>/gi;
 
 const ALLOWED_ATTRS: Record<string, string[]> = {
-  img: ['src', 'alt', 'width', 'height', 'style'],
+  img: ['src', 'alt', 'width', 'height', 'style', 'class'],
   td: ['colspan', 'rowspan'],
   th: ['colspan', 'rowspan'],
   ol: ['start', 'type'],

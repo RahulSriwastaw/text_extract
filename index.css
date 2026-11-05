@@ -469,6 +469,8 @@ html .katex-display {
   border-radius: 8px;
   margin: 2px 0;
 }
+.mcq-html img.svg-figure { display: block; max-height: 18rem; width: auto; }
+.mcq-html-inline img.svg-figure { display: inline-block; max-height: 9rem; vertical-align: middle; }
 .mcq-html-inline { display: inline; }
 .mcq-html-inline .katex-display { display: inline-block; margin: 0 0.2em; padding: 2px 6px; border-left: 0; }
 .mcq-html .math-error {

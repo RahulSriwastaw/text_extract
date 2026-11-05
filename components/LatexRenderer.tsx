@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import katex from 'katex';
 import { cleanMocktestText } from '../services/textCleanService';
-import { protectMath, restoreMath, toInlineHtml, MathSegment } from '../services/htmlLatex';
+import { protectMath, restoreMath, toInlineHtml, svgBlocksToImg, MathSegment } from '../services/htmlLatex';
 
 /**
  * Kept for backward compatibility: math is now rendered synchronously by KaTeX,
@@ -57,7 +57,7 @@ const OL_TYPE_STYLES: Record<string, string> = { I: 'upper-roman', i: 'lower-rom
 /** HTML + LaTeX string → final HTML with KaTeX markup. Input is sanitized by cleanMocktestText. */
 export function renderHtmlLatex(content: string, inline = false): string {
   if (!content) return '';
-  let html = cleanMocktestText(content).replace(
+  let html = cleanMocktestText(svgBlocksToImg(content)).replace(
     /<ol([^>]*?) type="([IiAa1])"/g,
     (_m, before, t) => `<ol${before} type="${t}" style="list-style-type:${OL_TYPE_STYLES[t]}"`
   );

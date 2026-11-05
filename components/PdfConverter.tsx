@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers, Bot, FileSpreadsheet } from 'lucide-react';
+import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers, Bot, FileSpreadsheet, MoreHorizontal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import FileUploader from './FileUploader';
 import ProcessingList from './ProcessingList';
@@ -41,6 +41,26 @@ export interface PdfConverterProps {
   onClearInitialImages?: () => void;
 }
 
+/** Compact on/off chip for the output options row. */
+const ToggleChip: React.FC<{ on: boolean; onClick: () => void; label: string; title?: string }> = ({ on, onClick, label, title }) => (
+  <button
+    type="button"
+    aria-pressed={on}
+    onClick={onClick}
+    title={title}
+    className={`h-7 px-2.5 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors ${
+      on
+        ? 'bg-accent/10 border-accent/40 text-accent-light'
+        : 'border-line-strong text-ink-3 hover:text-ink hover:border-white/25'
+    }`}
+  >
+    <span className={`w-3.5 h-3.5 rounded-[4px] border flex items-center justify-center ${on ? 'bg-accent border-accent text-on-accent' : 'border-line-strong'}`}>
+      {on && <Check className="w-2.5 h-2.5" strokeWidth={3} />}
+    </span>
+    {label}
+  </button>
+);
+
 const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearInitialImages }) => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [pages, setPages] = useState<ScannedPage[]>([]);
@@ -59,6 +79,21 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [user] = useCurrentUser();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  useEffect(() => {
+    if (!showMoreMenu) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[data-menu-root]')) setShowMoreMenu(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowMoreMenu(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showMoreMenu]);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
   const [mcqMode, setMcqMode] = useState(false);
   const [showMcqNumbers, setShowMcqNumbers] = useState(true);
@@ -1098,7 +1133,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const selectedPendingCount = pages.filter(p => p.isSelected && p.status !== 'done').length;
 
   return (
-    <div className="min-h-screen bg-canvas font-sans selection:bg-accent/20 selection:text-accent relative">
+    <div className="min-h-screen bg-canvas font-sans relative">
       {/* Floating Top Upload Progress Bar */}
       <AnimatePresence>
         {uploadProgress && (
@@ -1106,217 +1141,200 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         )}
       </AnimatePresence>
 
-      <div className="max-w-7xl mx-auto px-3 py-3 md:px-3 md:py-12">
-        
-        <header className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {aiEngine === 'extension' && bridgeStatus.connected ? (
-              <button 
-                onClick={() => setShowGeminiConnect(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-bold bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 rounded-[6px] hover:bg-emerald-500/20 transition-colors"
-                title={`TextExtract Pro Bridge is active with ${(bridgeStatus.provider || getStoredAiProvider()).toUpperCase()}`}
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>{(bridgeStatus.provider || getStoredAiProvider()).toUpperCase()} Active</span>
-              </button>
-            ) : userGeminiAuth.isAuthenticated ? (
-              <button 
-                onClick={() => setShowGeminiSettings(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-[6px] hover:bg-emerald-500/20 transition-colors"
-                title="Direct Gemini API is active"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Gemini API Active</span>
-              </button>
-            ) : (
-              <button 
-                onClick={() => setShowGeminiConnect(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium bg-accent/15 hover:bg-accent/25 border border-accent/30 text-accent-light rounded-[6px] transition-colors shadow-sm"
-                title="Connect AI Bridge or Gemini account"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Connect AI Engine (Free)</span>
-              </button>
-            )}
-          </div>
+      <div className="app-container py-6 space-y-5">
 
-          <div className="flex items-center gap-2">
-            {pages.length > 0 && (
-              <button 
-                onClick={reset}
-                className="flex items-center gap-2 px-3 py-1.5 text-[12px] font-medium text-ink-3 hover:text-rose-400 hover:bg-[#3A1A1A] rounded-[6px] transition-colors border border-line"
-                title="Reset All"
+        {/* Error details modal */}
+        <AnimatePresence>
+          {selectedError && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="modal-backdrop"
+              onClick={() => setSelectedError(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.97 }}
+                animate={{ scale: 1 }}
+                className="modal max-w-lg"
+                role="dialog"
+                aria-modal="true"
+                onClick={e => e.stopPropagation()}
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Reset All</span>
-              </button>
-            )}
+                <div className="modal-header">
+                  <h3 className="modal-title">Error details</h3>
+                </div>
+                <div className="modal-body">
+                  <pre className="bg-canvas border border-line p-3 rounded-lg text-xs text-ink-2 overflow-auto max-h-60 whitespace-pre-wrap">
+                    {selectedError}
+                  </pre>
+                </div>
+                <div className="modal-footer">
+                  <button onClick={() => setSelectedError(null)} className="btn btn-secondary">
+                    Close
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Page header */}
+        <section className="card">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-4 sm:p-5">
+            <div className="min-w-0">
+              <p className="page-eyebrow mb-1">Document to Word</p>
+              <h1 className="page-title">Convert PDF to editable Word</h1>
+              <p className="page-subtitle mt-1">
+                Text, tables and math from scanned PDFs and images, exported as a clean <strong className="text-ink-2 font-semibold">.docx</strong>.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {aiEngine === 'extension' && bridgeStatus.connected ? (
+                <button
+                  onClick={() => setShowGeminiConnect(true)}
+                  className="badge badge-success h-8 px-3 rounded-lg cursor-pointer hover:bg-emerald-500/20"
+                  title={`TextExtract Pro Bridge is active with ${(bridgeStatus.provider || getStoredAiProvider()).toUpperCase()}`}
+                >
+                  <span className="dot" />
+                  <span>{(bridgeStatus.provider || getStoredAiProvider()).toUpperCase()} bridge active</span>
+                </button>
+              ) : userGeminiAuth.isAuthenticated ? (
+                <button
+                  onClick={() => setShowGeminiSettings(true)}
+                  className="badge badge-success h-8 px-3 rounded-lg cursor-pointer hover:bg-emerald-500/20"
+                  title="Direct Gemini API is active"
+                >
+                  <Check />
+                  <span>Gemini API active</span>
+                </button>
+              ) : pages.length > 0 && (
+                <button
+                  onClick={() => setShowGeminiConnect(true)}
+                  className="btn btn-secondary"
+                  title="Connect AI Bridge or Gemini account"
+                >
+                  <Sparkles className="text-accent" />
+                  <span>Connect AI engine</span>
+                </button>
+              )}
+              {pages.length > 0 && (
+                <div className="relative" data-menu-root>
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreMenu(v => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={showMoreMenu}
+                    aria-label="More actions"
+                    className="btn btn-ghost btn-icon"
+                  >
+                    <MoreHorizontal />
+                  </button>
+                  {showMoreMenu && (
+                    <div className="menu right-0 mt-1.5 w-60 animate-fadeIn" role="menu">
+                      <button type="button" role="menuitem" className="menu-item" onClick={() => { setShowMoreMenu(false); setIsHistoryOpen(true); }}>
+                        <Clock />
+                        <span>Conversion history</span>
+                      </button>
+                      <button type="button" role="menuitem" className="menu-item" onClick={() => { setShowMoreMenu(false); setIsMcqSidebarOpen(true); }}>
+                        <ListChecks />
+                        <span>MCQ bank</span>
+                      </button>
+                      <button type="button" role="menuitem" className="menu-item" onClick={() => { setShowMoreMenu(false); handleOpenMocktestStudio(); }} title="Open in 18-Field MockTest CSV Studio">
+                        <FileSpreadsheet />
+                        <span>Open in MockTest Studio<span className="menu-item-desc">Edit as CSV questions</span></span>
+                      </button>
+                      <div className="menu-divider" />
+                      <button type="button" role="menuitem" className="menu-item menu-item-danger" onClick={() => { setShowMoreMenu(false); reset(); }}>
+                        <RefreshCw />
+                        <span>Reset all pages</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-        </header>
+        </section>
 
         {/* Main Content */}
         <main className="relative">
-           {/* Upload Area */}
            {pages.length === 0 ? (
-             <div className="max-w-4xl mx-auto">
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5 }}
-                  className="text-center mb-8 space-y-4"
-                >
-                    <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-accent-light text-xs uppercase tracking-wider font-bold mb-2 shadow-inner">
-                        <Sparkles className="w-3.5 h-3.5 text-accent" />
-                        <span>AI-Powered Layout & Math OCR</span>
-                    </div>
-
-                    <h2 className="text-3xl sm:text-5xl md:text-6xl font-semibold text-white tracking-tight leading-tight font-display">
-                        Convert <span className="text-accent-light">PDF to Text</span> <br className="hidden md:block" /> with Human-Like Accuracy
-                    </h2>
-                    <p className="text-slate-400 text-sm sm:text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
-                        The ultimate AI OCR engine designed for exam papers, formulas, tables, and bilingual documents. 
-                        Preserves original hierarchy and exports directly to <strong className="text-white font-semibold">Microsoft Word (.docx)</strong>.
-                    </p>
-
-                    <div className="flex flex-wrap justify-center gap-3 pt-2">
-                        <div className="flex items-center gap-2 bg-white/[0.03] px-3.5 py-1.5 rounded-full border border-white/[0.06] text-xs font-semibold text-slate-200">
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>99.9% Accuracy</span>
-                        </div>
-                        <div className="flex items-center gap-2 bg-white/[0.03] px-3.5 py-1.5 rounded-full border border-white/[0.06] text-xs font-semibold text-slate-200">
-                            <Check className="w-3.5 h-3.5 text-blue-400" />
-                            <span>Real Word Math (OMML)</span>
-                        </div>
-                        <div className="flex items-center gap-2 bg-white/[0.03] px-3.5 py-1.5 rounded-full border border-white/[0.06] text-xs font-semibold text-slate-200">
-                            <Check className="w-3.5 h-3.5 text-ink-3" />
-                            <span>Full Table Extraction</span>
-                        </div>
-                    </div>
-                </motion.div>
-
-                {/* User-Owned Gemini Engine Callout Banner */}
-                <div className="mb-8 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.08] backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-accent/10 border border-accent/25 flex items-center justify-center text-accent-light shrink-0 ">
-                      <Sparkles className="w-5 h-5" />
-                    </div>
-                    <div className="text-left">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-white">
-                          {userGeminiAuth.isAuthenticated ? 'Your Personal Gemini Engine is Active' : 'Use Your Own Gemini for Unlimited Text Extraction'}
-                        </h4>
-                        {userGeminiAuth.isAuthenticated && (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
-                            Connected ✓
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-400">
-                        {userGeminiAuth.isAuthenticated 
-                          ? 'Extracting text using your personal Google/Gemini quota. 100% saved locally on this device.'
-                          : 'Zero server limits, maximum speed, and your extracted documents stay 100% private in local browser storage.'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                    {userGeminiAuth.isAuthenticated ? (
-                      <button
-                        type="button"
-                        onClick={() => setShowGeminiSettings(true)}
-                        className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs font-bold text-slate-200 transition-all flex items-center justify-center gap-1.5"
-                      >
-                        <Settings className="w-3.5 h-3.5 text-slate-400" />
-                        <span>Gemini Settings</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setShowGeminiConnect(true)}
-                        className="w-full sm:w-auto px-4 py-2 rounded-xl bg-accent hover:shadow-lg text-xs font-bold text-on-accent transition-all flex items-center justify-center gap-2"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        <span>Connect Your Gemini (Free)</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <FileUploader 
-                  onFilesSelected={handleFilesSelected} 
+             /* Empty state: upload + engine + how it works */
+             <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-5">
+                <FileUploader
+                  onFilesSelected={handleFilesSelected}
                   isLoading={appState === AppState.PROCESSING_PDF}
                 />
 
-                {/* How it works section */}
-                <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-5">
-                    {[
-                        { step: "01", title: "Upload Paper or PDF", desc: "Drag & drop your scanned question papers, notes, or books into the secure converter." },
-                        { step: "02", title: "AI Vision Analysis", desc: "Gemini vision model identifies text, equations, tables, and Hindi/English bilingual pairs." },
-                        { step: "03", title: "Instant Word Export", desc: "Download refined, layout-preserved .docx documents with editable math and clean tables." }
-                    ].map((item, i) => (
-                        <div key={i} className="glass-panel glass-panel-hover p-6 rounded-2xl relative overflow-hidden group">
-                            <div className="text-4xl font-bold text-white/[0.04] absolute -right-2 -bottom-2 group-hover:text-accent/15 transition-colors font-mono">
-                                {item.step}
-                            </div>
-                            <div className="text-xs font-bold text-accent-light font-mono mb-2 uppercase tracking-wider">Step {item.step}</div>
-                            <h3 className="text-base font-bold text-white mb-2 relative z-10 font-display">{item.title}</h3>
-                            <p className="text-slate-400 text-xs sm:text-sm leading-relaxed relative z-10">{item.desc}</p>
-                        </div>
-                    ))}
-                </div>
+                <aside className="space-y-4">
+                  <div className="card p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-sm font-semibold text-ink">AI engine</h2>
+                      {userGeminiAuth.isAuthenticated || (aiEngine === 'extension' && bridgeStatus.connected) ? (
+                        <span className="badge badge-success"><span className="dot" />Connected</span>
+                      ) : (
+                        <span className="badge badge-warning">Not connected</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-ink-3 leading-relaxed">
+                      {userGeminiAuth.isAuthenticated
+                        ? 'Using your own Gemini quota. Results stay on this device.'
+                        : 'Use your own Gemini key or the browser bridge. No server limits, and documents stay private.'}
+                    </p>
+                    {userGeminiAuth.isAuthenticated ? (
+                      <button type="button" onClick={() => setShowGeminiSettings(true)} className="btn btn-secondary w-full">
+                        <Settings />
+                        Gemini settings
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => setShowGeminiConnect(true)} className="btn btn-secondary w-full">
+                        <Zap className="text-accent" />
+                        Connect your Gemini (free)
+                      </button>
+                    )}
+                  </div>
 
+                  <div className="card p-4">
+                    <h2 className="text-sm font-semibold text-ink mb-3">How it works</h2>
+                    <ol className="space-y-3">
+                      {[
+                        { title: 'Upload', desc: 'PDF, scanned pages or a pasted screenshot.' },
+                        { title: 'Extract', desc: 'AI reads text, tables, equations and Hindi/English pairs.' },
+                        { title: 'Download', desc: 'Editable .docx with native Word math and tables.' },
+                      ].map((step, i) => (
+                        <li key={step.title} className="flex gap-3">
+                          <span className="w-6 h-6 shrink-0 rounded-full bg-surface-3 border border-line-strong text-xs font-semibold text-ink flex items-center justify-center tabular-nums">{i + 1}</span>
+                          <span>
+                            <span className="block text-sm font-medium text-ink">{step.title}</span>
+                            <span className="block text-sm text-ink-3">{step.desc}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                </aside>
              </div>
            ) : (
              <motion.div
-               initial={{ opacity: 0, y: 10 }}
+               initial={{ opacity: 0, y: 8 }}
                animate={{ opacity: 1, y: 0 }}
-               className="space-y-6"
+               className="space-y-5"
              >
-
-                {/* Error Modal */}
-                <AnimatePresence>
-                  {selectedError && (
-                    <motion.div 
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="fixed inset-0 bg-canvas/50 z-[100] flex items-center justify-center p-3"
-                      onClick={() => setSelectedError(null)}
-                    >
-                      <motion.div 
-                        initial={{ scale: 0.9 }}
-                        animate={{ scale: 1 }}
-                        className="bg-surface-2 p-3 rounded-[8px] max-w-lg w-full"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <h3 className="text-[16px] font-bold text-ink mb-4">Error Details</h3>
-                        <pre className="bg-[#141414] p-3 rounded-[8px] text-[11px] text-ink overflow-auto max-h-60 whitespace-pre-wrap">
-                          {selectedError}
-                        </pre>
-                        <button 
-                          onClick={() => setSelectedError(null)}
-                          className="mt-4 w-full bg-transparent border border-[#2A2A2A] text-ink py-2 rounded-[6px] hover:bg-surface-2 transition-colors font-medium text-[13px]"
-                        >
-                          Close
-                        </button>
-                      </motion.div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Main Tool Header - Combined Progress & Actions */}
-                <div className="bg-surface/90 backdrop-blur-xl rounded-2xl border border-white/[0.08] shadow-2xl sticky top-16 z-40 overflow-hidden">
-                   {/* Integrated Progress Bar (Top edge) */}
+                {/* Sticky toolbar: status, engine, convert and export */}
+                <div className="card sticky top-14 z-30 overflow-hidden shadow-[0_8px_24px_rgb(0_0_0/0.35)]">
+                   {/* Progress bar */}
                    <AnimatePresence>
                         {appState === AppState.ANALYZING && (
-                            <motion.div 
+                            <motion.div
                                 initial={{ height: 0 }}
-                                animate={{ height: 4 }}
+                                animate={{ height: 3 }}
                                 exit={{ height: 0 }}
                                 className="w-full bg-white/[0.05] relative overflow-hidden"
                             >
-                                <motion.div 
-                                    className="h-full bg-accent shadow-[0_0_12px_#FF6B2B]"
+                                <motion.div
+                                    className="h-full bg-accent"
                                     initial={{ width: 0 }}
                                     animate={{ width: `${Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%` }}
                                     transition={{ type: "spring", bounce: 0, duration: 0.5 }}
@@ -1325,450 +1343,277 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         )}
                    </AnimatePresence>
 
-                   <div className="p-3 sm:p-4 flex flex-col gap-3">
-                        {/* Top Row: Processing Info & Main Actions */}
-                        <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3">
-                            <div className="flex flex-wrap items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                                {appState === AppState.ANALYZING ? (
-                                    <div className="flex items-center gap-3 bg-white/[0.04] px-3 py-1.5 rounded-xl border border-white/[0.08] min-w-0 max-w-md">
-                                        <RefreshCw className="w-4 h-4 text-accent animate-spin flex-shrink-0" />
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="text-xs font-bold text-white truncate">Processing: {fileName}</span>
-                                            {bridgeProgressMsg && (
-                                              <span className="text-[11px] text-accent-light font-medium truncate">
-                                                {bridgeProgressMsg}
-                                              </span>
+                   <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 p-3">
+                        {/* Left: status / selection */}
+                        <div className="toolbar min-w-0">
+                            {appState === AppState.ANALYZING ? (
+                                <div className="flex items-center gap-3 min-w-0 max-w-md" role="status">
+                                    <RefreshCw className="w-4 h-4 text-accent animate-spin shrink-0" />
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-semibold text-ink truncate">Converting {fileName}</div>
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3">
+                                            <span className="font-semibold text-accent-light tabular-nums">
+                                                {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
+                                            </span>
+                                            <span>{pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages</span>
+                                            {isUsingBridge ? (
+                                              <span className="badge badge-neutral h-5">Free bridge</span>
+                                            ) : totalKeys > 1 ? (
+                                              <span className="badge badge-success h-5">Turbo · {totalKeys} keys</span>
+                                            ) : null}
+                                            {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
+                                                <>
+                                                    <button
+                                                        onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
+                                                        className="text-rose-300 font-semibold hover:underline"
+                                                    >
+                                                        {pages.filter(p => p.isSelected && p.status === 'error').length} errors
+                                                    </button>
+                                                    <button onClick={retryAllErrors} className="btn btn-danger btn-xs">
+                                                        <RefreshCw />
+                                                        Retry all
+                                                    </button>
+                                                </>
                                             )}
-                                            <div className="flex items-center gap-2 mt-0.5">
-                                                <span className="text-[11px] text-accent-light font-bold tabular-nums">
-                                                    {Math.round(((pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length) / Math.max(1, pages.filter(p => p.isSelected).length)) * 100)}%
-                                                </span>
-                                                <span className="text-[11px] text-slate-400 font-medium">
-                                                    {pages.filter(p => p.isSelected && (p.status === 'done' || p.status === 'error')).length}/{pages.filter(p => p.isSelected).length} pages
-                                                </span>
-                                                {isUsingBridge ? (
-                                                  <span className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 text-[11px] font-bold rounded uppercase tracking-wider border border-blue-500/20">
-                                                    Free Bridge
-                                                  </span>
-                                                ) : totalKeys > 1 ? (
-                                                  <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 text-[11px] font-bold rounded uppercase tracking-wider border border-emerald-500/20">
-                                                    Turbo: {totalKeys} Keys
-                                                  </span>
-                                                ) : null}
-                                                {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
-                                                    <div className="flex items-center gap-2">
-                                                        <button 
-                                                            onClick={() => setSelectedError(pages.find(p => p.isSelected && p.status === 'error')?.errorMessage || "No error details available.")}
-                                                            className="text-[11px] text-rose-400 font-bold hover:underline"
-                                                        >
-                                                            {pages.filter(p => p.isSelected && p.status === 'error').length} errors
-                                                        </button>
-                                                        <button 
-                                                            onClick={retryAllErrors}
-                                                            className="flex items-center gap-1 px-2 py-0.5 bg-rose-500/15 border border-rose-500/30 text-rose-400 rounded-lg hover:bg-rose-500/25 transition-all text-[11px] font-bold"
-                                                        >
-                                                            <RefreshCw className="w-2.5 h-2.5" />
-                                                            Retry All
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
                                         </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white/[0.04] rounded-xl border border-white/[0.06]">
-                                        <span className="text-xs font-bold text-white tabular-nums px-1">{selectedCount}/{totalCount}</span>
-                                        <div className="flex gap-1">
-                                            <button 
-                                                onClick={() => toggleAllSelection(true)}
-                                                className="text-[11px] font-bold text-white hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
-                                            >
-                                                ALL
-                                            </button>
-                                            <button 
-                                                onClick={() => toggleAllSelection(false)}
-                                                className="text-[11px] font-bold text-slate-400 hover:bg-white/[0.08] px-2 py-1 rounded-lg transition-all"
-                                            >
-                                                NONE
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Live Consumption Stats */}
-                                <div className="flex items-center gap-2">
-                                    <div className="flex items-center gap-1.5 bg-white/[0.03] px-2.5 py-1 rounded-xl border border-white/[0.05]">
-                                        <Type className="w-3.5 h-3.5 text-blue-400" />
-                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{wordsConsumed.toLocaleString()} <span className="text-[11px] text-slate-500 uppercase">Words</span></span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 bg-white/[0.03] px-2.5 py-1 rounded-xl border border-white/[0.05]">
-                                        <Zap className="w-3.5 h-3.5 text-amber-400" />
-                                        <span className="text-xs font-bold text-slate-200 tabular-nums">{pointsConsumed} <span className="text-[11px] text-slate-500 uppercase">Points</span></span>
-                                    </div>
-                                </div>
-
-                                <div className="relative">
-                                    <Filter className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                                    <input 
-                                        type="text" 
-                                        placeholder="Range (e.g. 1-5)" 
-                                        className="pl-7 pr-2.5 py-1 text-xs bg-white/[0.03] border border-white/[0.08] rounded-xl focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/50 transition-all w-28 text-white placeholder:text-slate-500"
-                                        value={rangeInput}
-                                        onChange={(e) => setRangeInput(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 justify-end">
-                                {hasCompletedPages && (
-                                    <div className="flex gap-2">
-                                        <button 
-                                            onClick={copyAllText}
-                                            className="p-2 text-slate-400 hover:text-white bg-white/[0.03] hover:bg-white/[0.08] border border-white/[0.06] rounded-xl transition-all"
-                                            title="Copy All"
-                                        >
-                                            {copySuccess ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                                        </button>
-                                        <div 
-                                            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/[0.04] border border-white/[0.08] hover:border-accent/40 focus-within:border-accent rounded-xl transition-all"
-                                            title="Output file name. Rename here before download!"
-                                        >
-                                            <FileText className="w-3.5 h-3.5 text-accent-light shrink-0" />
-                                            <input 
-                                                type="text"
-                                                value={fileName}
-                                                onChange={(e) => setFileName(e.target.value)}
-                                                placeholder="Rename file..."
-                                                className="w-24 sm:w-44 bg-transparent text-xs text-white placeholder:text-slate-500 font-medium focus:outline-none"
-                                            />
-                                            <span className="text-[11px] text-slate-500 font-bold shrink-0">.docx</span>
-                                        </div>
-                                        <button 
-                                            onClick={downloadDocx}
-                                            className="px-3.5 py-2 text-white bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm"
-                                        >
-                                            <FileDown className="w-4 h-4 text-blue-400" />
-                                            DOCX
-                                        </button>
-                                    </div>
-                                )}
-
-                                {appState !== AppState.ANALYZING ? (
-                                    <div className="flex flex-wrap items-center gap-2 flex-1 sm:flex-none">
-                                        {/* AI Engine Switcher */}
-                                        <div className="flex items-center gap-1 p-1 bg-white/[0.03] border border-white/[0.08] rounded-xl">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    setAiEngine('extension');
-                                                    if (!bridgeStatus.connected) {
-                                                        setShowGeminiConnect(true);
-                                                    }
-                                                }}
-                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                                    aiEngine === 'extension'
-                                                        ? bridgeStatus.connected
-                                                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow'
-                                                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                                        : 'text-slate-400 hover:text-white'
-                                                }`}
-                                                title={bridgeStatus.connected ? "Zero Token Extension Mode Active" : "Extension not detected - click to connect"}
-                                            >
-                                                <Bot className="w-3.5 h-3.5" />
-                                                <span className="hidden sm:inline">Free Bridge</span>
-                                                <span className={`text-[11px] px-1 py-px rounded font-bold ${bridgeStatus.connected ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                                                    {bridgeStatus.connected ? '0 Tokens' : 'Connect'}
-                                                </span>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setAiEngine('api')}
-                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                                    aiEngine === 'api'
-                                                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
-                                                        : 'text-slate-400 hover:text-white'
-                                                }`}
-                                                title="Direct Gemini API (Uses API Keys)"
-                                            >
-                                                <Zap className="w-3.5 h-3.5" />
-                                                <span className="hidden sm:inline">API Mode</span>
-                                            </button>
-                                        </div>
-
-                                        {/* AI Model Selector for Free Bridge */}
-                                        {aiEngine === 'extension' && (
-                                            <div className="flex items-center gap-1.5 px-2 py-1 bg-white/[0.03] border border-white/[0.08] rounded-xl">
-                                                <span className="text-[11px] text-slate-400 font-bold uppercase hidden md:inline">Model:</span>
-                                                <select
-                                                    value={getStoredAiProvider()}
-                                                    onChange={(e) => {
-                                                        const newModel = e.target.value as AiProvider;
-                                                        setStoredAiProvider(newModel);
-                                                        setBridgeStatus(prev => ({ ...prev, provider: newModel }));
-                                                    }}
-                                                    className="bg-canvas border border-emerald-500/30 text-emerald-300 text-xs font-bold rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-400 cursor-pointer"
-                                                    title="Select AI Model (Gemini, DeepSeek, ChatGPT, Claude)"
-                                                >
-                                                    <option value="gemini" className="bg-surface text-white">⚡ Gemini Web</option>
-                                                    <option value="deepseek" className="bg-surface text-white">🧠 DeepSeek Web</option>
-                                                    <option value="chatgpt" className="bg-surface text-white">💬 ChatGPT Web</option>
-                                                    <option value="claude" className="bg-surface text-white">🎭 Claude Web</option>
-                                                </select>
-                                            </div>
+                                        {bridgeProgressMsg && (
+                                          <div className="text-xs text-ink-2 truncate">{bridgeProgressMsg}</div>
                                         )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-1 text-xs text-ink-3">
+                                    <span className="font-semibold text-ink tabular-nums px-1">{selectedCount}/{totalCount} selected</span>
+                                    <button onClick={() => toggleAllSelection(true)} className="btn btn-ghost btn-xs">All</button>
+                                    <button onClick={() => toggleAllSelection(false)} className="btn btn-ghost btn-xs">None</button>
+                                </div>
+                            )}
 
-                                        <label className="px-3.5 py-2 text-slate-200 bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all">
-                                            <Plus className="w-4 h-4 text-accent" />
-                                            ADD
-                                            <input 
-                                                type="file" 
-                                                className="hidden" 
-                                                accept=".pdf,.jpg,.jpeg,.png" 
-                                                multiple 
-                                                onChange={(e) => handleFilesSelected(e.target.files, true)} 
-                                            />
-                                        </label>
+                            <label className="input-group h-8 w-36" title="Select a page range and press Enter">
+                                <Filter className="w-3.5 h-3.5 text-ink-3 shrink-0" />
+                                <input
+                                    type="text"
+                                    placeholder="Range, e.g. 1-5"
+                                    aria-label="Page range"
+                                    value={rangeInput}
+                                    onChange={(e) => setRangeInput(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && applyRangeSelection()}
+                                />
+                            </label>
+
+                            <span className="hidden md:inline-flex items-center gap-3 text-xs text-ink-3" title="Usage in this session">
+                                <span className="flex items-center gap-1"><Type className="w-3.5 h-3.5" /><strong className="text-ink-2 font-semibold tabular-nums">{wordsConsumed.toLocaleString()}</strong> words</span>
+                                <span className="flex items-center gap-1"><Zap className="w-3.5 h-3.5" /><strong className="text-ink-2 font-semibold tabular-nums">{pointsConsumed}</strong> points</span>
+                            </span>
+                        </div>
+
+                        {/* Right: engine, add, export, convert */}
+                        <div className="toolbar xl:justify-end">
+                            {appState !== AppState.ANALYZING && (
+                                <>
+                                    <div className="seg" role="group" aria-label="AI engine">
                                         <button
-                                            onClick={startExtraction}
-                                            disabled={selectedPendingCount === 0 && !hasErrorPages}
-                                            className={`px-4 py-2 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-md ${
-                                                selectedPendingCount === 0 && !hasErrorPages
-                                                    ? 'bg-white/[0.05] text-slate-500 border border-white/[0.04] cursor-not-allowed'
-                                                    : 'bg-accent text-on-accent hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]'
-                                            }`}
+                                            type="button"
+                                            aria-pressed={aiEngine === 'extension'}
+                                            onClick={() => {
+                                                setAiEngine('extension');
+                                                if (!bridgeStatus.connected) {
+                                                    setShowGeminiConnect(true);
+                                                }
+                                            }}
+                                            className="seg-item"
+                                            title={bridgeStatus.connected ? "Zero Token Extension Mode Active" : "Extension not detected - click to connect"}
                                         >
-                                            <Wand2 className="w-4 h-4" /> 
-                                            {hasErrorPages && selectedPendingCount === 0 
-                                                ? 'RETRY' 
-                                                : `CONVERT (${selectedPendingCount})`
-                                            }
+                                            <Bot />
+                                            <span>Free bridge</span>
+                                            <span className={`dot ${bridgeStatus.connected ? 'text-emerald-400' : 'text-amber-400'}`} />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            aria-pressed={aiEngine === 'api'}
+                                            onClick={() => setAiEngine('api')}
+                                            className="seg-item"
+                                            title="Direct Gemini API (Uses API Keys)"
+                                        >
+                                            <Zap />
+                                            <span>API</span>
                                         </button>
                                     </div>
-                                ) : (
-                                    <div className="flex gap-2 flex-1 sm:flex-none">
-                                        {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
-                                            <button 
-                                                onClick={() => {
-                                                    setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending', elements: undefined, extractedText: undefined } : p));
-                                                    startExtraction();
-                                                }}
-                                                className="px-3 py-2 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold hover:bg-rose-500/30 transition-all"
-                                            >
-                                                Retry Failed
-                                            </button>
-                                        )}
-                                        <div className="px-4 py-2 bg-accent/15 border border-accent/30 text-accent-light rounded-xl text-xs font-bold flex items-center justify-center gap-2">
-                                            <RefreshCw className="w-4 h-4 animate-spin" />
-                                            PROCESSING...
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+
+                                    {aiEngine === 'extension' && (
+                                        <select
+                                            value={getStoredAiProvider()}
+                                            onChange={(e) => {
+                                                const newModel = e.target.value as AiProvider;
+                                                setStoredAiProvider(newModel);
+                                                setBridgeStatus(prev => ({ ...prev, provider: newModel }));
+                                            }}
+                                            className="select w-36"
+                                            aria-label="AI model"
+                                            title="Select AI Model (Gemini, DeepSeek, ChatGPT, Claude)"
+                                        >
+                                            <option value="gemini">Gemini web</option>
+                                            <option value="deepseek">DeepSeek web</option>
+                                            <option value="chatgpt">ChatGPT web</option>
+                                            <option value="claude">Claude web</option>
+                                        </select>
+                                    )}
+
+                                    <label className="btn btn-secondary cursor-pointer" title="Add more PDFs or images">
+                                        <Plus />
+                                        Add files
+                                        <input
+                                            type="file"
+                                            className="hidden"
+                                            accept=".pdf,.jpg,.jpeg,.png"
+                                            multiple
+                                            onChange={(e) => handleFilesSelected(e.target.files, true)}
+                                        />
+                                    </label>
+                                </>
+                            )}
+
+                            {hasCompletedPages && (
+                                <>
+                                    <div className="toolbar-divider hidden sm:block" />
+                                    <label className="input-group w-44 sm:w-52" title="Output file name. Rename here before download!">
+                                        <FileText className="w-4 h-4 text-ink-3 shrink-0" />
+                                        <input
+                                            type="text"
+                                            value={fileName}
+                                            onChange={(e) => setFileName(e.target.value)}
+                                            placeholder="File name"
+                                            aria-label="Output file name"
+                                        />
+                                        <span className="text-xs text-ink-3 shrink-0">.docx</span>
+                                    </label>
+                                    <button onClick={copyAllText} className="btn btn-ghost btn-icon" title="Copy all text" aria-label="Copy all text">
+                                        {copySuccess ? <Check className="text-emerald-400" /> : <Copy />}
+                                    </button>
+                                    <button
+                                        onClick={downloadDocx}
+                                        className={`btn ${appState !== AppState.ANALYZING && selectedPendingCount === 0 && !hasErrorPages ? 'btn-primary' : 'btn-secondary'}`}
+                                    >
+                                        <FileDown />
+                                        Download DOCX
+                                    </button>
+                                </>
+                            )}
+
+                            {appState !== AppState.ANALYZING ? (
+                                (selectedPendingCount > 0 || hasErrorPages || !hasCompletedPages) && (
+                                    <button
+                                        onClick={startExtraction}
+                                        disabled={selectedPendingCount === 0 && !hasErrorPages}
+                                        className="btn btn-primary"
+                                    >
+                                        <Wand2 />
+                                        {hasErrorPages && selectedPendingCount === 0
+                                            ? 'Retry failed'
+                                            : `Convert ${selectedPendingCount} page${selectedPendingCount === 1 ? '' : 's'}`}
+                                    </button>
+                                )
+                            ) : (
+                                <>
+                                    {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
+                                        <button
+                                            onClick={() => {
+                                                setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending', elements: undefined, extractedText: undefined } : p));
+                                                startExtraction();
+                                            }}
+                                            className="btn btn-danger"
+                                        >
+                                            Retry failed
+                                        </button>
+                                    )}
+                                    <span className="badge badge-accent h-[34px] px-3 rounded-lg">
+                                        <RefreshCw className="animate-spin" />
+                                        Converting…
+                                    </span>
+                                </>
+                            )}
                         </div>
+                   </div>
 
-                        {/* Bottom Row: Tools & Settings Grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-2 pt-2.5 border-t border-white/[0.06]">
-                            {/* Extraction Mode Toggle */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-amber-500/30 transition-all">
-                                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">Mode</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-300 font-bold">{mcqMode ? 'MCQ Only' : 'Full Text'}</span>
-                                    <button
-                                        onClick={() => setMcqMode(!mcqMode)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${mcqMode ? 'bg-amber-500' : 'bg-white/[0.1]'}`}
-                                        title={mcqMode ? "MCQ mode active. Click to switch to Full Text mode." : "Full Text mode active (Extracts 100% of all text from PDF page). Click to switch to MCQ mode."}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${mcqMode ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Numbers Toggle */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-accent/30 transition-all">
-                                <span className="text-[11px] font-bold text-accent-light uppercase tracking-wider">Numbers</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-400 font-medium">{showMcqNumbers ? 'On' : 'Off'}</span>
-                                    <button
-                                        onClick={() => setShowMcqNumbers(!showMcqNumbers)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showMcqNumbers ? 'bg-accent' : 'bg-white/[0.1]'}`}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${showMcqNumbers ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Auto Proofread */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
-                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Proofread</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-400 font-medium">{autoProofread ? 'Auto' : 'Manual'}</span>
-                                    <button
-                                        onClick={() => setAutoProofread(!autoProofread)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoProofread ? 'bg-accent' : 'bg-white/[0.1]'}`}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${autoProofread ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Numbering Style */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-blue-500/30 transition-all">
-                                <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider">Pattern</span>
-                                <select 
-                                    value={numberingStyle}
-                                    onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
-                                    className="text-[11px] font-bold bg-canvas border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-blue-500"
-                                >
-                                    <option value={NumberingStyle.Q_DOT} className="bg-surface text-slate-200">Q1.</option>
-                                    <option value={NumberingStyle.HASH} className="bg-surface text-slate-200">#1.</option>
-                                    <option value={NumberingStyle.QUESTION_DOT} className="bg-surface text-slate-200">Question 1.</option>
-                                    <option value={NumberingStyle.NUMBER_DOT} className="bg-surface text-slate-200">1.</option>
-                                </select>
-                            </div>
-
-                            {/* Option Arrangement */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
-                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Options Layout</span>
-                                <select 
-                                    value={optionArrangement}
-                                    onChange={(e) => setOptionArrangement(e.target.value as OptionArrangement)}
-                                    className="text-[11px] font-bold bg-canvas border border-white/[0.1] rounded-lg px-1.5 py-1 text-slate-200 cursor-pointer focus:outline-none focus:border-accent"
-                                    title="Choose option arrangement for layout and DOCX export"
-                                >
-                                    <option value={OptionArrangement.VERTICAL} className="bg-surface text-slate-200">Vertical (A-D)</option>
-                                    <option value={OptionArrangement.HORIZONTAL} className="bg-surface text-slate-200">Horizontal (Inline)</option>
-                                    <option value={OptionArrangement.GRID} className="bg-surface text-slate-200">2x2 Grid</option>
-                                </select>
-                            </div>
-
-                            {/* Bilingual */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-emerald-500/30 transition-all">
-                                <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Bilingual</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-400 font-medium">{isBilingual ? 'On' : 'Off'}</span>
-                                    <button
-                                        onClick={() => setIsBilingual(!isBilingual)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${isBilingual ? 'bg-emerald-500' : 'bg-white/[0.1]'}`}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${isBilingual ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Images */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
-                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Images</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-400 font-medium">{includeImages ? 'Keep' : 'Skip'}</span>
-                                    <button
-                                        onClick={() => setIncludeImages(!includeImages)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${includeImages ? 'bg-accent' : 'bg-white/[0.1]'}`}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${includeImages ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Auto Save */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
-                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Auto Save</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-400 font-medium">{autoDownload ? 'On' : 'Off'}</span>
-                                    <button
-                                        onClick={() => setAutoDownload(!autoDownload)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${autoDownload ? 'bg-accent' : 'bg-white/[0.1]'}`}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${autoDownload ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Refine Mode */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-rose-500/30 transition-all">
-                                <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Refine</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-400 font-medium">{refineMode ? 'Active' : 'A-Z'}</span>
-                                    <button
-                                        onClick={() => setRefineMode(!refineMode)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${refineMode ? 'bg-rose-500' : 'bg-white/[0.1]'}`}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${refineMode ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            {/* Answers Toggle */}
-                            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/20 transition-all">
-                                <span className="text-[11px] font-bold text-ink-3 uppercase tracking-wider">Answers</span>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[11px] text-slate-400 font-medium">{showAnswers ? 'On' : 'Off'}</span>
-                                    <button
-                                        onClick={() => setShowAnswers(!showAnswers)}
-                                        className={`w-8 h-4 rounded-full transition-all flex items-center px-0.5 ${showAnswers ? 'bg-accent' : 'bg-white/[0.1]'}`}
-                                    >
-                                        <div className={`w-3 h-3 rounded-full bg-slate-900 transition-transform ${showAnswers ? 'translate-x-4' : 'translate-x-0'}`} />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Extra Navigation Badges */}
-                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/[0.04]">
+                   {/* Output options */}
+                   <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 border-t border-line bg-white/[0.015]">
+                        <span className="text-xs font-semibold text-ink-3 mr-1">Output</span>
+                        <div className="seg seg-sm" role="group" aria-label="Extraction mode">
                             <button
-                                onClick={() => setIsHistoryOpen(true)}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/[0.06] transition-all"
+                                type="button"
+                                aria-pressed={!mcqMode}
+                                onClick={() => setMcqMode(false)}
+                                className="seg-item"
+                                title="Full Text mode: extracts 100% of all text from each page"
                             >
-                                <Clock className="w-3.5 h-3.5 text-blue-400" />
-                                <span>History</span>
+                                Full text
                             </button>
                             <button
-                                onClick={() => setIsMcqSidebarOpen(true)}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white rounded-lg text-xs font-medium border border-white/[0.06] transition-all"
+                                type="button"
+                                aria-pressed={mcqMode}
+                                onClick={() => setMcqMode(true)}
+                                className="seg-item"
+                                title="MCQ mode: questions, options and answers only"
                             >
-                                <ListChecks className="w-3.5 h-3.5 text-accent" />
-                                <span>MCQ Bank</span>
-                            </button>
-                            <button
-                                onClick={handleOpenMocktestStudio}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-300 hover:text-white rounded-lg text-xs font-bold border border-emerald-500/30 transition-all shadow-sm"
-                                title="Open in 18-Field MockTest CSV Studio"
-                            >
-                                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>MockTest Studio (CSV)</span>
+                                MCQ only
                             </button>
                         </div>
+                        <ToggleChip on={isBilingual} onClick={() => setIsBilingual(!isBilingual)} label="Bilingual" />
+                        <ToggleChip on={refineMode} onClick={() => setRefineMode(!refineMode)} label="Refine" title="Remove exam tags, shift dates, page numbers and watermarks" />
+                        <ToggleChip on={autoProofread} onClick={() => setAutoProofread(!autoProofread)} label="Auto proofread" />
+                        <ToggleChip on={includeImages} onClick={() => setIncludeImages(!includeImages)} label="Keep images" />
+                        <ToggleChip on={showMcqNumbers} onClick={() => setShowMcqNumbers(!showMcqNumbers)} label="Numbers" title="Show question numbers" />
+                        <ToggleChip on={showAnswers} onClick={() => setShowAnswers(!showAnswers)} label="Answers" title="Show answers" />
+                        <ToggleChip on={autoDownload} onClick={() => setAutoDownload(!autoDownload)} label="Auto-download" title="Download the DOCX automatically when conversion finishes" />
+                        <select
+                            value={numberingStyle}
+                            onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
+                            className="select select-sm w-auto"
+                            aria-label="Question numbering pattern"
+                            title="Question numbering pattern"
+                        >
+                            <option value={NumberingStyle.Q_DOT}>Q1.</option>
+                            <option value={NumberingStyle.HASH}>#1.</option>
+                            <option value={NumberingStyle.QUESTION_DOT}>Question 1.</option>
+                            <option value={NumberingStyle.NUMBER_DOT}>1.</option>
+                        </select>
+                        <select
+                            value={optionArrangement}
+                            onChange={(e) => setOptionArrangement(e.target.value as OptionArrangement)}
+                            className="select select-sm w-auto"
+                            aria-label="Option layout"
+                            title="Choose option arrangement for layout and DOCX export"
+                        >
+                            <option value={OptionArrangement.VERTICAL}>Options: vertical</option>
+                            <option value={OptionArrangement.HORIZONTAL}>Options: inline</option>
+                            <option value={OptionArrangement.GRID}>Options: 2×2 grid</option>
+                        </select>
                    </div>
                 </div>
 
-                {/* Error Banner */}
+                {/* Error banner */}
                 <AnimatePresence>
                     {errorMsg && (
-                        <motion.div 
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className="p-4 bg-[#3A1A1A] text-rose-400 rounded-[12px] border border-rose-500/30 flex flex-col gap-3 mt-4 shadow-xl"
+                        <motion.div
+                            initial={{ opacity: 0, y: -6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            className="callout callout-danger flex-col gap-3 p-4"
+                            role="alert"
                         >
                             <div className="flex items-start gap-3">
-                                <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-rose-400" />
+                                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-rose-400" />
                                 <div>
-                                    <h4 className="font-bold text-[14px] uppercase tracking-wider text-rose-400">Processing Interrupted</h4>
-                                    <p className="text-[13px] mt-1 text-ink leading-relaxed">{errorMsg}</p>
+                                    <h4 className="font-semibold text-sm text-rose-200">Processing interrupted</h4>
+                                    <p className="text-sm mt-1 text-ink-2 leading-relaxed">{errorMsg}</p>
                                 </div>
                             </div>
                             <div className="flex gap-2 pl-8">
-                                <button 
-                                    onClick={retryAllErrors}
-                                    className="px-4 py-2 bg-rose-600 text-white rounded-[8px] text-[12px] font-bold flex items-center gap-2 hover:bg-rose-500 transition-all shadow-lg active:scale-95"
-                                >
-                                    <RefreshCw className="w-3.5 h-3.5" />
-                                    Retry All Failed Pages
+                                <button onClick={retryAllErrors} className="btn btn-danger-solid btn-sm">
+                                    <RefreshCw />
+                                    Retry failed pages
                                 </button>
-                                <button 
-                                    onClick={() => setErrorMsg(null)}
-                                    className="px-4 py-2 bg-transparent border border-rose-500/30 text-rose-400 rounded-[8px] text-[12px] font-bold hover:bg-rose-600/10 transition-all active:scale-95"
-                                >
+                                <button onClick={() => setErrorMsg(null)} className="btn btn-ghost btn-sm">
                                     Dismiss
                                 </button>
                             </div>
@@ -1777,35 +1622,30 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                 </AnimatePresence>
 
                 {hasErrorPages && !errorMsg && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
+                    <motion.div
+                        initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3 p-4 bg-[#1A1111] border border-rose-500/20 rounded-[12px]"
+                        className="callout callout-danger flex-col sm:flex-row sm:items-center justify-between gap-3 p-4"
                     >
                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-[#3A1A1A] flex items-center justify-center">
-                                <AlertCircle className="w-4 h-4 text-rose-400" />
-                            </div>
+                            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
                             <div>
-                                <h5 className="text-[12px] font-bold text-ink">Some pages failed to process</h5>
-                                <p className="text-[11px] text-ink-3">You can retry them all at once or individually.</p>
+                                <h5 className="text-sm font-semibold text-ink">Some pages failed to convert</h5>
+                                <p className="text-xs text-ink-3">Retry them all at once, or one by one below.</p>
                             </div>
                         </div>
-                        <button 
-                            onClick={retryAllErrors}
-                            className="w-full sm:w-auto px-4 py-2 bg-rose-600 text-white rounded-[8px] text-[12px] font-bold flex items-center justify-center gap-2 hover:bg-rose-500 transition-all shadow-md active:scale-95"
-                        >
-                            <RefreshCw className="w-3.5 h-3.5" />
-                            Retry {pages.filter(p => p.status === 'error').length} Failed Pages
+                        <button onClick={retryAllErrors} className="btn btn-danger-solid btn-sm">
+                            <RefreshCw />
+                            Retry {pages.filter(p => p.status === 'error').length} failed pages
                         </button>
                     </motion.div>
                 )}
 
                 {/* Grid of Pages */}
-                <ProcessingList 
-                    pages={pages} 
-                    onUpdateText={updatePageText} 
-                    onRetry={retryPage} 
+                <ProcessingList
+                    pages={pages}
+                    onUpdateText={updatePageText}
+                    onRetry={retryPage}
                     onRecapture={handleRecapturePage}
                     onToggleSelection={togglePageSelection}
                     includeImages={includeImages}
@@ -1818,7 +1658,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
            )}
         </main>
 
-        <HistorySidebar 
+        <HistorySidebar
           history={history}
           isOpen={isHistoryOpen}
           onClose={() => setIsHistoryOpen(false)}
@@ -1827,7 +1667,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           onClearAll={handleClearAllHistory}
         />
 
-        <McqSidebar 
+        <McqSidebar
           isOpen={isMcqSidebarOpen}
           onClose={() => setIsMcqSidebarOpen(false)}
           pages={pages}
@@ -1838,215 +1678,77 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           showAnswers={showAnswers}
         />
 
-        {/* SEO & Feature Deep Dive Section */}
-        <div className="mt-28 border-t border-white/[0.08] pt-20 pb-16">
-            <div className="max-w-5xl mx-auto px-4 box-border">
-                
-                <motion.div 
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    className="text-center mb-16"
-                >
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-xs font-bold text-accent-light uppercase tracking-wider mb-4">
-                        <Layers className="w-3.5 h-3.5 text-accent" />
-                        <span>Why Choose Our AI Digitizer?</span>
-                    </div>
-                    <h2 className="text-3xl sm:text-4xl md:text-5xl font-semibold text-white mb-4 tracking-tight font-display">
-                        Engineered specifically for <br className="hidden sm:block" />
-                        <span className="text-accent-light">
-                            Exams, Formulas & Structured Books
-                        </span>
-                    </h2>
-                    <p className="text-slate-400 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed">
-                        We don't just dump plain OCR text. Our vision model reads document hierarchy, cleans exam junk tags, extracts formulas into Word Math, and arranges bilingual lines automatically.
-                    </p>
-                </motion.div>
+        {/* Features & FAQ (only before a document is loaded) */}
+        {pages.length === 0 && (
+          <div className="pt-10 space-y-12">
+            <section>
+              <h2 className="font-display text-xl font-bold tracking-tight text-ink mb-5">What you get</h2>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { icon: <Wand2 />, title: 'Accurate OCR', desc: 'Reads blurry scans, shaded backgrounds and low-contrast prints.' },
+                  { icon: <Layout />, title: 'Native Word math', desc: 'Fractions, roots and powers become editable OMML equations.' },
+                  { icon: <Layers />, title: 'Layout aware', desc: 'Headers, columns, options (a)–(d) and multi-row tables stay in order.' },
+                  { icon: <ListChecks />, title: 'Exam refiner', desc: 'Strips exam tags, shift dates and watermarks from questions.' },
+                ].map((f) => (
+                  <div key={f.title} className="panel p-4">
+                    <span className="w-9 h-9 rounded-lg flex items-center justify-center bg-white/[0.04] border border-line text-ink-2 mb-3 [&>svg]:w-[18px] [&>svg]:h-[18px]">{f.icon}</span>
+                    <h3 className="font-semibold text-ink mb-1">{f.title}</h3>
+                    <p className="text-sm text-ink-3 leading-relaxed">{f.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
 
-                {/* 3 Pillars Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-24">
-                    {[
-                        { 
-                            title: "Human-Quality OCR", 
-                            desc: "Deciphers blurry scans, handwritten notes, shaded backgrounds, and low-contrast test prints without mangling words.",
-                            icon: <Wand2 className="w-6 h-6 text-accent" />,
-                            color: "from-orange-500/20 to-transparent"
-                        },
-                        { 
-                            title: "Real Word Math (OMML)", 
-                            desc: "Transforms continued fractions, roots, square powers, and algebraic symbols into native editable Microsoft Word math objects.",
-                            icon: <Layout className="w-6 h-6 text-blue-400" />,
-                            color: "from-blue-500/20 to-transparent"
-                        },
-                        { 
-                            title: "MCQ & Exam Refiner", 
-                            desc: "Filters out previous year exam tags, shift dates, and watermarks to output clean Questions, Options, and Answers.",
-                            icon: <ListChecks className="w-6 h-6 text-emerald-400" />,
-                            color: "from-emerald-500/20 to-transparent"
-                        }
-                    ].map((feature, i) => (
-                        <motion.div 
-                            key={i}
-                            initial={{ opacity: 0, y: 20 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true }}
-                            transition={{ delay: i * 0.1 }}
-                            className="glass-panel glass-panel-hover p-6 sm:p-7 rounded-2xl flex flex-col items-start text-left relative overflow-hidden group"
-                        >
-                            <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
-                                {feature.icon}
-                            </div>
-                            <h3 className="text-base sm:text-lg font-bold text-white mb-2 font-display">{feature.title}</h3>
-                            <p className="text-slate-400 text-xs sm:text-sm leading-relaxed">{feature.desc}</p>
-                        </motion.div>
-                    ))}
-                </div>
+            <section>
+              <h2 className="font-display text-xl font-bold tracking-tight text-ink mb-5">Frequently asked questions</h2>
+              <div className="card divide-y divide-line">
+                {[
+                  {
+                    q: "How does the AI handle complex mathematical formulas?",
+                    a: "Formulas, fractions (\\frac{a}{b}), roots, and superscripts are transcribed into standard LaTeX and converted directly into native Microsoft Word Math (OMML) objects upon download."
+                  },
+                  {
+                    q: "Can I extract large tables with multiple rows?",
+                    a: "Yes. There are no row limits. Tables of any length are recreated as native, editable Word tables with borders and header shading."
+                  },
+                  {
+                    q: "What does the Refine option do?",
+                    a: "When Refine is on, the AI strips previous year exam tags (e.g. SSC CGL 2022 Shift-II), book headers, page numbers, and publisher branding to leave only questions and options."
+                  },
+                  {
+                    q: "How does Bilingual mode work?",
+                    a: "In Bilingual mode, a Hindi question gets its English translation below it, and options are formatted on a single line as '(a) Hindi / English'."
+                  },
+                  {
+                    q: "Are my uploaded documents private?",
+                    a: "Files are sent over encrypted HTTPS and processed in memory without permanent cloud storage."
+                  },
+                  {
+                    q: "What file formats can I upload?",
+                    a: "PDF documents, scanned images (JPG, JPEG, PNG, WEBP), or screenshots pasted with Ctrl+V."
+                  }
+                ].map((faq) => (
+                  <details key={faq.q} className="group px-4 sm:px-5">
+                    <summary className="flex items-center justify-between gap-4 py-4 cursor-pointer list-none text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+                      {faq.q}
+                      <Plus className="w-4 h-4 text-ink-3 shrink-0 transition-transform group-open:rotate-45" />
+                    </summary>
+                    <p className="pb-4 -mt-1 text-sm text-ink-3 leading-relaxed">{faq.a}</p>
+                  </details>
+                ))}
+              </div>
+            </section>
 
-                {/* Interactive Preview Mockup Section */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center mb-28">
-                    <motion.div 
-                        initial={{ opacity: 0, x: -20 }}
-                        whileInView={{ opacity: 1, x: 0 }}
-                        viewport={{ once: true }}
-                    >
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-xs font-bold text-blue-400 mb-4">
-                            <span>Universal Vision Intelligence</span>
-                        </div>
-                        <h2 className="text-2xl sm:text-3xl lg:text-4xl font-semibold text-white mb-4 font-display">
-                            Intelligent <span className="text-accent">Document Layout</span> Understanding
-                        </h2>
-                        <div className="space-y-4 text-slate-400 text-xs sm:text-sm leading-relaxed">
-                            <p>
-                                Traditional OCR engines read text line-by-line without understanding structure, causing multi-column text to overlap and formulas to turn into broken characters.
-                            </p>
-                            <p>
-                                TextExtract's vision pipeline understands document geometry: distinguishing headers, nested equations, question numbers, options <strong className="text-slate-200">(a)-(d)</strong>, and multi-row tables effortlessly.
-                            </p>
-                            <div className="pt-3 grid grid-cols-3 gap-3">
-                                <div className="glass-panel p-3.5 rounded-xl text-center">
-                                    <div className="text-xl font-semibold text-white font-display">4x</div>
-                                    <div className="text-[11px] uppercase font-bold text-slate-500 mt-0.5">Faster Digitizing</div>
-                                </div>
-                                <div className="glass-panel p-3.5 rounded-xl text-center">
-                                    <div className="text-xl font-semibold text-emerald-400 font-display">100%</div>
-                                    <div className="text-[11px] uppercase font-bold text-slate-500 mt-0.5">Math Accuracy</div>
-                                </div>
-                                <div className="glass-panel p-3.5 rounded-xl text-center">
-                                    <div className="text-xl font-semibold text-accent-light font-display">DOCX</div>
-                                    <div className="text-[11px] uppercase font-bold text-slate-500 mt-0.5">Word Native</div>
-                                </div>
-                            </div>
-                        </div>
-                    </motion.div>
-
-                    {/* Realistic Visual Mockup */}
-                    <motion.div 
-                        initial={{ opacity: 0, x: 20 }}
-                        whileInView={{ opacity: 1, x: 0 }}
-                        viewport={{ once: true }}
-                        className="glass-panel p-5 rounded-2xl relative shadow-2xl border-white/[0.1] bg-surface"
-                    >
-                        <div className="flex items-center justify-between pb-3 border-b border-white/[0.06] mb-3">
-                            <div className="flex items-center gap-1.5">
-                                <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
-                                <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
-                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
-                            </div>
-                            <span className="text-[11px] font-mono text-slate-500">Live Digitizer Preview</span>
-                        </div>
-
-                        <div className="space-y-3 font-mono text-xs">
-                            <div className="p-2.5 bg-white/[0.03] rounded-lg border border-white/[0.05]">
-                                <span className="text-accent-light font-bold">Question 1.</span> <span className="text-slate-200">सबसे छोटी अभाज्य संख्या कौन-सी है?</span>
-                                <div className="text-slate-400 text-[11px] mt-0.5">Which is the smallest prime number?</div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-[11px]">
-                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
-                                    <span className="text-amber-400 font-bold">(a)</span> 0
-                                </div>
-                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
-                                    <span className="text-amber-400 font-bold">(b)</span> 1
-                                </div>
-                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
-                                    <span className="text-amber-400 font-bold">(c)</span> 2
-                                </div>
-                                <div className="p-2 bg-white/[0.02] rounded-md border border-white/[0.04] text-slate-300">
-                                    <span className="text-amber-400 font-bold">(d)</span> 3
-                                </div>
-                            </div>
-                            <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-[11px] text-emerald-400 font-bold flex items-center justify-between">
-                                <span>Answer: C</span>
-                                <span className="text-[11px] bg-emerald-500/20 px-1.5 py-0.5 rounded text-emerald-300">Verified</span>
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
-
-                {/* FAQ Section */}
-                <section className="mb-24">
-                    <div className="text-center mb-12">
-                        <h2 className="text-2xl sm:text-3xl font-semibold text-white mb-2 font-display">Frequently Asked Questions</h2>
-                        <p className="text-slate-400 text-xs sm:text-sm">Everything you need to know about the conversion engine.</p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-                        {[
-                            {
-                                q: "How does the AI handle complex mathematical formulas?",
-                                a: "Formulas, fractions (\\frac{a}{b}), roots, and superscripts are transcribed into standard LaTeX and converted directly into native Microsoft Word Math (OMML) objects upon download."
-                            },
-                            {
-                                q: "Can I extract large tables with multiple rows?",
-                                a: "Yes! There are no row limits. Tables of any length (15, 50, 100+ rows) are recreated as 100% native, editable Word tables with custom borders and header shading."
-                            },
-                            {
-                                q: "What does the 'Refine' toggle do?",
-                                a: "When Refine is active, the AI automatically strips previous year exam tags (e.g. SSC CGL 2022 Shift-II), book headers, page numbers, and publisher branding to leave only pure questions and options."
-                            },
-                            {
-                                q: "How does Bilingual translation work?",
-                                a: "In Bilingual mode, if a question is in Hindi, it automatically adds the English translation below it. Options are neatly formatted on a single line as '(a) Hindi / English'."
-                            },
-                            {
-                                q: "Are my uploaded documents secure and private?",
-                                a: "Yes. Files are transmitted over encrypted HTTPS channels and processed transiently in memory without permanent cloud storage. Your data remains 100% private."
-                            },
-                            {
-                                q: "What file formats can I upload?",
-                                a: "You can upload PDF documents, scanned images (JPG, JPEG, PNG, WEBP), or paste screenshots directly using Ctrl+V."
-                            }
-                        ].map((faq, i) => (
-                            <motion.div 
-                                key={i}
-                                initial={{ opacity: 0, y: 15 }}
-                                whileInView={{ opacity: 1, y: 0 }}
-                                viewport={{ once: true }}
-                                transition={{ delay: i * 0.05 }}
-                                className="glass-panel p-5 sm:p-6 rounded-2xl hover:border-accent/40 transition-all"
-                            >
-                                <h4 className="text-sm sm:text-base font-bold text-white mb-2 font-display flex items-start gap-2">
-                                    <span className="text-accent">•</span>
-                                    <span>{faq.q}</span>
-                                </h4>
-                                <p className="text-slate-400 text-xs sm:text-sm leading-relaxed pl-3.5">{faq.a}</p>
-                            </motion.div>
-                        ))}
-                    </div>
-                </section>
-
-                {/* Footer */}
-                <footer className="pt-12 border-t border-white/[0.08] text-center space-y-4">
-                    <div className="flex flex-wrap justify-center gap-6 text-slate-400 text-xs font-semibold">
-                        <a href="#" className="hover:text-accent-light transition-colors">Privacy Policy</a>
-                        <a href="#" className="hover:text-accent-light transition-colors">Terms of Service</a>
-                        <a href="#" className="hover:text-accent-light transition-colors">Contact Support</a>
-                    </div>
-                    <p className="text-slate-500 text-xs font-medium">
-                        © 2026 TextExtract AI Pro. Powered by Google Gemini Vision OCR & Word OMML Engine.
-                    </p>
-                </footer>
-            </div>
-        </div>
+            <footer className="pt-6 border-t border-line flex flex-wrap items-center justify-between gap-3 text-xs text-ink-3">
+              <span>© 2026 TextExtract AI Pro · Gemini Vision OCR and Word OMML</span>
+              <span className="flex gap-4">
+                <a href="#" className="hover:text-ink">Privacy</a>
+                <a href="#" className="hover:text-ink">Terms</a>
+                <a href="#" className="hover:text-ink">Support</a>
+              </span>
+            </footer>
+          </div>
+        )}
       </div>
 
       <GeminiConnectModal

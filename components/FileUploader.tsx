@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Upload, FileText, Image as ImageIcon, Sparkles, AlertCircle } from 'lucide-react';
+import { Upload, FileText, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface FileUploaderProps {
@@ -73,18 +73,15 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
   }, [isLoading, onFilesSelected]);
 
   return (
-    <div className="w-full max-w-3xl mx-auto" onPaste={handlePaste}>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
+    <div className="w-full" onPaste={handlePaste}>
+      <div
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`relative group border-2 border-dashed rounded-2xl p-6 sm:p-10 text-center transition-all duration-300 ease-in-out ${
-          isDragActive 
-            ? 'border-accent bg-accent/10 scale-[1.01] shadow-2xl ' 
-            : 'border-white/[0.12] bg-surface/80 backdrop-blur-xl hover:border-accent/60 hover:bg-surface'
+        className={`relative border border-dashed rounded-[14px] px-6 py-12 text-center transition-colors ${
+          isDragActive
+            ? 'border-accent bg-accent/[0.06]'
+            : 'border-line-strong bg-surface hover:border-accent/50 hover:bg-surface-2'
         } ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
       >
         <input
@@ -97,67 +94,49 @@ const FileUploader: React.FC<FileUploaderProps> = ({ onFilesSelected, isLoading 
           disabled={isLoading}
         />
         <label htmlFor="fileInput" className="cursor-pointer flex flex-col items-center gap-4">
-          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-300 shadow-xl ${
-            isDragActive 
-              ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]' 
-              : 'bg-white/[0.05] border border-white/[0.08] text-slate-400 group-hover:text-white group-hover:bg-accent/15 group-hover:border-accent/30'
+          <span className={`w-14 h-14 rounded-xl flex items-center justify-center border transition-colors ${
+            isDragActive ? 'bg-accent text-on-accent border-accent' : 'bg-accent/10 border-accent/25 text-accent-light'
           }`}>
-            <Upload className="w-7 h-7" />
-          </div>
-          
-          <div className="space-y-1.5">
-            <h3 className="text-lg sm:text-xl font-bold text-white font-display tracking-tight">
-              Drop your documents or exam papers here
-            </h3>
-            <p className="text-slate-400 text-xs sm:text-sm">
-              or <span className="text-accent-light font-semibold underline decoration-accent/50 underline-offset-4 hover:text-accent">browse your device</span>
-            </p>
-            <p className="text-slate-500 text-xs pt-1 flex items-center justify-center gap-1.5">
-              <span>Paste directly using</span> 
-              <kbd className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.1] rounded-md text-slate-300 font-mono text-[11px] shadow-sm">Ctrl+V</kbd> / <kbd className="px-2 py-0.5 bg-white/[0.06] border border-white/[0.1] rounded-md text-slate-300 font-mono text-[11px] shadow-sm">Cmd+V</kbd>
-            </p>
-          </div>
+            <Upload className="w-6 h-6" />
+          </span>
 
-          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] border border-white/[0.06] rounded-xl text-xs font-semibold text-slate-300">
-              <FileText className="w-3.5 h-3.5 text-blue-400" />
-              PDF Documents
-            </div>
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/[0.04] border border-white/[0.06] rounded-xl text-xs font-semibold text-slate-300">
-              <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
-              Scanned Images (JPG, PNG)
-            </div>
-            <div className="text-xs text-slate-500 font-medium px-2 py-1">
-              Max 50MB
-            </div>
-          </div>
+          <span className="space-y-1.5">
+            <span className="block text-lg font-semibold text-ink font-display">
+              {isDragActive ? 'Drop to upload' : 'Drop a PDF or scanned pages here'}
+            </span>
+            <span className="block text-sm text-ink-3">
+              or <span className="text-accent-light font-semibold underline decoration-accent/40 underline-offset-4">browse your device</span>
+              <span className="hidden sm:inline"> · paste with <kbd className="px-1.5 py-0.5 bg-surface-3 border border-line-strong rounded text-ink-2 font-mono text-[11px]">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 bg-surface-3 border border-line-strong rounded text-ink-2 font-mono text-[11px]">V</kbd></span>
+            </span>
+          </span>
+
+          <span className="flex flex-wrap items-center justify-center gap-2 pt-1">
+            <span className="badge badge-neutral"><FileText />PDF</span>
+            <span className="badge badge-neutral"><ImageIcon />JPG, PNG, WEBP</span>
+            <span className="text-xs text-ink-3">Up to 50 MB</span>
+          </span>
+
+          <span className="btn btn-primary mt-1">
+            <Upload />
+            Choose files
+          </span>
         </label>
 
         <AnimatePresence>
-          {isDragActive && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-accent/10 rounded-2xl pointer-events-none border-2 border-accent"
-            />
-          )}
-        </AnimatePresence>
-        
-        <AnimatePresence>
           {error && (
             <motion.div
-              initial={{ opacity: 0, y: -10 }}
+              initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="mt-4 p-3 bg-rose-500/15 border border-rose-500/30 text-rose-300 rounded-xl text-xs flex items-center justify-center gap-2"
+              exit={{ opacity: 0, y: -6 }}
+              className="callout callout-danger items-center justify-center mt-5 max-w-lg mx-auto"
+              role="alert"
             >
-              <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
+      </div>
     </div>
   );
 };

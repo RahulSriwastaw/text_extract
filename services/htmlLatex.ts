@@ -23,6 +23,35 @@ export const HTML_LATEX_FORMAT_RULES = `- OUTPUT FORMAT = CLEAN HTML + LaTeX (th
   * JSON safety: double every LaTeX backslash inside JSON strings (e.g. "$\\\\frac{1}{2}$") and never put double quotes inside HTML tags (tags need no attributes).`;
 
 // ---------------------------------------------------------------------------
+// Inline SVG support
+// ---------------------------------------------------------------------------
+
+const SVG_BLOCK_RE = /<svg\b[\s\S]*?<\/svg\s*>/gi;
+
+function svgToDataUri(svg: string): string {
+  let s = svg.trim();
+  // Never keep active content; an <img> data URI cannot run scripts anyway, this is belt and braces.
+  s = s.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '');
+  s = s.replace(/&nbsp;/g, '&#160;');
+  if (!/^<svg[^>]*\sxmlns\s*=/i.test(s)) s = s.replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  if (/xlink:/i.test(s) && !/xmlns:xlink/i.test(s)) s = s.replace(/^<svg/i, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+  const enc = encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `data:image/svg+xml;charset=utf-8,${enc}`;
+}
+
+/** Converts inline <svg>…</svg> blocks into <img> tags with an SVG data URI (renders safely everywhere). */
+export function svgBlocksToImg(text: string): string {
+  if (!text || !/<svg\b/i.test(text)) return text;
+  return text.replace(SVG_BLOCK_RE, svg => `<img src="${svgToDataUri(svg)}" alt="figure" class="svg-figure">`);
+}
+
+/** Same as svgBlocksToImg but emits Markdown image syntax (for ReactMarkdown previews). */
+export function svgBlocksToMarkdown(text: string): string {
+  if (!text || !/<svg\b/i.test(text)) return text;
+  return text.replace(SVG_BLOCK_RE, svg => `\n\n![figure](${svgToDataUri(svg)})\n\n`);
+}
+
+// ---------------------------------------------------------------------------
 // Math protection
 // ---------------------------------------------------------------------------
 
@@ -402,8 +431,8 @@ function markdownInlineToHtml(text: string): string {
  */
 export function normalizeHtmlLatex(input: string): string {
   if (!input || !input.trim()) return '';
-  const { text, math } = protectMath(input.replace(/\r\n?/g, '\n'));
-  let s = markdownInlineToHtml(markdownTablesToHtml(text));
+  const { text, math } = protectMath(svgBlocksToImg(input).replace(/\r\n?/g, '\n'));
+  let s =markdownInlineToHtml(markdownTablesToHtml(text));
   s = serialize(blockify(parseHtml(s)));
   return restoreMath(s, math, seg => {
     const tex = normalizeMathTex(seg.tex);

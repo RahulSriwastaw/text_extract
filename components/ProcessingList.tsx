@@ -1,5 +1,19 @@
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
+import { svgBlocksToMarkdown } from '../services/htmlLatex';
+
+/** remark-math only understands $…$ / $$…$$; convert \( \) and \[ \] and tidy common LaTeX glitches. */
+function normalizePreviewMath(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_m, t) => `\n\n$$\n${t.trim()}\n$$\n\n`)
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_m, t) => `$${t.trim()}$`)
+    .replace(/\\begin\{align\*?\}/g, '\\begin{aligned}')
+    .replace(/\\end\{align\*?\}/g, '\\end{aligned}')
+    .replace(/\\begin\{gather\*?\}/g, '\\begin{gathered}')
+    .replace(/\\end\{gather\*?\}/g, '\\end{gathered}')
+    .replace(/\\cosec\b/g, '\\csc');
+}
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
@@ -148,213 +162,186 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
   };
 
   return (
-    <div className="mt-8 grid grid-cols-1 gap-6">
+    <div className="grid grid-cols-1 gap-4">
       {pages.map((page) => (
-        <div 
-            key={page.id} 
-            className={`glass-panel rounded-2xl overflow-hidden shadow-xl flex flex-col md:flex-row h-auto min-h-[260px] transition-all duration-300 ${
-                page.isSelected 
-                  ? 'border-white/[0.15] ring-2 ring-accent/40 bg-surface/80' 
-                  : 'border-white/[0.05] opacity-80 hover:opacity-100 bg-canvas/60'
+        <article
+            key={page.id}
+            className={`card overflow-hidden flex flex-col md:flex-row min-h-[260px] transition-colors ${
+                page.isSelected ? 'border-accent/35' : 'opacity-80 hover:opacity-100'
             }`}
         >
-          
-          {/* Image Thumbnail Side */}
-          <div 
-            className="w-full md:w-1/4 bg-canvas relative group border-b md:border-b-0 md:border-r border-white/[0.08] cursor-pointer flex items-center justify-center p-3"
-            onClick={() => onToggleSelection(page.id)}
-          >
-            <img 
-              src={page.imageUrl} 
-              alt={`Page ${page.pageNumber}`} 
-              className="w-full max-h-[300px] object-contain rounded-lg transition-transform duration-300 group-hover:scale-[1.02]" 
-            />
-            
-            {/* Bounding Box Overlays */}
-            {includeImages && page.status === 'done' && page.elements && page.elements.map((el, index) => (
-                el.type === 'image' && el.bbox && (
-                    <div 
-                        key={`overlay-${el.id || index}`}
-                        className="absolute border-2 border-emerald-400 bg-emerald-400/10 pointer-events-none rounded"
-                        style={{
-                            top: `${(Math.min(el.bbox.ymin, el.bbox.ymax) / 1000) * 100}%`,
-                            left: `${(Math.min(el.bbox.xmin, el.bbox.xmax) / 1000) * 100}%`,
-                            width: `${Math.abs(el.bbox.xmax - el.bbox.xmin) / 1000 * 100}%`,
-                            height: `${Math.abs(el.bbox.ymax - el.bbox.ymin) / 1000 * 100}%`,
-                        }}
-                    >
-                        <span className="absolute -top-3.5 left-0 bg-emerald-500 text-slate-950 text-[8px] px-1 rounded font-bold uppercase">Diagram</span>
-                    </div>
-                )
-            ))}
-
-            {/* Selection Checkbox */}
-            <div className="absolute top-3 left-3 z-10">
-                <div className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-all ${
-                    page.isSelected 
-                        ? 'bg-accent border-accent text-on-accent shadow-md ' 
-                        : 'bg-canvas/80 border-white/[0.2] hover:border-white/[0.4]'
-                }`}>
-                    {page.isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                </div>
+          {/* Page image side (click toggles selection) */}
+          <div className="w-full md:w-1/4 md:min-w-[220px] bg-canvas/60 border-b md:border-b-0 md:border-r border-line p-3 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none" title="Include this page in conversion">
+                <input
+                  type="checkbox"
+                  checked={!!page.isSelected}
+                  onChange={() => onToggleSelection(page.id)}
+                  className="w-4 h-4 cursor-pointer"
+                />
+                <span className="text-sm font-semibold text-ink">Page {page.pageNumber}</span>
+              </label>
+              {page.status === 'processing' && (
+                <span className="badge badge-accent"><Loader2 className="animate-spin" /> Converting</span>
+              )}
+              {page.status === 'done' && (
+                <span className="badge badge-success"><CheckCircle2 /> Ready</span>
+              )}
+              {page.status === 'error' && (
+                <span className="badge badge-danger"><AlertCircle /> Error</span>
+              )}
+              {page.status === 'pending' && (
+                <span className="badge badge-neutral">Pending</span>
+              )}
             </div>
 
-            <div className="absolute top-3 left-10 bg-slate-900/80 text-slate-200 text-[11px] font-bold px-2 py-0.5 rounded-md backdrop-blur-md border border-white/[0.08]">
-                Page {page.pageNumber}
-            </div>
-            
-            {/* Status Badge */}
-            <div className="absolute top-3 right-3">
-               {page.status === 'processing' && (
-                 <span className="bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
-                   <Loader2 className="w-3 h-3 animate-spin" /> Digitizing...
-                 </span>
-               )}
-               {page.status === 'done' && (
-                 <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
-                   <CheckCircle2 className="w-3 h-3" /> Ready
-                 </span>
-               )}
-               {page.status === 'error' && (
-                 <span className="bg-rose-500/15 border border-rose-500/30 text-rose-400 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-sm">
-                   <AlertCircle className="w-3 h-3" /> Error
-                 </span>
-               )}
-            </div>
+            <button
+              type="button"
+              className="relative rounded-[10px] overflow-hidden border border-line bg-white/[0.03] flex items-center justify-center"
+              onClick={() => onToggleSelection(page.id)}
+              title={page.isSelected ? 'Deselect page' : 'Select page'}
+            >
+              <img
+                src={page.imageUrl}
+                alt={`Page ${page.pageNumber}`}
+                className="w-full max-h-[300px] object-contain"
+              />
+
+              {/* Detected diagram overlays */}
+              {includeImages && page.status === 'done' && page.elements && page.elements.map((el, index) => (
+                  el.type === 'image' && el.bbox && (
+                      <span
+                          key={`overlay-${el.id || index}`}
+                          className="absolute border-2 border-emerald-400 bg-emerald-400/10 pointer-events-none rounded"
+                          style={{
+                              top: `${(Math.min(el.bbox.ymin, el.bbox.ymax) / 1000) * 100}%`,
+                              left: `${(Math.min(el.bbox.xmin, el.bbox.xmax) / 1000) * 100}%`,
+                              width: `${Math.abs(el.bbox.xmax - el.bbox.xmin) / 1000 * 100}%`,
+                              height: `${Math.abs(el.bbox.ymax - el.bbox.ymin) / 1000 * 100}%`,
+                          }}
+                      >
+                          <span className="absolute -top-4 left-0 bg-emerald-500 text-slate-950 text-[10px] px-1 rounded font-semibold">Diagram</span>
+                      </span>
+                  )
+              ))}
+            </button>
           </div>
 
-          {/* Text & Content Viewer / Editor Side */}
-          <div className="w-full md:w-3/4 flex flex-col h-[360px] md:h-auto bg-surface">
-            {/* Content Toolbar */}
-            <div className="flex justify-between items-center px-4 py-2.5 border-b border-white/[0.06] bg-white/[0.02]">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-display">
-                      {editingId === page.id ? "Live Editor" : "Extracted Document"}
+          {/* Extracted text side */}
+          <div className="w-full md:flex-1 min-w-0 flex flex-col h-[380px] md:h-auto">
+            <div className="flex flex-wrap justify-between items-center gap-2 px-4 py-2.5 border-b border-line">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-sm font-semibold text-ink">
+                      {editingId === page.id ? 'Editing text' : 'Extracted text'}
                   </span>
                   {page.extractedText && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-slate-500 font-mono">
-                        ({page.extractedText.split(/\s+/).filter(Boolean).length} words)
+                    <>
+                      <span className="text-xs text-ink-3 tabular-nums">
+                        {page.extractedText.split(/\s+/).filter(Boolean).length} words
                       </span>
                       {page.extractedText.split(/\s+/).filter(Boolean).length < 20 && onRecapture && (
                         <button
                           onClick={() => onRecapture(page.id)}
-                          className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-[11px] text-amber-300 font-bold hover:bg-amber-500/30 transition-all flex items-center gap-1"
+                          className="badge badge-warning cursor-pointer hover:bg-amber-500/20"
                           title="Click to recapture complete response from AI chat tab"
                         >
-                          <Camera className="w-3 h-3 text-amber-400" />
+                          <Camera />
                           <span>Short response? Recapture</span>
                         </button>
                       )}
-                    </div>
+                    </>
                   )}
                 </div>
-                
+
                 {page.status === 'done' && page.extractedText && (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
                         {editingId === page.id ? (
                             <>
-                                <button 
-                                    onClick={() => handleSave(page.id)}
-                                    className="flex items-center gap-1 px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold rounded-lg transition-all shadow-sm"
-                                >
-                                    <Save className="w-3.5 h-3.5" /> Save
+                                <button onClick={handleCancel} className="btn btn-ghost btn-sm">
+                                    <X /> Cancel
                                 </button>
-                                <button 
-                                    onClick={handleCancel}
-                                    className="flex items-center gap-1 px-3 py-1 bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 text-xs font-bold rounded-lg border border-white/[0.08] transition-all"
-                                >
-                                    <X className="w-3.5 h-3.5" /> Cancel
+                                <button onClick={() => handleSave(page.id)} className="btn btn-primary btn-sm">
+                                    <Save /> Save
                                 </button>
                             </>
                         ) : (
                             <>
-                                <button 
-                                    onClick={() => handleEditClick(page)}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
-                                    title="Edit Text"
-                                >
-                                    <Edit2 className="w-3.5 h-3.5 text-slate-400" /> Edit
+                                <button onClick={() => handleEditClick(page)} className="btn btn-secondary btn-sm" title="Edit text">
+                                    <Edit2 /> Edit
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => handleCopy(page.id, processedPagesMap.get(page.id) || page.extractedText || '')}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
-                                    title="Copy Text"
+                                    className="btn btn-ghost btn-sm"
+                                    title="Copy text"
                                 >
-                                    {copiedId === page.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-                                    {copiedId === page.id ? "Copied" : "Copy"}
+                                    {copiedId === page.id ? <Check className="text-emerald-400" /> : <Copy />}
+                                    {copiedId === page.id ? 'Copied' : 'Copy'}
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => handleCopy(page.id, `\`\`\`markdown\n${processedPagesMap.get(page.id) || page.extractedText || ''}\n\`\`\``)}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 hover:text-white text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
-                                    title="Copy Markdown Code"
+                                    className="btn btn-ghost btn-sm"
+                                    title="Copy as Markdown code"
                                 >
-                                    <FileText className="w-3.5 h-3.5 text-slate-400" /> MD
+                                    <FileText /> MD
                                 </button>
-                                <button 
+                                <button
                                     onClick={() => setAiPanelOpenId(aiPanelOpenId === page.id ? null : page.id)}
-                                    className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all ${
-                                      aiPanelOpenId === page.id 
-                                        ? 'bg-accent text-on-accent border-accent' 
-                                        : 'bg-accent/10 hover:bg-accent/20 text-accent-light border-accent/30'
-                                    }`}
-                                    title="Ask Gemini or Explain Extracted Content"
+                                    aria-pressed={aiPanelOpenId === page.id}
+                                    className={`btn btn-ghost btn-sm ${aiPanelOpenId === page.id ? 'bg-white/[0.06] text-ink' : ''}`}
+                                    title="Ask Gemini or explain extracted content"
                                 >
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    <span>Gemini AI</span>
+                                    <Sparkles /> Ask AI
                                 </button>
                                 {onRecapture && (
-                                    <button 
+                                    <button
                                         type="button"
                                         onClick={() => onRecapture(page.id)}
-                                        className="flex items-center gap-1 px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 text-xs font-bold rounded-lg border border-amber-500/30 transition-all shadow-sm"
-                                        title="Recapture full finished response from AI Chat tab without re-uploading"
+                                        className="btn btn-ghost btn-sm btn-icon"
+                                        title="Recapture full finished response from AI chat tab without re-uploading"
+                                        aria-label="Recapture from AI tab"
                                     >
-                                        <Camera className="w-3.5 h-3.5 text-amber-400" />
-                                        <span>Recapture</span>
+                                        <Camera />
                                     </button>
                                 )}
-                                <button 
+                                <button
                                     onClick={() => onRetry(page.id)}
-                                    className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.03] hover:bg-white/[0.08] text-slate-400 hover:text-accent-light text-xs font-semibold rounded-lg border border-white/[0.06] transition-all"
-                                    title="Reprocess Page"
+                                    className="btn btn-ghost btn-sm btn-icon"
+                                    title="Convert this page again"
+                                    aria-label="Convert this page again"
                                 >
-                                    <RefreshCw className="w-3.5 h-3.5" />
+                                    <RefreshCw />
                                 </button>
                             </>
                         )}
                     </div>
                 )}
-                
+
                 {page.status === 'error' && (
                     <div className="flex items-center gap-1.5">
                         {onRecapture && (
-                            <button 
+                            <button
                                 type="button"
                                 onClick={() => onRecapture(page.id)}
-                                className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold rounded-lg hover:bg-amber-500/30 transition-all"
+                                className="btn btn-secondary btn-sm"
                                 title="Recapture from AI tab"
                             >
-                                <Camera className="w-3.5 h-3.5 text-amber-400" /> Recapture
+                                <Camera /> Recapture
                             </button>
                         )}
-                        <button 
-                            onClick={() => onRetry(page.id)}
-                            className="flex items-center gap-1.5 px-3 py-1 bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold rounded-lg hover:bg-rose-500/25 transition-all"
-                        >
-                            <RefreshCw className="w-3 h-3" /> Retry Page
+                        <button onClick={() => onRetry(page.id)} className="btn btn-primary btn-sm">
+                            <RefreshCw /> Retry page
                         </button>
                     </div>
                 )}
             </div>
 
-            {/* Content Display Area */}
-            <div className="flex-1 overflow-auto p-4 sm:p-5 relative custom-scrollbar">
+            <div className="flex-1 overflow-auto p-4 sm:p-5 relative">
                {editingId === page.id ? (
                    <textarea
                      value={editText}
                      onChange={(e) => setEditText(e.target.value)}
-                     className="w-full h-full bg-canvas text-slate-100 p-3 rounded-xl border border-white/[0.1] font-mono text-xs focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/50 resize-none leading-relaxed"
+                     className="textarea h-full min-h-[240px] font-mono text-xs resize-none"
                      placeholder="Edit extracted content..."
                      autoFocus
                    />
@@ -362,18 +349,19 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                    <div>
                       {page.status === 'done' && page.extractedText ? (
                           <>
-                            <div className="markdown-body prose prose-invert max-w-none text-xs sm:text-sm leading-relaxed">
+                            <div className="markdown-body max-w-none text-sm leading-relaxed">
                                 <ReactMarkdown
                                   remarkPlugins={[remarkGfm, remarkMath]}
-                                  rehypePlugins={[rehypeKatex]}
+                                  rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore', errorColor: '#f87171' }]]}
+                                  urlTransform={(url) => (/^data:image\//i.test(url) ? url : defaultUrlTransform(url))}
                                 >
-                                  {processedPagesMap.get(page.id) || page.extractedText}
+                                  {svgBlocksToMarkdown(normalizePreviewMath(processedPagesMap.get(page.id) || page.extractedText))}
                                 </ReactMarkdown>
                             </div>
 
                             {/* Inline Gemini AI Assistant for Extracted Page */}
                             {aiPanelOpenId === page.id && (
-                              <div className="mt-4 pt-3 border-t border-white/[0.08]">
+                              <div className="mt-4 pt-3 border-t border-line">
                                 <GeminiExplanationPanel
                                   questionId={`extracted_page_${page.id}_${page.pageNumber}`}
                                   questionText={processedPagesMap.get(page.id) || page.extractedText || ''}
@@ -383,27 +371,28 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                             )}
                           </>
                       ) : page.status === 'processing' ? (
-                          <div className="flex flex-col items-center justify-center h-48 gap-3 text-slate-400">
+                          <div className="flex flex-col items-center justify-center h-48 gap-3 text-ink-3" role="status">
                              <Loader2 className="w-7 h-7 text-accent animate-spin" />
-                             <span className="text-xs font-medium tracking-wide">Transcribing layout, math & text...</span>
+                             <span className="text-sm">Reading layout, math and text…</span>
                           </div>
                       ) : page.status === 'error' ? (
-                          <div className="flex flex-col items-center justify-center h-48 gap-3 text-rose-400">
-                             <AlertCircle className="w-8 h-8" />
-                             <span className="text-xs font-semibold text-center max-w-sm">
-                               {page.errorMessage || "Extraction failed. Click 'Retry Page' above to try again."}
+                          <div className="flex flex-col items-center justify-center h-48 gap-3 text-rose-300">
+                             <AlertCircle className="w-7 h-7" />
+                             <span className="text-sm text-center max-w-sm">
+                               {page.errorMessage || "Extraction failed. Use “Retry page” above to try again."}
                              </span>
                           </div>
                       ) : (
-                          <div className="flex items-center justify-center h-48 text-slate-500 text-xs">
-                             Pending conversion... Click CONVERT to start.
+                          <div className="flex flex-col items-center justify-center h-48 gap-1 text-center">
+                             <span className="text-sm font-medium text-ink-2">Waiting to convert</span>
+                             <span className="text-sm text-ink-3">Use “Convert” in the toolbar to start.</span>
                           </div>
                       )}
                    </div>
                )}
             </div>
           </div>
-        </div>
+        </article>
       ))}
     </div>
   );

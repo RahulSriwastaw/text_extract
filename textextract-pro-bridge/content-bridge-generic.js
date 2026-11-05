@@ -4,7 +4,7 @@
  */
 
 (function () {
-  const EXT_VER = "2.5.8";
+  const EXT_VER = "2.5.9";
   if (window.__tfStudyAiGenericVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGenericVer = EXT_VER;

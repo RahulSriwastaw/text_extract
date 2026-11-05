@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.8";
+  const EXT_VER = "2.5.9";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -287,6 +287,7 @@
       if (!el) throw new Error("Composer not found — login on the bridge tab, then retry.");
       const skipPdf = !!job.skipPdf && !job.fileBase64;
       const initialReplyCount = getModelResponseNodes().length;
+      const initialUserTurns = getUserQueryNodes().length;
       const baseline = snapshotReplyFingerprint();
       const needsImage = !skipPdf && !!job.fileBase64;
       if (needsImage) {
@@ -335,12 +336,18 @@
         throw new Error("Image attachment disappeared before sending. Retry this page.");
       }
       progress(requestId, "send", "Sending to Gemini…", adminTabId);
-      await clickSendOrEnter(findComposer() || el);
-      await sleep(300);
-      const postSendText = composerText(findComposer());
-      if (postSendText && postSendText.length > 10 && !isGenerating() && getModelResponseNodes().length <= initialReplyCount) {
-        LOG("Composer still has text after send attempt — retrying send once more.");
-        await clickSendOrEnter(findComposer() || el);
+      let sent = await submitPrompt(findComposer() || el, initialUserTurns, initialReplyCount, requestId, adminTabId);
+      if (!sent) {
+        // Re-inject once (Gemini may have dropped the text when the upload finished), then retry.
+        LOG("Nothing was sent — re-injecting prompt and retrying submit.");
+        progress(requestId, "send", "Send did not go through — re-typing prompt and retrying…", adminTabId);
+        await injectPromptKeepAttachments(findComposer() || el, job.prompt);
+        await sleep(500);
+        runtime.check();
+        sent = await submitPrompt(findComposer() || el, initialUserTurns, initialReplyCount, requestId, adminTabId);
+      }
+      if (!sent) {
+        throw new Error("Prompt was typed but Gemini did not send it (Send button stayed disabled). Click once inside the Gemini chat box, then retry this page.");
       }
       progress(requestId, "wait", "Waiting for Gemini reply…", adminTabId);
       const expectedMarker = job.expectedMarker || msg.expectedMarker || null;
@@ -499,8 +506,24 @@
     }
     throw new Error("Gemini composer not found — login first.");
   }
+  // A hidden duplicate editor (collapsed side panel, off-screen clone, aria-hidden overlay) still
+  // reports a bounding box, so size alone let the prompt land in an invisible element while the
+  // real composer stayed empty and Send stayed disabled.
+  function isTrulyVisible(el) {
+    if (!el || !el.isConnected) return false;
+    if (el.closest('[aria-hidden="true"], [inert], [hidden]')) return false;
+    const style = getComputedStyle(el);
+    if (style.visibility === "hidden" || style.display === "none" || Number(style.opacity) === 0) return false;
+    if (el.offsetParent === null && style.position !== "fixed") return false;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 30 || r.height <= 12) return false;
+    if (r.bottom <= 0 || r.right <= 0) return false;
+    if (r.top > (window.innerHeight || document.documentElement.clientHeight)) return false;
+    return true;
+  }
   function findComposer() {
     const selectors = [
+      "rich-textarea div.ql-editor",
       "div.ql-editor.textarea.new-input-ui",
       'div.ql-editor[contenteditable="true"]',
       "div.ql-editor",
@@ -513,10 +536,7 @@
       "p[data-placeholder]"
     ];
     for (const sel of selectors) {
-      const list = deepQueryAll(sel).filter(el => {
-        const r = el.getBoundingClientRect();
-        return r.width > 30 && r.height > 12 && r.bottom > 0;
-      });
+      const list = deepQueryAll(sel).filter(el => isTrulyVisible(el) && !el.closest('model-response, user-query'));
       if (!list.length) continue;
       list.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
       return list[0];
@@ -840,17 +860,29 @@
     return minLen > 0 && t.length >= minLen;
   }
 
+  // Quill (Gemini's editor) syncs its model from DOM mutations, and Gemini's Send button enables
+  // from that model. Tell both layers about the change so the button does not stay disabled.
+  function notifyEditorChanged(el, sample) {
+    try {
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: sample || " " }));
+      el.dispatchEvent(new KeyboardEvent("keyup", { key: " ", code: "Space", bubbles: true }));
+      el.classList.remove("ql-blank");
+    } catch {}
+  }
+
   async function injectPromptKeepAttachments(el, prompt) {
     closeOpenOverlays();
     el = findComposer() || el;
+    el.scrollIntoView({ block: "center" });
     el.click();
     el.focus();
     await sleep(200);
-    const payload = "\n" + prompt;
+    // Empty editor: no leading newline, or Gemini keeps a blank first paragraph.
+    const payload = composerText(el) ? "\n" + prompt : prompt;
     const needle = promptNeedle(prompt);
     const hasNeedle = () => {
-      const t = composerText(el);
-      return t.includes(needle) || t.includes(String(prompt).slice(0, 24));
+      const t = composerText(findComposer() || el);
+      return t.includes(needle) || t.includes(String(prompt).replace(/\s+/g, " ").trim().slice(0, 24));
     };
     try {
       const sel = window.getSelection();
@@ -869,7 +901,7 @@
       await sleep(30);
     }
     await sleep(200);
-    if (hasNeedle()) return;
+    if (hasNeedle()) { notifyEditorChanged(el, payload.slice(0, 40)); return; }
     try {
       const dt = new DataTransfer;
       dt.setData("text/plain", payload);
@@ -880,7 +912,7 @@
       }));
       await sleep(250);
     } catch {}
-    if (hasNeedle()) return;
+    if (hasNeedle()) { notifyEditorChanged(el, payload.slice(0, 40)); return; }
     if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
       try {
         const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -905,83 +937,119 @@
     } catch {}
     if (!hasNeedle()) {
       const t = composerText(el);
-      if (t.length > 80 && /json|question|MCQ|exam/i.test(t)) return;
+      if (t.length > 80 && /json|question|MCQ|exam/i.test(t)) { notifyEditorChanged(el, payload.slice(0, 40)); return; }
       throw new Error("Could not inject prompt into Gemini input. Click the chat box once, then retry.");
     }
+    notifyEditorChanged(el, payload.slice(0, 40));
   }
-  async function clickSendOrEnter(el) {
-    for (let attempt = 0; attempt < 25; attempt++) {
+
+  const isDisabledButton = b => !b || b.disabled || b.getAttribute("aria-disabled") === "true" || /\bdisabled\b/.test((b.className || "").toString());
+
+  // Evidence that the prompt actually left the composer: generation started, a new user turn or
+  // model turn appeared, or the editor emptied.
+  function sendHappened(baselineUserTurns, baselineModelTurns) {
+    if (isGenerating()) return true;
+    if (getUserQueryNodes().length > baselineUserTurns) return true;
+    if (getModelResponseNodes().length > baselineModelTurns) return true;
+    const t = composerText(findComposer());
+    return t.length < 10;
+  }
+
+  function dispatchEnter(el) {
+    const init = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    el.dispatchEvent(new KeyboardEvent("keydown", init));
+    el.dispatchEvent(new KeyboardEvent("keypress", init));
+    el.dispatchEvent(new KeyboardEvent("keyup", init));
+  }
+
+  // Submit with escalating strategies and verify each one. Clicking a disabled Send and walking
+  // away was the failure the user saw: image attached, prompt typed, nothing ever sent, then a
+  // 3-minute wait for a reply that could not come.
+  async function submitPrompt(el, baselineUserTurns, baselineModelTurns, requestId, adminTabId) {
+    const sent = () => sendHappened(baselineUserTurns, baselineModelTurns);
+    const settle = async ms => { await sleep(ms); return sent(); };
+    // A: wait for Send to enable (upload finishing, model catching up with the editor), then click.
+    for (let attempt = 0; attempt < 32; attempt++) {
       const send = findSendButton();
-      const disabled = send?.disabled || send?.getAttribute("aria-disabled") === "true";
-      if (send && !disabled) {
+      if (send && !isDisabledButton(send)) {
         send.click();
-        await sleep(400);
-        return;
+        if (await settle(700)) return true;
+        break;
+      }
+      if (attempt === 8) {
+        // Send still disabled: nudge the editor model with a real keystroke-like edit.
+        const composer = findComposer() || el;
+        composer.focus();
+        try { document.execCommand("insertText", false, " "); } catch {}
+        notifyEditorChanged(composer, " ");
+        progress(requestId, "send", "Send button still disabled — nudging the editor…", adminTabId);
       }
       await sleep(250);
     }
+    // B: Enter in the composer (Gemini submits on Enter without Shift).
+    const composer = findComposer() || el;
+    composer.focus();
+    dispatchEnter(composer);
+    if (await settle(900)) return true;
+    // C: click whatever Send we can find, even if it looks disabled (stale aria state).
     const send = findSendButton();
     if (send) {
       send.click();
-      await sleep(300);
-      return;
+      if (await settle(900)) return true;
     }
-    el.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "Enter",
-      code: "Enter",
-      keyCode: 13,
-      which: 13,
-      bubbles: true,
-      cancelable: true
-    }));
+    // D: native form submission when the composer lives in a form.
+    const form = composer.closest("form");
+    if (form) {
+      try { form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); } catch {}
+      if (await settle(900)) return true;
+    }
+    return sent();
   }
+
+  // Kept for compatibility with older call sites.
+  async function clickSendOrEnter(el) {
+    return submitPrompt(el, getUserQueryNodes().length, getModelResponseNodes().length);
+  }
+
+  const SEND_WORDS = /send|submit|भेज|enviar|envoyer|senden/i;
+  const NOT_SEND_WORDS = /stop|रोक|mic|microphone|माइक|voice|आवाज़|upload|अपलोड|attach|file|फ़ाइल|add|जोड़|menu|more|history|search|खोज|feedback|report|share|copy|edit|retry|regenerate|close|बंद|gem|canvas|deep research|tool/i;
+
   function findSendButton() {
     const composer = findComposer();
-    const container = composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, rich-textarea, .chat-input-container') || document;
-    
+    const container = composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, rich-textarea, .chat-input-container, .input-area-container') || document;
+    const visible = b => { try { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch { return false; } };
+    const label = b => ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "") + " " + (b.getAttribute("mattooltip") || "") + " " + (b.title || "") + " " + (b.textContent || "")).replace(/\s+/g, " ").trim().toLowerCase();
+    const notHistory = b => !b.closest('model-response, user-query, [data-message-author-role], .conversation-container');
+
+    // 0. Gemini's own send button markup (class survives label localisation).
+    const known = deepQueryAll('button.send-button, .send-button-container button, button[class*="send-button"], button[data-test-id*="send" i], button[aria-label*="send" i], button[aria-label*="भेज"], button[mattooltip*="send" i]')
+      .filter(b => visible(b) && notHistory(b) && !/stop|रोक/i.test(label(b)));
+    if (known.length) return known[known.length - 1];
+
     // Check candidate buttons near composer first
     const nearButtons = composer ? deepQueryAll('button, [role="button"]', container) : [];
     const allButtons = nearButtons.length ? nearButtons : deepQueryAll('button, [role="button"]');
-    
+
     // Exclude any button that belongs to past chat messages (history / responses) or feedback
-    const validButtons = allButtons.filter(b => {
-      const inHistory = b.closest('model-response, user-query, [data-message-author-role], .conversation-container');
-      if (inHistory) return false;
-      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "") + " " + (b.title || "")).toLowerCase();
-      if (al.includes("feedback") || al.includes("report") || al.includes("share") || al.includes("copy") || al.includes("edit") || al.includes("retry")) return false;
-      return true;
-    });
+    const validButtons = allButtons.filter(b => visible(b) && notHistory(b));
 
     // 1. Exact send/submit aria-label or test-id
-    const exact = validButtons.find(b => {
-      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "")).trim().toLowerCase();
-      return /^(send|submit|send message|send prompt)$/i.test(al) || al === 'send-button';
-    });
+    const exact = validButtons.find(b => /^(send|submit|send message|send prompt|संदेश भेजें|भेजें)$/i.test(label(b)) || b.getAttribute("data-test-id") === 'send-button');
     if (exact) return exact;
 
-    // 2. Buttons with send/submit text
-    const withText = validButtons.find(b => {
-      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "") + " " + (b.title || "")).toLowerCase();
-      return (al.includes("send") || al.includes("submit")) && !al.includes("stop");
-    });
+    // 2. Buttons with send/submit text (any language we know), never stop/mic
+    const withText = validButtons.find(b => SEND_WORDS.test(label(b)) && !/stop|रोक/i.test(label(b)));
     if (withText) return withText;
 
-    // 3. SVG send icon button near composer
-    const svgBtn = validButtons.find(b => {
-      const svg = b.querySelector("svg");
-      return svg && ((b.className || "").toString().toLowerCase().includes("send") || (b.getAttribute("aria-label") || "").toLowerCase().includes("send"));
-    });
-    if (svgBtn) return svgBtn;
+    // 3. Icon button whose class names say send
+    const classBtn = validButtons.find(b => /send|submit/i.test((b.className || "").toString()));
+    if (classBtn) return classBtn;
 
-    // 4. Return last valid button if near composer (typically the circular send icon in bottom corner)
-    if (nearButtons.length > 0) {
-      const filteredNear = validButtons.filter(b => {
-        const al = ((b.getAttribute("aria-label") || "") + " " + (b.title || "")).toLowerCase();
-        return !al.includes("upload") && !al.includes("attach") && !al.includes("file") && !al.includes("mic") && !al.includes("voice");
-      });
-      if (filteredNear.length > 0) {
-        return filteredNear[filteredNear.length - 1];
-      }
+    // 4. Last valid button near the composer that is clearly not mic/upload/stop (the circular
+    //    send icon sits bottom-right). Only when the composer holds text; otherwise it is the mic.
+    if (nearButtons.length > 0 && composerText(composer).length > 10) {
+      const filteredNear = validButtons.filter(b => !NOT_SEND_WORDS.test(label(b)));
+      if (filteredNear.length > 0) return filteredNear[filteredNear.length - 1];
     }
 
     return null;
@@ -994,8 +1062,9 @@
         const r = b.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return false;
       } catch { return false; }
-      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.textContent || "")).toLowerCase().trim();
-      return (/\b(stop|stop response|stop generation|stop generating|cancel response)\b/i.test(al) ||
+      const al = ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "") + " " + (b.getAttribute("mattooltip") || "") + " " + (b.textContent || "")).toLowerCase().trim();
+      return (/\b(stop|stop response|stop generation|stop generating|cancel response)\b/i.test(al) || /रोकें|रोको/.test(al) ||
+             /\bstop-button\b|\bstop_button\b/.test((b.className || "").toString()) ||
              b.querySelector('.ds-icon-stop, [class*="stop-icon"], svg[data-icon="stop"]') !== null) &&
              !al.includes("history") && !al.includes("search");
     });

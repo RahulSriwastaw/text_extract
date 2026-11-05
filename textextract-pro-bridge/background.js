@@ -155,6 +155,22 @@ async function launch(job) {
   if (!response?.ok) throw new Error(response?.error || 'AI chat adapter did not acknowledge the request.');
 }
 
+// After an install, update or reload, app tabs that are already open keep an orphaned content
+// script (or none, if they were opened first). Inject a live copy so the user does not have to
+// refresh every tab to get "connected" back.
+async function reinjectAppTabs() {
+  const providerHosts = new Set(Object.values(PROVIDERS).flatMap(p => p.hosts));
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: ['https://*/*', 'http://*/*'] }); } catch { return; }
+  for (const tab of tabs) {
+    let host = '';
+    try { host = new URL(tab.url || '').hostname; } catch { continue; }
+    if (!tab.id || !host || providerHosts.has(host)) continue;
+    try { await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content-admin.js'] }); } catch { /* chrome:// or no access */ }
+  }
+}
+chrome.runtime.onInstalled?.addListener(() => { void reinjectAppTabs(); });
+
 chrome.runtime.onConnect.addListener(port => {
   if (port.name !== 'study-ai-keepalive') return;
   port.onDisconnect.addListener(() => { void chrome.runtime.lastError; });

@@ -176,6 +176,22 @@ function publishStatus(status: BridgeStatus, fromPing = false) {
 function fromExtension(event: MessageEvent) {
   return event.source === window && event.origin === window.location.origin && event.data?.source === EXT_SOURCE;
 }
+/**
+ * The extension's content script stamps the document (shared DOM) when it is injected. No stamp
+ * means the extension is not loaded on this page at all, which needs a different fix from a
+ * silent service worker.
+ */
+export function getInjectedBridgeVersion(): string | null {
+  try { return document.documentElement.getAttribute('data-tf-bridge'); } catch { return null; }
+}
+function describeSilentExtension(): string {
+  if (typeof document === 'undefined') return 'Extension did not respond.';
+  const injected = getInjectedBridgeVersion();
+  if (!injected) {
+    return 'TextExtract Pro Bridge is not loaded on this page. Open chrome://extensions, make sure the extension is installed and enabled (toggle ON), then refresh this page (F5).';
+  }
+  return `Extension ${injected} is loaded but its service worker did not answer. In chrome://extensions click "Errors" or "Reload" on TextExtract Pro Bridge, then refresh this page.`;
+}
 /** Current cached bridge status (synchronous; use subscribeToExtensionStatus for updates). */
 export function getBridgeStatus(): BridgeStatus {
   return cachedStatus;
@@ -265,7 +281,7 @@ export function pingStudyAiExtension(timeoutMs = 2500, options: { force?: boolea
     const timer = setTimeout(() => finish({ ...cachedStatus, connected: false, state: 'disconnected', session: null,
       error: cachedStatus.connected
         ? 'Bridge stopped responding. Check that TextExtract Pro Bridge is still enabled in chrome://extensions, then refresh this page.'
-        : 'Extension did not respond. Reload the extension and refresh this page.' }), timeoutMs);
+        : describeSilentExtension() }), timeoutMs);
     const retry = setInterval(send, Math.max(300, Math.floor(timeoutMs / 3)));
     window.addEventListener('message', handler);
     send();

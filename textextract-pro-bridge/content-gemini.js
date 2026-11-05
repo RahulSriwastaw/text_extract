@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.9";
+  const EXT_VER = "2.5.14";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;
@@ -347,7 +347,7 @@
         sent = await submitPrompt(findComposer() || el, initialUserTurns, initialReplyCount, requestId, adminTabId);
       }
       if (!sent) {
-        throw new Error("Prompt was typed but Gemini did not send it (Send button stayed disabled). Click once inside the Gemini chat box, then retry this page.");
+        throw new Error("Prompt was typed but Gemini did not send it (Send button stayed disabled). Click once inside the Gemini chat box, then retry this page. [" + sendDiagnostics() + "]");
       }
       progress(requestId, "wait", "Waiting for Gemini reply…", adminTabId);
       const expectedMarker = job.expectedMarker || msg.expectedMarker || null;
@@ -581,13 +581,17 @@
       return null;
     }
   }
-  const ATTACHMENT_CHIP_SELECTOR = 'uploader-file-card, file-preview, [data-test-id*="file-preview"], ' +
+  const ATTACHMENT_CHIP_SELECTOR = 'uploader-file-card, uploader-file-preview, gem-media-attachment, file-preview, [data-test-id*="file-preview"], ' +
     '[data-test-id*="uploaded"], [class*="attachment-preview"], [class*="file-preview"], [class*="uploader-file"], ' +
     '[class*="file-chip"], [class*="file-card"], [class*="thumbnail"], [class*="attachment-chip"]';
 
+  // Gemini's new input UI renders the attachment preview and the Send button as siblings of
+  // <rich-textarea>, under div.text-input-field / .input-area. Stopping at rich-textarea made the
+  // attach step count zero chips, retry the upload three times and never reach the prompt.
   function composerContainer() {
     const composer = findComposer();
-    return composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, rich-textarea, .chat-input-container') || composer?.parentElement || document;
+    return composer?.closest('.text-input-field, .input-area, .input-area-container, input-container, form, [class*="input-area"], [class*="composer"], .bottom-container, .chat-input-container')
+      || composer?.parentElement?.parentElement?.parentElement || document;
   }
 
   // Count real attachment chips in the composer only, never past turns in chat history.
@@ -629,9 +633,12 @@
     const start = Date.now();
     await sleep(600);
     while (Date.now() - start < timeoutMs) {
+      // Only spinners inside the input area count; a spinner elsewhere on the page (sidebar,
+      // notebook list) must not hold the page for 35 seconds.
       const uploading = deepQueryAll(
         '[class*="upload-progress"], [class*="uploading"], [aria-label*="uploading" i], ' +
-        '[class*="file-uploading"], .animate-spin, svg[class*="loading"], [data-test-id*="loading"], mat-progress-spinner'
+        '[class*="file-uploading"], .animate-spin, svg[class*="loading"], [data-test-id*="loading"], mat-progress-spinner, [role="progressbar"]',
+        composerContainer()
       ).filter(el => {
         try {
           const r = el.getBoundingClientRect();
@@ -884,6 +891,10 @@
       const t = composerText(findComposer() || el);
       return t.includes(needle) || t.includes(String(prompt).replace(/\s+/g, " ").trim().slice(0, 24));
     };
+    // Gemini's model accepted the text: its Send button container turns visible / the field is dirty.
+    const registered = () => !!document.querySelector(".send-button-container.visible") || /ng-dirty/.test(el.closest("rich-textarea")?.className || "");
+    // Re-injection after a failed send: the prompt is already there, only wake the model up.
+    if (hasNeedle()) { notifyEditorChanged(el, String(prompt).slice(0, 40)); return; }
     try {
       const sel = window.getSelection();
       const range = document.createRange();
@@ -901,18 +912,27 @@
       await sleep(30);
     }
     await sleep(200);
-    if (hasNeedle()) { notifyEditorChanged(el, payload.slice(0, 40)); return; }
+    if (hasNeedle() && registered()) { notifyEditorChanged(el, payload.slice(0, 40)); return; }
+    // Strategy 2: append the prompt as DOM paragraphs. Verified live on Gemini: Quill syncs its model
+    // from DOM mutations, Gemini marks the field dirty and shows Send, and it needs no focus — so it
+    // also works in the background tab the bridge opens, where execCommand can insert nothing.
+    // (innerHTML is not an option: Gemini enforces Trusted Types and the assignment throws.)
     try {
-      const dt = new DataTransfer;
-      dt.setData("text/plain", payload);
-      el.dispatchEvent(new ClipboardEvent("paste", {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: dt
-      }));
-      await sleep(250);
+      el = findComposer() || el;
+      // Text present but Gemini's model did not take it (background tab): rebuild it as DOM nodes.
+      if (!hasNeedle() || !registered()) {
+        while (el.firstChild) el.removeChild(el.firstChild);
+        for (const line of String(prompt).split(/\r?\n/)) {
+          const p = document.createElement("p");
+          if (line) p.textContent = line; else p.appendChild(document.createElement("br"));
+          el.appendChild(p);
+        }
+      }
+      el.classList.remove("ql-blank");
+      notifyEditorChanged(el, String(prompt).slice(0, 40));
+      await sleep(350);
     } catch {}
-    if (hasNeedle()) { notifyEditorChanged(el, payload.slice(0, 40)); return; }
+    if (hasNeedle()) return;
     if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
       try {
         const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -925,15 +945,10 @@
       if (hasNeedle()) return;
     }
     try {
-      const esc = payload.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      el.innerHTML = (el.innerHTML || "") + esc.split(/\n/).map(l => `<p>${l || "<br>"}</p>`).join("");
-      el.classList.remove("ql-blank");
-      el.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        inputType: "insertText",
-        data: payload.slice(0, 200)
-      }));
-      await sleep(150);
+      const dt = new DataTransfer;
+      dt.setData("text/plain", payload);
+      el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt }));
+      await sleep(250);
     } catch {}
     if (!hasNeedle()) {
       const t = composerText(el);
@@ -965,9 +980,44 @@
   // Submit with escalating strategies and verify each one. Clicking a disabled Send and walking
   // away was the failure the user saw: image attached, prompt typed, nothing ever sent, then a
   // 3-minute wait for a reply that could not come.
+  // The bridge opens Gemini in a background tab, where the send button never reacts to a scripted
+  // click (verified live: the same click works at once in a foreground tab). Ask the worker to show
+  // the tab for the send, then give the user their previous tab back.
+  function askWorker(type, requestId) {
+    return new Promise(resolve => {
+      try { chrome.runtime.sendMessage({ type, requestId }, res => { void chrome.runtime.lastError; resolve(!!res?.ok); }); }
+      catch { resolve(false); }
+    });
+  }
+  // Bring the tab forward and wait until the document really is visible (window un-minimized,
+  // tab switched); a click before that is swallowed.
+  async function showTabForSend(requestId) {
+    const granted = await askWorker("STUDY_AI_FOCUS_TAB", requestId);
+    for (let i = 0; i < 12 && document.visibilityState !== "visible"; i++) await sleep(250);
+    return granted && document.visibilityState === "visible";
+  }
+
   async function submitPrompt(el, baselineUserTurns, baselineModelTurns, requestId, adminTabId) {
     const sent = () => sendHappened(baselineUserTurns, baselineModelTurns);
     const settle = async ms => { await sleep(ms); return sent(); };
+    let focused = false;
+    try {
+      // Fast path: a visible tab sends on the first click. Hidden tab: bring it forward first.
+      if (document.visibilityState !== "visible") {
+        progress(requestId, "send", "Showing the Gemini tab for the send…", adminTabId);
+        focused = await showTabForSend(requestId);
+        await sleep(300);
+        progress(requestId, "send", `Tab ${focused ? "visible" : "still hidden"} — ${sendDiagnostics()}`, adminTabId);
+      }
+      const ok = await submitPromptSteps(el, sent, settle, requestId, adminTabId);
+      if (!ok) progress(requestId, "send", "Send failed — " + sendDiagnostics(), adminTabId);
+      return ok;
+    } finally {
+      if (focused) void askWorker("STUDY_AI_RESTORE_TAB", requestId);
+    }
+  }
+
+  async function submitPromptSteps(el, sent, settle, requestId, adminTabId) {
     // A: wait for Send to enable (upload finishing, model catching up with the editor), then click.
     for (let attempt = 0; attempt < 32; attempt++) {
       const send = findSendButton();
@@ -980,11 +1030,23 @@
         // Send still disabled: nudge the editor model with a real keystroke-like edit.
         const composer = findComposer() || el;
         composer.focus();
-        try { document.execCommand("insertText", false, " "); } catch {}
+        try {
+          // A DOM mutation is what Quill's model listens to; it works without focus too.
+          const last = composer.lastElementChild || composer;
+          last.appendChild(document.createTextNode(" "));
+        } catch {}
         notifyEditorChanged(composer, " ");
         progress(requestId, "send", "Send button still disabled — nudging the editor…", adminTabId);
       }
       await sleep(250);
+    }
+    // A2: the tab may still have been hidden during A; once shown, one more click is cheap.
+    if (document.visibilityState !== "visible") {
+      if (await showTabForSend(requestId)) {
+        await sleep(300);
+        const send = findSendButton();
+        if (send && !isDisabledButton(send)) { send.click(); if (await settle(900)) return true; }
+      }
     }
     // B: Enter in the composer (Gemini submits on Enter without Shift).
     const composer = findComposer() || el;
@@ -1012,11 +1074,22 @@
   }
 
   const SEND_WORDS = /send|submit|भेज|enviar|envoyer|senden/i;
-  const NOT_SEND_WORDS = /stop|रोक|mic|microphone|माइक|voice|आवाज़|upload|अपलोड|attach|file|फ़ाइल|add|जोड़|menu|more|history|search|खोज|feedback|report|share|copy|edit|retry|regenerate|close|बंद|gem|canvas|deep research|tool/i;
+  const NOT_SEND_WORDS = /stop|रोक|mic|microphone|माइक|dictate|voice|आवाज़|upload|अपलोड|attach|file|फ़ाइल|add|जोड़|menu|more|history|search|खोज|feedback|report|share|copy|edit|retry|regenerate|close|बंद|gem|canvas|deep research|tool|mode|picker|model|expand|collapse|fullscreen/i;
+
+  // One-line state of the composer for progress/error messages, so a failed send explains itself.
+  function sendDiagnostics() {
+    try {
+      const composer = findComposer();
+      const rt = composer?.closest("rich-textarea");
+      const send = findSendButton();
+      const label = send ? ((send.getAttribute("aria-label") || "") + "|" + (send.className || "").toString().slice(0, 30)) : "none";
+      return `vis=${document.visibilityState} focus=${document.hasFocus()} text=${composerText(composer).length} dirty=${/ng-dirty/.test(rt?.className || "")} sendVisible=${!!document.querySelector(".send-button-container.visible")} picked=${label} disabled=${isDisabledButton(send)} gen=${isGenerating()}`;
+    } catch (e) { return "diag-error:" + e.message; }
+  }
 
   function findSendButton() {
     const composer = findComposer();
-    const container = composer?.closest('form, [class*="input-area"], [class*="composer"], .bottom-container, rich-textarea, .chat-input-container, .input-area-container') || document;
+    const container = composerContainer();
     const visible = b => { try { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; } catch { return false; } };
     const label = b => ((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("data-test-id") || "") + " " + (b.getAttribute("mattooltip") || "") + " " + (b.title || "") + " " + (b.textContent || "")).replace(/\s+/g, " ").trim().toLowerCase();
     const notHistory = b => !b.closest('model-response, user-query, [data-message-author-role], .conversation-container');

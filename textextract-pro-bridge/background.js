@@ -1,5 +1,5 @@
 /* TextExtract Pro Bridge 2.5: durable, owner-scoped request queue. */
-const EXT_VERSION = '2.5.9';
+const EXT_VERSION = '2.5.14';
 const PROVIDERS = {
   gemini: { home: 'https://gemini.google.com/app', hosts: ['gemini.google.com'], script: 'content-gemini.js' },
   deepseek: { home: 'https://chat.deepseek.com/', hosts: ['chat.deepseek.com'], script: 'content-bridge-generic.js' },
@@ -53,11 +53,23 @@ async function finish(job, payload) {
 async function resultFor(job) {
   return (await chrome.storage.local.get('result_' + job.requestId))['result_' + job.requestId];
 }
+// Adapters heartbeat every 8 s. A running job with no heartbeat for this long has lost its adapter
+// (tab closed/reloaded, extension reloaded) and must not block the provider until its deadline.
+const STALE_HEARTBEAT_MS = 45000;
 async function maintain() {
   for (const job of jobs.values()) {
     if (!terminal(job) && Date.now() > job.deadline) {
       if (job.bridgeTabId) await tabMessage(job.bridgeTabId, { type: 'STUDY_AI_CANCEL', requestId: job.requestId }).catch(() => {});
       await finish(job, { ok: false, error: 'Extraction deadline reached. Check the AI tab, then retry this page.' });
+    }
+    if (job.status === 'starting' && !launching.has(job.provider) && Date.now() - (job.createdAt || 0) > 5000) {
+      await finish(job, { ok: false, error: 'Connection setup was interrupted. Retry this page.' });
+    }
+    if (job.status === 'running' && Date.now() - (job.lastHeartbeatAt || 0) > STALE_HEARTBEAT_MS) {
+      const status = job.bridgeTabId ? await tabMessage(job.bridgeTabId, { type: 'STUDY_AI_TAB_STATUS', requestId: job.requestId }).catch(() => null) : null;
+      if (status?.activeRequestId === job.requestId) { job.lastHeartbeatAt = Date.now(); await save(job); }
+      else if (status?.finished) { await tabMessage(job.bridgeTabId, { type: job.capture ? 'STUDY_AI_CAPTURE' : 'STUDY_AI_RUN', requestId: job.requestId }).catch(() => {}); job.lastHeartbeatAt = Date.now(); await save(job); }
+      else await finish(job, { ok: false, error: 'AI tab stopped working on this page (no heartbeat). Retry this page.' });
     }
     if (terminal(job) && Date.now() - job.finishedAt > 10 * 60 * 1000) {
       jobs.delete(job.requestId);
@@ -68,6 +80,8 @@ async function maintain() {
 }
 async function pump() {
   await ready;
+  // Expire orphaned jobs first; otherwise one dead "running" job queues every later page for minutes.
+  await maintain().catch(() => {});
   for (const provider of Object.keys(PROVIDERS)) {
     if (launching.has(provider)) continue;
     if ([...jobs.values()].some(j => j.provider === provider && ['starting', 'running'].includes(j.status))) continue;
@@ -100,7 +114,11 @@ async function launch(job) {
   const targetUrl = job.continueChat ? (preferredUrl || null) : provider.home;
   let navigating = false;
   if (!tab) {
-    tab = await chrome.tabs.create({ url: preferredUrl || provider.home, active: !job.silent });
+    // Same window as the app tab, so showing it for the send never requires a window switch.
+    const admin = await chrome.tabs.get(job.adminTabId).catch(() => null);
+    const placement = admin ? { windowId: admin.windowId, openerTabId: admin.id } : {};
+    tab = await chrome.tabs.create({ url: preferredUrl || provider.home, active: !job.silent, ...placement })
+      .catch(() => chrome.tabs.create({ url: preferredUrl || provider.home, active: !job.silent }));
   } else if (targetUrl && tab.url !== targetUrl) {
     tab = await chrome.tabs.update(tab.id, { url: targetUrl, active: !job.silent });
     navigating = true;
@@ -175,6 +193,21 @@ chrome.runtime.onConnect.addListener(port => {
   if (port.name !== 'study-ai-keepalive') return;
   port.onDisconnect.addListener(() => { void chrome.runtime.lastError; });
   port.postMessage({ type: 'HELLO', version: EXT_VERSION });
+});
+// A hard reload of the app page orphans its in-flight jobs (the new page cannot poll them): cancel
+// them so the next extraction from that page starts at once instead of queueing behind them.
+chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== 'loading') return;
+  void ready.then(async () => {
+    for (const job of jobs.values()) {
+      if (terminal(job) || job.adminTabId !== tabId) continue;
+      if (job.bridgeTabId) await tabMessage(job.bridgeTabId, { type: 'STUDY_AI_CANCEL', requestId: job.requestId }).catch(() => {});
+      job.status = 'cancelled'; job.finishedAt = Date.now();
+      await save(job);
+      await chrome.storage.local.remove('img_' + job.requestId);
+    }
+    void pump();
+  }).catch(console.warn);
 });
 chrome.tabs.onRemoved.addListener(tabId => {
   void ready.then(async () => {
@@ -295,6 +328,36 @@ async function handle(msg, sender) {
     case 'STUDY_AI_RESULT':
       if (adapter) await finish(job, msg);
       return { ok: true };
+    // Gemini's composer ignores script-driven sends in a background tab. The adapter asks for the
+    // tab to be shown just for the send, then hands focus back to whatever was active.
+    case 'STUDY_AI_FOCUS_TAB': {
+      if (!adapter || terminal(job)) return { ok: false };
+      try {
+        let tab = await chrome.tabs.get(job.bridgeTabId);
+        // The bridge tab must be in the window the user is looking at (the app's window). A tab
+        // that is "active" in a minimized or background window still reports hidden, and Gemini
+        // never completes a send while hidden.
+        const admin = await chrome.tabs.get(job.adminTabId).catch(() => null);
+        if (admin && admin.windowId !== tab.windowId) {
+          tab = await chrome.tabs.move(tab.id, { windowId: admin.windowId, index: -1 });
+        }
+        const [active] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+        if (active && active.id !== tab.id) { job.restoreTabId = active.id; await save(job); }
+        await chrome.tabs.update(tab.id, { active: true });
+        const win = await chrome.windows.get(tab.windowId).catch(() => null);
+        if (win && win.state === 'minimized') await chrome.windows.update(tab.windowId, { state: 'normal' }).catch(() => {});
+        await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+        return { ok: true };
+      } catch (error) { return { ok: false, error: error.message }; }
+    }
+    case 'STUDY_AI_RESTORE_TAB': {
+      if (!adapter) return { ok: false };
+      const restore = job.restoreTabId;
+      delete job.restoreTabId;
+      await save(job);
+      if (restore) await chrome.tabs.update(restore, { active: true }).catch(() => {});
+      return { ok: true };
+    }
     case 'STUDY_AI_RESET_SESSION':
       for (const key of Object.keys(sessions)) if (key.startsWith(adminTabId + ':')) delete sessions[key];
       await saveSessions();

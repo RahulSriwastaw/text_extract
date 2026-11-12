@@ -119,7 +119,7 @@ const ToolsPage: React.FC<ToolsPageProps> = ({
   const cardBody = (tool: ToolCard) => (
     <>
       <div className="flex items-start justify-between gap-3 mb-4">
-        <span className="w-11 h-11 rounded-xl flex items-center justify-center bg-accent/10text-accent-light border border-accent/25 [&>svg]:w-5 [&>svg]:h-5">
+        <span className="w-11 h-11 rounded-xl flex items-center justify-center bg-accent/10 text-accent-light border border-accent/25 [&>svg]:w-5 [&>svg]:h-5">
           {tool.icon}
         </span>
         <span className="badge badge-neutral">{tool.badge}</span>

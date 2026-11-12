@@ -12,6 +12,7 @@ import {
   Split,
   LayoutGrid,
   FileSpreadsheet,
+  Scissors,
   Upload,
   CheckCircle2,
   Download,
@@ -37,7 +38,7 @@ const stagger = {
 
 const TRUST = ['Hindi + English', 'LaTeX math', 'Word & CSV export', 'Your own AI key'];
 
-const TOOLS: { id: LaunchableTool | 'csv'; icon: React.ReactNode; title: string; desc: string; output: string }[] = [
+const TOOLS: { id: LaunchableTool | 'csv' | 'pdf-splitter'; href?: string; icon: React.ReactNode; title: string; desc: string; output: string }[] = [
   {
     id: 'mcq-extractor',
     icon: <Zap />,
@@ -65,6 +66,15 @@ const TOOLS: { id: LaunchableTool | 'csv'; icon: React.ReactNode; title: string;
     title: 'Universal CSV converter',
     desc: 'Map existing question banks to the 34-field template with validation.',
     output: 'CSV · audit report',
+    href: '/csv-converter',
+  },
+  {
+    id: 'pdf-splitter',
+    icon: <Scissors />,
+    title: 'PDF splitter & compressor',
+    desc: 'Split big PDFs by size or page limit and compress oversized pages, all in the browser.',
+    output: 'PDF parts · ZIP',
+    href: '/pdf-splitter',
   },
 ];
 
@@ -219,7 +229,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools, onOpenTool })
           <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
             <div>
               <p className="page-eyebrow mb-2">Tools</p>
-              <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">Four tools, one workflow</h2>
+              <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight">Five tools, one workflow</h2>
               <p className="text-ink-3 mt-2 max-w-lg">From a raw PDF to a test-ready question bank without leaving the browser.</p>
             </div>
             <button type="button" onClick={onExploreTools} className="btn btn-ghost">
@@ -233,7 +243,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools, onOpenTool })
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true, margin: '-60px' }}
-            className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4"
+            className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4"
           >
             {TOOLS.map((tool) => {
               const body = (
@@ -252,8 +262,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onExploreTools, onOpenTool })
               const cls = 'group card p-5 h-full w-full text-left flex flex-col transition-colors hover:border-accent/45 hover:bg-surface-2';
               return (
                 <motion.div key={tool.id} variants={fadeUp}>
-                  {tool.id === 'csv' ? (
-                    <a href="/csv-converter" className={cls}>{body}</a>
+                  {tool.href ? (
+                    <a href={tool.href} className={cls}>{body}</a>
                   ) : (
                     <button type="button" onClick={() => openTool(tool.id as LaunchableTool)} className={cls}>{body}</button>
                   )}

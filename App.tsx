@@ -13,6 +13,7 @@ import { Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const UniversalCsvConverter = React.lazy(() => import('./components/UniversalCsvConverter'));
+const PdfSplitter = React.lazy(() => import('./components/PdfSplitter'));
 
 export type ActiveTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
 
@@ -22,6 +23,15 @@ function App() {
       <ErrorBoundary>
         <React.Suspense fallback={<div className="p-8 text-ink-2">Loading CSV converter…</div>}>
           <UniversalCsvConverter />
+        </React.Suspense>
+      </ErrorBoundary>
+    );
+  }
+  if (window.location.pathname.replace(/\/$/, '') === '/pdf-splitter') {
+    return (
+      <ErrorBoundary>
+        <React.Suspense fallback={<div className="p-8 text-ink-2">Loading PDF splitter…</div>}>
+          <PdfSplitter />
         </React.Suspense>
       </ErrorBoundary>
     );

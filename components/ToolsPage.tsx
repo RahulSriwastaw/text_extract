@@ -13,6 +13,7 @@ import {
   Crop,
   LayoutGrid,
   FileSpreadsheet,
+  Scissors,
 } from 'lucide-react';
 
 interface ToolsPageProps {
@@ -92,6 +93,18 @@ const TOOLS: ToolCard[] = [
       { icon: <ListChecks />, label: 'Validation' },
     ],
     href: '/csv-converter',
+  },
+  {
+    id: 'pdf-splitter',
+    icon: <Scissors />,
+    badge: 'Split & compress',
+    title: 'PDF splitter & compressor',
+    desc: 'Drop many PDFs at once; anything over your size or page limit is split into parts and downloaded as a ZIP.',
+    tags: [
+      { icon: <Split />, label: 'Page-range names' },
+      { icon: <FileText />, label: 'Runs in browser' },
+    ],
+    href: '/pdf-splitter',
   },
 ];
 

@@ -212,7 +212,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `my_gemini_explanations_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `my_claude_explanations_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -569,7 +569,7 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                     <BookOpen className="w-10 h-10 mx-auto opacity-30 text-slate-400" />
                     <p className="text-xs font-bold text-slate-400">No Explanations Saved Yet</p>
                     <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
-                      Click "Gemini से Explain" on any mock question to view and save explanations locally on your device.
+                      Click "Claude से Explain" on any mock question to view and save explanations locally on your device.
                     </p>
                   </div>
                 ) : (

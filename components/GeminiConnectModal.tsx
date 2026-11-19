@@ -41,11 +41,11 @@ interface GeminiConnectModalProps {
 
 const PROVIDERS: { id: AiProvider; name: string; url: string; badge: string; desc: string }[] = [
   {
-    id: 'gemini',
-    name: 'Google Gemini',
-    url: 'https://gemini.google.com/app',
+    id: 'claude',
+    name: 'Claude (Anthropic)',
+    url: 'https://claude.ai/',
     badge: 'Recommended',
-    desc: 'Gemini 2.5 Flash / Pro via web interface. Native image & PDF vision.'
+    desc: 'Claude 3.7 Sonnet / 3.5 Sonnet web session. Best math, layout & LaTeX reasoning.'
   },
   {
     id: 'deepseek',
@@ -60,13 +60,6 @@ const PROVIDERS: { id: AiProvider; name: string; url: string; badge: string; des
     url: 'https://chatgpt.com/',
     badge: 'Free Tier',
     desc: 'GPT-4o mini / GPT-4o web chat session in browser.'
-  },
-  {
-    id: 'claude',
-    name: 'Claude (Anthropic)',
-    url: 'https://claude.ai/',
-    badge: 'Alternative',
-    desc: 'Claude 3.5 Sonnet free browser chat thread.'
   }
 ];
 
@@ -157,7 +150,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
   const handleSaveApiKey = async () => {
     const detected = parseUserApiKeys(apiKeyInput);
     if (detected.length === 0) {
-      setStatusMessage({ type: 'error', text: 'Please enter at least one valid Gemini API key (starts with AIza... or AQ...).' });
+      setStatusMessage({ type: 'error', text: 'Please enter at least one valid Claude API key (e.g. sk-ant-...).' });
       return;
     }
 
@@ -165,8 +158,8 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
     setStatusMessage({
       type: 'info',
       text: detected.length > 1
-        ? `Verifying ${detected.length} Gemini API keys with Google...`
-        : 'Verifying with Google Gemini API...'
+        ? `Verifying ${detected.length} Claude API keys...`
+        : 'Verifying with Claude (Anthropic) API...'
     });
 
     const verification = await testGeminiApiKey(apiKeyInput);
@@ -181,8 +174,8 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
       setStatusMessage({
         type: 'success',
         text: detected.length > 1
-          ? `Connected ${detected.length} Gemini API keys! Automatic load-balancing & rotation is active.`
-          : 'Connected successfully with your Gemini account! Unlimited extraction active.'
+          ? `Connected ${detected.length} Claude API keys! Automatic load-balancing & rotation is active.`
+          : 'Connected successfully with Claude API! Unlimited extraction active.'
       });
       if (onConnected) onConnected();
       setTimeout(() => {
@@ -197,7 +190,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
     await clearAiCredentials();
     await loadSettings();
     setApiKeyInput('');
-    setStatusMessage({ type: 'info', text: 'Disconnected from Gemini. Local conversation history is retained.' });
+    setStatusMessage({ type: 'info', text: 'Disconnected from Claude API. Local conversation history is retained.' });
   };
 
   // Google OAuth flow
@@ -330,9 +323,9 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                     <div>
                       <p className="text-xs font-bold text-emerald-300">
-                        Gemini API Connected ({settings?.authType === 'apikey' ? 'Personal API Key' : 'OAuth'})
+                        Claude API Connected (Personal API Key)
                       </p>
-                      <p className="text-[11px] text-emerald-400/80">Direct API mode is currently configured.</p>
+                      <p className="text-[11px] text-emerald-400/80">Direct Claude API mode is currently active.</p>
                     </div>
                   </div>
                   <button
@@ -351,18 +344,6 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                 <div className="flex p-1 bg-white/[0.04] border border-white/[0.06] rounded-xl gap-1">
                   <button
                     type="button"
-                    onClick={() => setActiveTab('extension')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                      activeTab === 'extension'
-                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Bot className="w-3.5 h-3.5" />
-                    <span>TextExtract Pro Bridge (100% Free)</span>
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setActiveTab('chrome_key')}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
                       activeTab === 'chrome_key'
@@ -371,19 +352,19 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     }`}
                   >
                     <Key className="w-3.5 h-3.5" />
-                    <span>Gemini API Key</span>
+                    <span>Claude API Key</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveTab('oauth')}
+                    onClick={() => setActiveTab('extension')}
                     className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                      activeTab === 'oauth'
+                      activeTab === 'extension'
                         ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Google OAuth</span>
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>Claude Web Bridge (100% Free)</span>
                   </button>
                 </div>
 
@@ -536,24 +517,24 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                   </div>
                 )}
 
-                {/* Tab 2: Chrome Google AI Studio Key */}
+                {/* Tab 2: Anthropic Claude API Key */}
                 {activeTab === 'chrome_key' && (
                   <div className="space-y-3.5">
                     <div className="p-3.5 bg-white/[0.04] border border-white/[0.08] rounded-xl space-y-2.5">
                       <div className="flex items-center gap-2 text-xs font-bold text-white">
                         <Zap className="w-4 h-4 text-accent-light" />
-                        <span>Chrome me pehle se Google login hai?</span>
+                        <span>Anthropic Claude API Key chahiye?</span>
                       </div>
                       <p className="text-[11px] text-slate-300 leading-relaxed">
-                        Niche diye gaye button par click karein. Ye aapke Chrome ke <strong>existing logged-in Google account</strong> me Google AI Studio kholega.
+                        Niche diye gaye button par click karke Anthropic Console se apna Claude API key generate karein aur yahan paste karein.
                       </p>
                       <a
-                        href="https://aistudio.google.com/apikey"
+                        href="https://console.anthropic.com/settings/keys"
                         target="_blank"
                         rel="noreferrer"
                         className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/[0.08] hover:bg-white/[0.12] border border-accent/40 hover:border-accent text-accent-light hover:text-white rounded-xl text-xs font-bold transition-all shadow"
                       >
-                        <span>🔗 Open in Chrome & Copy My Gemini Key</span>
+                        <span>🔗 Open Anthropic Console & Copy Claude Key</span>
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     </div>
@@ -561,7 +542,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between text-xs font-bold text-slate-200">
                         <label className="flex items-center gap-2">
-                          <span>Paste Gemini API Key(s):</span>
+                          <span>Paste Claude API Key(s):</span>
                           {parseUserApiKeys(apiKeyInput).length > 1 && (
                             <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 flex items-center gap-1">
                               ⚡ {parseUserApiKeys(apiKeyInput).length} Keys (Auto-Rotating)
@@ -574,11 +555,11 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                         rows={3}
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
-                        placeholder="Paste one or multiple Gemini API keys:&#10;AIzaSy..., AIzaSy..."
+                        placeholder="Paste Claude API key(s) (e.g. sk-ant-api03-...):&#10;sk-ant-..., sk-ant-..."
                         className="w-full px-3.5 py-2.5 bg-white/[0.04] border border-white/[0.1] focus:border-accent rounded-xl text-white text-xs placeholder:text-slate-500 outline-none transition-all font-mono resize-y"
                       />
                       <p className="text-[11px] text-slate-400">
-                        Aap ek se zyada keys paste kar sakte hain. Agar ek key par quota limit aayegi to system bina ruke turant agli key par switch kar lega!
+                        Claude 3.7 / 3.5 Sonnet direct API mode. Multiple keys daalne par load-balance aur auto-rotation activate ho jayega.
                       </p>
                     </div>
 
@@ -591,10 +572,10 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                       {isVerifying ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          Testing Connection with Gemini...
+                          Testing Connection with Claude API...
                         </>
                       ) : (
-                        'Connect & Save Key'
+                        'Connect & Save Claude Key'
                       )}
                     </button>
                   </div>

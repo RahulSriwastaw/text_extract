@@ -34,5 +34,6 @@ firebase-applet-config.json
 *.rar
 test_*
 unzipped_*
+__*
 scratch/
 uploads/

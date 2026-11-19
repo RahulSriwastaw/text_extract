@@ -27,6 +27,7 @@ export const extractLayoutFromImage = async (
   };
 
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -92,6 +93,7 @@ export const proofreadMcqs = async (rawText: string, isBilingual: boolean = fals
   };
 
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 

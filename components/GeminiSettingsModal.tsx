@@ -49,10 +49,10 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
   };
 
   const handleDisconnect = async () => {
-    if (confirm('Disconnect your Gemini connection? (Your local AI conversation history will be kept)')) {
+    if (confirm('Disconnect your Claude connection? (Your local AI conversation history will be kept)')) {
       await clearAiCredentials();
       await loadDetails();
-      setNotification('Gemini disconnected successfully.');
+      setNotification('Claude disconnected successfully.');
       setTimeout(() => setNotification(null), 2000);
     }
   };
@@ -96,7 +96,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                     <Settings className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white font-display">Gemini AI Settings</h3>
+                    <h3 className="text-sm font-bold text-white font-display">Claude AI Settings</h3>
                     <p className="text-[11px] text-slate-400">User connection & device privacy</p>
                   </div>
                 </div>
@@ -120,15 +120,15 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                 <div className="p-3.5 bg-white/[0.02] border border-white/[0.06] rounded-xl space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-bold text-white">Gemini Connection</p>
+                      <p className="text-xs font-bold text-white">Claude Connection</p>
                       <p className="text-[11px] text-slate-400">
                         {isConnected 
                           ? settings?.authType === 'apikey' 
                             ? activeKeyCount > 1 
                               ? `${activeKeyCount} Personal API Keys (Auto-Rotating)`
-                              : 'Personal API Key'
-                            : 'Google OAuth Account'
-                          : 'No Gemini account connected'}
+                              : 'Personal Claude API Key'
+                            : 'Personal Claude API Key'
+                          : 'No Claude account/key connected'}
                       </p>
                     </div>
                     {isConnected ? (
@@ -169,7 +169,7 @@ const GeminiSettingsModal: React.FC<GeminiSettingsModalProps> = ({ isOpen, onClo
                         className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-accent text-on-accent rounded-lg text-xs font-bold hover:shadow-lg transition-all"
                       >
                         <Sparkles className="w-3.5 h-3.5" />
-                        Connect Gemini (Free)
+                        Connect Claude (API / Free)
                       </button>
                     )}
                   </div>

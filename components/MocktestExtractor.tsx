@@ -390,7 +390,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
       setCopiedImagePageId(page.id);
       setTimeout(() => setCopiedImagePageId(null), 3000);
-      alert(`📸 Page ${page.pageNumber} image copied to clipboard!\n\nNow open ChatGPT, Claude, or Gemini and press Ctrl+V to paste the image directly!`);
+      alert(`📸 Page ${page.pageNumber} image copied to clipboard!\n\nNow open Claude or ChatGPT and press Ctrl+V to paste the image directly!`);
     } catch (e: any) {
       console.warn('Direct image clipboard copy fallback:', e);
       try {
@@ -2810,10 +2810,9 @@ Rules:
                         className="select w-44"
                         aria-label="AI provider"
                       >
-                        <option value="gemini">Gemini {bridgeStatus.openProviders?.includes('gemini') ? '🟢 (Tab Open)' : ''}</option>
+                        <option value="claude">Claude {bridgeStatus.openProviders?.includes('claude') ? '🟢 (Tab Open)' : ''}</option>
                         <option value="deepseek">DeepSeek {bridgeStatus.openProviders?.includes('deepseek') ? '🟢 (Tab Open)' : ''}</option>
                         <option value="chatgpt">ChatGPT {bridgeStatus.openProviders?.includes('chatgpt') ? '🟢 (Tab Open)' : ''}</option>
-                        <option value="claude">Claude {bridgeStatus.openProviders?.includes('claude') ? '🟢 (Tab Open)' : ''}</option>
                       </select>
                       {bridgeStatus.connected ? (
                         <button

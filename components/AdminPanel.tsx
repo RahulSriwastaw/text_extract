@@ -234,7 +234,7 @@ const AdminPanel = () => {
             <Zap className="text-accent-light w-6 h-6 fill-white" />
           </div>
           <div>
-            <span className="font-bold text-[18px] tracking-tight block">Gemini Admin</span>
+            <span className="font-bold text-[18px] tracking-tight block">Claude AI Admin</span>
             <span className="text-[11px] text-ink-3 uppercase tracking-widest font-bold">API Management</span>
           </div>
         </div>

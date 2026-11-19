@@ -452,42 +452,44 @@ export async function extractLayoutWithUserGemini(
 }
 
 /**
- * Tests one or multiple API Keys against Gemini to verify validity before saving.
+ * Tests one or multiple API Keys against Claude (Anthropic) or Gemini to verify validity before saving.
  */
 export async function testGeminiApiKey(apiKeyInput: string): Promise<{ success: boolean; message: string; validCount?: number }> {
   const keys = parseUserApiKeys(apiKeyInput);
   if (keys.length === 0) {
-    return { success: false, message: 'Please enter at least one valid Gemini API key (starts with AIza... or AQ...)' };
+    return { success: false, message: 'Please enter at least one valid Claude API key (e.g. starts with sk-ant-...)' };
   }
 
-  // Test the first key to verify Google Generative Language API connectivity
+  // Test the key via our server-side test endpoint to avoid CORS issues
   try {
     const testKey = keys[0];
-    const url = `${API_BASE_URL}/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(testKey)}`;
-    const res = await fetch(url, {
+    const res = await fetch('/api/test-key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: 'Hello, respond with OK.' }] }]
+        apiKey: testKey,
+        provider: 'claude'
       })
     });
 
-    if (res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
       const msg = keys.length > 1
-        ? `Successfully verified ${keys.length} API keys! Smart rotation enabled.`
-        : 'Gemini connection verified successfully!';
+        ? `Successfully verified ${keys.length} Claude API keys! Smart rotation enabled.`
+        : 'Claude API key verified successfully!';
       return { success: true, message: msg, validCount: keys.length };
     }
 
-    const err = await res.json().catch(() => ({}));
     return {
       success: false,
-      message: err.error?.message || `HTTP ${res.status}: Invalid API Key or Quota exceeded`
+      message: data.message || `HTTP ${res.status}: Invalid API Key or Quota exceeded`
     };
   } catch (e: any) {
     return {
       success: false,
-      message: e.message || 'Network error connecting to Gemini API'
+      message: e.message || 'Network error verifying API key'
     };
   }
 }
+
+export const testClaudeApiKey = testGeminiApiKey;

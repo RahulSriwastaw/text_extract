@@ -479,7 +479,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       const status = await pingStudyAiExtension(3000);
       if (!status.connected || status.protocolVersion !== 2) {
         useBridge = false;
-        setBridgeProgressMsg(`Bridge not connected (${status.error || 'extension did not respond'}) — using Direct Gemini API for this run.`);
+        setBridgeProgressMsg(`Bridge not connected (${status.error || 'extension did not respond'}) — using Direct Claude API for this run.`);
       }
     }
 
@@ -557,7 +557,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
               expectedMarker: pageMarker,
               responseFormat: mcqMode ? 'json' : 'text',
               signal: pageAborter.signal,
-              provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
+              provider: getStoredAiProvider() || bridgeStatus.provider || 'claude',
               // Rotate to a fresh chat every few pages: a long chat makes upload and the composer
               // unreliable. Continuation context travels in the prompt, not the chat history.
               continueChat: !startNewChat,
@@ -812,7 +812,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           prompt,
           expectedMarker: pageMarker,
           responseFormat: mcqMode ? 'json' : 'text',
-          provider: getStoredAiProvider() || bridgeStatus.provider || 'gemini',
+          provider: getStoredAiProvider() || bridgeStatus.provider || 'claude',
           continueChat: false,
           pageNumber: page.pageNumber,
           totalPages: pages.length,
@@ -914,7 +914,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: 'Reading complete response from AI tab...' } : p));
 
     try {
-      const provider = getStoredAiProvider() || bridgeStatus.provider || 'gemini';
+      const provider = getStoredAiProvider() || bridgeStatus.provider || 'claude';
       const rawText = await captureFromStudyAiBridge({
         provider,
         fullChat: false,
@@ -1223,19 +1223,19 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                 <button
                   onClick={() => setShowGeminiSettings(true)}
                   className="badge badge-success h-8 px-3 rounded-lg cursor-pointer hover:bg-emerald-500/20"
-                  title="Direct Gemini API is active"
+                  title="Direct Claude API is active"
                 >
                   <Check />
-                  <span>Gemini API active</span>
+                  <span>Claude API active</span>
                 </button>
               ) : pages.length > 0 && (
                 <button
                   onClick={() => setShowGeminiConnect(true)}
                   className="btn btn-secondary"
-                  title="Connect AI Bridge or Gemini account"
+                  title="Connect Claude API or Browser Bridge"
                 >
                   <Sparkles className="text-accent" />
-                  <span>Connect AI engine</span>
+                  <span>Connect Claude engine</span>
                 </button>
               )}
               {pages.length > 0 && (
@@ -1299,18 +1299,18 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                     </div>
                     <p className="text-sm text-ink-3 leading-relaxed">
                       {userGeminiAuth.isAuthenticated
-                        ? 'Using your own Gemini quota. Results stay on this device.'
-                        : 'Use your own Gemini key or the browser bridge. No server limits, and documents stay private.'}
+                        ? 'Using your own Claude quota. Results stay on this device.'
+                        : 'Use your own Claude key or the browser bridge. No server limits, and documents stay private.'}
                     </p>
                     {userGeminiAuth.isAuthenticated ? (
                       <button type="button" onClick={() => setShowGeminiSettings(true)} className="btn btn-secondary w-full">
                         <Settings />
-                        Gemini settings
+                        Claude settings
                       </button>
                     ) : (
                       <button type="button" onClick={() => setShowGeminiConnect(true)} className="btn btn-secondary w-full">
                         <Zap className="text-accent" />
-                        Connect your Gemini (free)
+                        Connect your Claude (API / Free)
                       </button>
                     )}
                   </div>
@@ -1458,10 +1458,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                             aria-pressed={aiEngine === 'api'}
                                             onClick={() => setAiEngine('api')}
                                             className="seg-item"
-                                            title="Direct Gemini API (Uses API Keys)"
+                                            title="Direct Claude API (Uses Anthropic API Key)"
                                         >
                                             <Zap />
-                                            <span>API</span>
+                                            <span>Claude API</span>
                                         </button>
                                     </div>
 
@@ -1475,12 +1475,11 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                             }}
                                             className="select w-36"
                                             aria-label="AI model"
-                                            title="Select AI Model (Gemini, DeepSeek, ChatGPT, Claude)"
+                                            title="Select AI Model (Claude, DeepSeek, ChatGPT)"
                                         >
-                                            <option value="gemini">Gemini web</option>
+                                            <option value="claude">Claude web</option>
                                             <option value="deepseek">DeepSeek web</option>
                                             <option value="chatgpt">ChatGPT web</option>
-                                            <option value="claude">Claude web</option>
                                         </select>
                                     )}
 
@@ -1765,7 +1764,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             </section>
 
             <footer className="pt-6 border-t border-line flex flex-wrap items-center justify-between gap-3 text-xs text-ink-3">
-              <span>© 2026 TextExtract AI Pro · Gemini Vision OCR and Word OMML</span>
+              <span>© 2026 TextExtract AI Pro · Claude Vision OCR and Word OMML</span>
               <span className="flex gap-4">
                 <a href="#" className="hover:text-ink">Privacy</a>
                 <a href="#" className="hover:text-ink">Terms</a>

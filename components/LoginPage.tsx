@@ -22,7 +22,7 @@ const FEATURES = [
   },
   {
     icon: <Bot className="w-4 h-4 text-emerald-400" />,
-    text: 'Multi-AI bridge: Gemini, DeepSeek, ChatGPT & Claude',
+    text: 'Claude API & Multi-AI bridge: Claude, DeepSeek & ChatGPT',
   },
 ];
 

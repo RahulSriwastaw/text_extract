@@ -1939,6 +1939,7 @@ export async function generateDeepSolutionForItem(
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -2047,6 +2048,7 @@ export async function repairMockTestItemWithAi(
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -2784,6 +2786,7 @@ export async function extractMockTestWithDirectApi(
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -2890,6 +2893,7 @@ export async function generateSimilarQuestionItem(
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -2959,6 +2963,7 @@ export async function reverifyMockTestItemWithImages(
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -3020,6 +3025,7 @@ export async function proofreadMocktestItems(
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -3097,6 +3103,7 @@ export async function chatFixMockTestItemWithAi(
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
@@ -3146,6 +3153,7 @@ export async function addMockTestQuestionWithAi(params: {
     'Content-Type': 'application/json'
   };
   if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 

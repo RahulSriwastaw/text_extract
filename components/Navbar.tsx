@@ -109,11 +109,11 @@ const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowSettingsModal(true)}
-                  title="Direct Gemini API Active - Click to configure"
+                  title="Direct Claude API Active - Click to configure"
                   className="badge badge-info h-8 px-3 rounded-lg cursor-pointer hover:bg-blue-500/20"
                 >
                   <CheckCircle2 />
-                  <span>Gemini API</span>
+                  <span>Claude API</span>
                 </button>
               ) : (
                 <button

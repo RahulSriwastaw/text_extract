@@ -86,7 +86,7 @@ export interface ExtractWithBridgeOptions {
   onProgress?: (step: string, detail?: string, chatUrl?: string) => void;
 }
 
-const providers: AiProvider[] = ['gemini', 'deepseek', 'chatgpt', 'claude'];
+const providers: AiProvider[] = ['claude', 'deepseek', 'chatgpt'];
 let cachedStatus: BridgeStatus = { connected: false, state: 'disconnected', provider: getStoredAiProvider(), openProviders: [] };
 const statusListeners = new Set<(status: BridgeStatus) => void>();
 let pendingPing: Promise<BridgeStatus> | null = null;
@@ -203,8 +203,9 @@ export function getBridgeStatus(): BridgeStatus {
 export function getStoredAiProvider(): AiProvider {
   try {
     const stored = localStorage.getItem('study_ai_provider') as AiProvider;
-    return ['gemini', 'deepseek', 'chatgpt', 'claude'].includes(stored) ? stored : 'gemini';
-  } catch { return 'gemini'; }
+    if (stored === 'claude' || stored === 'deepseek' || stored === 'chatgpt') return stored;
+    return 'claude';
+  } catch { return 'claude'; }
 }
 /**
  * Pages per AI chat before the bridge starts a fresh one. A long chat grows the provider's DOM

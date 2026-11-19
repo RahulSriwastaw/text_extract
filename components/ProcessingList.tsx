@@ -289,7 +289,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                     onClick={() => setAiPanelOpenId(aiPanelOpenId === page.id ? null : page.id)}
                                     aria-pressed={aiPanelOpenId === page.id}
                                     className={`btn btn-ghost btn-sm ${aiPanelOpenId === page.id ? 'bg-white/[0.06] text-ink' : ''}`}
-                                    title="Ask Gemini or explain extracted content"
+                                    title="Ask Claude or explain extracted content"
                                 >
                                     <Sparkles /> Ask AI
                                 </button>

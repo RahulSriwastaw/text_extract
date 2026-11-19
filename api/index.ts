@@ -23,38 +23,107 @@ try {
   process.loadEnvFile();
 } catch (e) {}
 
+export const getClaudePrimaryModel = (): string => {
+  return process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+};
+
+export const getClaudeFallbackModel = (): string => {
+  return process.env.CLAUDE_FALLBACK_MODEL || 'claude-haiku-5-5';
+};
+
 export const getPrimaryModel = (): string => {
-  return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const claudeModel = process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL;
+  if (claudeModel) return claudeModel;
+  return 'claude-sonnet-5-5';
 };
 
 export const getFallbackModel = (): string => {
-  return process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash';
+  const claudeFallback = process.env.CLAUDE_FALLBACK_MODEL;
+  if (claudeFallback) return claudeFallback;
+  return 'claude-haiku-5-5';
 };
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
+export const getUserKey = (req: express.Request): string => {
+  return (
+    (req.headers['x-user-claude-key'] as string) ||
+    (req.headers['x-user-gemini-key'] as string) ||
+    (req.headers['x-user-key'] as string) ||
+    ''
+  );
+};
+
 app.get('/api/config', (req, res) => {
   try {
-    const { totalKeys } = getGeminiClient();
+    const { totalKeys } = getAIClient();
     res.json({
       totalKeys,
       model: getPrimaryModel(),
-      fallbackModel: getFallbackModel()
+      fallbackModel: getFallbackModel(),
+      provider: 'claude'
     });
   } catch (error) {
     res.json({
       totalKeys: 0,
       model: getPrimaryModel(),
-      fallbackModel: getFallbackModel()
+      fallbackModel: getFallbackModel(),
+      provider: 'claude'
     });
   }
 });
 
+app.post('/api/test-key', async (req, res) => {
+  try {
+    const { apiKey, provider = 'claude' } = req.body || {};
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 10) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid API key.' });
+    }
+    const cleanKey = apiKey.trim();
+
+    if (provider === 'claude' || cleanKey.startsWith('sk-ant-')) {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': cleanKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: process.env.CLAUDE_FALLBACK_MODEL || 'claude-haiku-5-5',
+          max_tokens: 10,
+          messages: [{ role: 'user', content: 'Respond with OK.' }]
+        })
+      });
+
+      if (response.ok) {
+        return res.json({ success: true, message: 'Claude API key verified successfully! Ready for extraction.', provider: 'claude' });
+      }
+
+      const errJson = await response.json().catch(() => ({}));
+      return res.status(response.status).json({
+        success: false,
+        message: errJson?.error?.message || `Claude API verification failed (HTTP ${response.status})`
+      });
+    } else {
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: cleanKey });
+      await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ text: 'Say OK' }]
+      });
+      return res.json({ success: true, message: 'API key verified successfully!' });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error?.message || 'Verification failed' });
+  }
+});
+
 app.get('/api/debug-key', (req, res) => {
-  const k = process.env.GEMINI_API_KEY || '';
-  res.json({ key: k, length: k.length });
+  const k = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || process.env.GEMINI_API_KEY || '';
+  res.json({ key: k.slice(0, 8) + '...', length: k.length, provider: (process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY) ? 'claude' : 'gemini' });
 });
 
 let globalKeyRotationIndex = 0;
@@ -77,11 +146,74 @@ const activeInFlightRequests = new Map<string, number>();
 
 const FALLBACK_KEYS: string[] = [];
 
-/**
- * Returns all active keys, combining user-provided keys with server-side keys.
- * userKeys take priority if provided.
- */
-const getAllKeys = (userKeyInput?: string): string[] => {
+const getClaudeKeys = (userKeyInput?: string): string[] => {
+  try {
+    process.loadEnvFile();
+  } catch(e) {}
+
+  let primaryKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+  let keysString = process.env.ANTHROPIC_API_KEYS || process.env.CLAUDE_API_KEYS || '';
+
+  if (!primaryKey && !keysString) {
+    const candidatePaths = [
+      path.join(process.cwd(), '.env'),
+      path.resolve('.env'),
+      'h:/Rahul Sriwastaw/Tools/Code/text_extract/.env'
+    ];
+    for (const envPath of candidatePaths) {
+      try {
+        if (fs.existsSync(envPath)) {
+          const content = fs.readFileSync(envPath, 'utf8');
+          content.split('\n').forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('ANTHROPIC_API_KEY=')) {
+              primaryKey = trimmed.replace(/^ANTHROPIC_API_KEY=/, '').replace(/^["']|["']$/g, '');
+            } else if (trimmed.startsWith('CLAUDE_API_KEY=')) {
+              primaryKey = trimmed.replace(/^CLAUDE_API_KEY=/, '').replace(/^["']|["']$/g, '');
+            } else if (trimmed.startsWith('ANTHROPIC_API_KEYS=')) {
+              keysString = trimmed.replace(/^ANTHROPIC_API_KEYS=/, '').replace(/^["']|["']$/g, '');
+            } else if (trimmed.startsWith('CLAUDE_API_KEYS=')) {
+              keysString = trimmed.replace(/^CLAUDE_API_KEYS=/, '').replace(/^["']|["']$/g, '');
+            }
+          });
+          if (keysString || primaryKey) break;
+        }
+      } catch (err) {}
+    }
+  }
+
+  const serverKeys = (keysString || '')
+    .split(/[,\n]+/)
+    .map(k => k.trim().replace(/['"\s]/g, ''))
+    .filter(k => k && k.length > 10);
+
+  if (primaryKey && primaryKey.trim().length > 10) {
+    const cleanPrimary = primaryKey.trim().replace(/['"\s]/g, '');
+    if (!serverKeys.includes(cleanPrimary)) {
+      serverKeys.unshift(cleanPrimary);
+    }
+  }
+
+  const userKeys: string[] = [];
+  if (userKeyInput && typeof userKeyInput === 'string') {
+    const parsed = userKeyInput
+      .split(/[,\n]+/)
+      .map(k => k.trim().replace(/['"\s]/g, ''))
+      .filter(k => k && k.length > 10);
+    userKeys.push(...parsed);
+  }
+
+  const combined: string[] = [];
+  for (const k of [...userKeys, ...serverKeys]) {
+    if (!combined.includes(k) && !deadKeys.has(k)) {
+      combined.push(k);
+    }
+  }
+
+  return combined;
+};
+
+const getGeminiLegacyKeys = (userKeyInput?: string): string[] => {
   try {
     process.loadEnvFile();
   } catch(e) {}
@@ -89,7 +221,6 @@ const getAllKeys = (userKeyInput?: string): string[] => {
   let primaryKey = process.env.GEMINI_API_KEY;
   let keysString = process.env.GEMINI_API_KEYS || '';
 
-  // Direct read from .env if process.env is empty
   if (!primaryKey && !keysString) {
     const candidatePaths = [
       path.join(process.cwd(), '.env'),
@@ -114,13 +245,12 @@ const getAllKeys = (userKeyInput?: string): string[] => {
       } catch (err) {}
     }
   }
-  
-  // Parse server pool keys
+
   const serverKeys = (keysString || '')
     .split(/[,\n]+/)
     .map(k => k.trim().replace(/['"\s]/g, ''))
     .filter(k => k && k.length > 20);
-    
+
   if (primaryKey && primaryKey.length > 20) {
     const cleanPrimary = primaryKey.trim().replace(/['"\s]/g, '');
     if (!serverKeys.includes(cleanPrimary)) {
@@ -128,7 +258,6 @@ const getAllKeys = (userKeyInput?: string): string[] => {
     }
   }
 
-  // Parse user-supplied keys from request headers/settings
   const userKeys: string[] = [];
   if (userKeyInput && typeof userKeyInput === 'string') {
     const parsed = userKeyInput
@@ -138,7 +267,6 @@ const getAllKeys = (userKeyInput?: string): string[] => {
     userKeys.push(...parsed);
   }
 
-  // Combine: user keys first, then all server keys, removing duplicates and dead keys
   const combined: string[] = [];
   for (const k of [...userKeys, ...serverKeys, ...FALLBACK_KEYS]) {
     if (!combined.includes(k) && !deadKeys.has(k)) {
@@ -147,6 +275,31 @@ const getAllKeys = (userKeyInput?: string): string[] => {
   }
 
   return combined;
+};
+
+export interface KeyPoolInfo {
+  keys: string[];
+  provider: 'claude' | 'gemini';
+}
+
+export const getActiveKeyPool = (userKeyInput?: string): KeyPoolInfo => {
+  const claudeKeys = getClaudeKeys(userKeyInput);
+  if (claudeKeys.length > 0) {
+    return { keys: claudeKeys, provider: 'claude' };
+  }
+  const geminiKeys = getGeminiLegacyKeys(userKeyInput);
+  if (geminiKeys.length > 0) {
+    return { keys: geminiKeys, provider: 'gemini' };
+  }
+  return { keys: [], provider: 'claude' };
+};
+
+/**
+ * Returns all active keys, combining user-provided keys with server-side keys.
+ * userKeys take priority if provided.
+ */
+const getAllKeys = (userKeyInput?: string): string[] => {
+  return getActiveKeyPool(userKeyInput).keys;
 };
 
 // Admin Auth Middleware
@@ -254,17 +407,18 @@ app.post('/api/admin/reset-key-health', checkAdminAuth, (req, res) => {
 
 /**
  * Intelligent Concurrency-Aware API Key Selector with Instant Failover.
+ * - Supports Claude (Anthropic) as primary engine and Google GenAI as fallback.
  * - Prioritizes completely idle keys (activeInFlightRequests === 0) for true parallel execution.
  * - Excludes keys currently in deadKeys, dailyExhaustedKeys, or temporary cooldown.
  * - Distributes load smoothly across all healthy keys in the pool without bottle-necking.
  */
-const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: string) => {
-  const allKeys = getAllKeys(userKeyInput);
+export const getAIClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: string) => {
+  const { keys: allKeys, provider } = getActiveKeyPool(userKeyInput);
   const now = Date.now();
   const skipSet = skipKeys instanceof Set ? skipKeys : new Set(skipKeys);
 
   if (allKeys.length === 0) {
-    throw new Error("No valid API keys found. Please verify your keys in .env (GEMINI_API_KEYS) or Settings menu.");
+    throw new Error("No valid Claude API keys found. Please set ANTHROPIC_API_KEY in .env or add your Claude API key in Settings.");
   }
 
   const total = allKeys.length;
@@ -278,16 +432,10 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
     return true;
   };
 
-  // Pass 1: Healthy keys not yet tried in this request sequence
   const untriedHealthy = allKeys.filter(k => !skipSet.has(k) && isHealthyKey(k));
-  // Pass 2: If all healthy were in skipSet, consider all healthy keys in pool
   const candidatePool = untriedHealthy.length > 0 ? untriedHealthy : allKeys.filter(k => isHealthyKey(k));
 
   if (candidatePool.length > 0) {
-    // Smart Load-Balancing Sort:
-    // 1. In-flight active requests ASC (idle keys first)
-    // 2. Consecutive errors ASC (most stable keys first)
-    // 3. Sequential rotation offset for fair distribution
     candidatePool.sort((a, b) => {
       const activeA = activeInFlightRequests.get(a) || 0;
       const activeB = activeInFlightRequests.get(b) || 0;
@@ -309,7 +457,10 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
     globalKeyRotationIndex = (selIdx + 1) % total;
 
     return {
-      client: new GoogleGenAI({ apiKey: selectedKey }),
+      provider,
+      client: provider === 'claude'
+        ? { provider: 'claude', apiKey: selectedKey }
+        : new GoogleGenAI({ apiKey: selectedKey }),
       key: selectedKey,
       keyIndex: selIdx + 1,
       totalKeys: total,
@@ -317,12 +468,10 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
     };
   }
 
-  // Pass 3: All keys are in temporary cooldown or daily exhausted/dead
-  // Find non-dead, non-daily-exhausted candidates whose cooldown expires earliest
   const eligibleTemporary = allKeys.filter(k => !deadKeys.has(k) && (dailyExhaustedKeys.get(k) || 0) <= now);
 
   if (eligibleTemporary.length === 0) {
-    throw new Error(`All ${total} API keys have reached daily limit or are unavailable. Please add fresh Gemini API keys in Settings.`);
+    throw new Error(`All ${total} API keys have reached momentary rate limit or are unavailable. Please add fresh keys in Settings.`);
   }
 
   eligibleTemporary.sort((a, b) => {
@@ -338,13 +487,18 @@ const getGeminiClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: s
   globalKeyRotationIndex = (selIdx + 1) % total;
 
   return {
-    client: new GoogleGenAI({ apiKey: selectedKey }),
+    provider,
+    client: provider === 'claude'
+      ? { provider: 'claude', apiKey: selectedKey }
+      : new GoogleGenAI({ apiKey: selectedKey }),
     key: selectedKey,
     keyIndex: selIdx + 1,
     totalKeys: total,
     waitNeededMs
   };
 };
+
+const getGeminiClient = getAIClient;
 
 const reportKeySuccess = (key: string) => {
   const health = keyHealth.get(key) || { 
@@ -540,10 +694,98 @@ const safeExtractResponseText = (response: any): string => {
 };
 
 /**
- * High-speed Gemini model invocation with instant failover on rate limits.
- * Avoids hammering alternate models on a rate-limited key, immediately delegating rotation to runAIAction.
+ * Invokes Anthropic Claude Messages API directly with vision & text payloads.
  */
-export const callGeminiWithFallback = async (
+export async function callClaudeMessagesApi(
+  apiKey: string,
+  model: string,
+  contents: any[] | string,
+  config: Record<string, any> = {},
+  label = 'Claude AI call'
+): Promise<string> {
+  const rawList = typeof contents === 'string' ? [{ text: contents }] : contents;
+  const contentParts: any[] = [];
+
+  for (const item of rawList) {
+    if (typeof item === 'string') {
+      contentParts.push({ type: 'text', text: item });
+    } else if (item?.text) {
+      contentParts.push({ type: 'text', text: item.text });
+    } else if (item?.inlineData) {
+      let mime = item.inlineData.mimeType || 'image/png';
+      if (mime === 'image/jpg') mime = 'image/jpeg';
+      const cleanData = String(item.inlineData.data || '').replace(/^data:image\/[a-zA-Z]+;base64,/, '').trim();
+      if (cleanData) {
+        contentParts.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: mime,
+            data: cleanData
+          }
+        });
+      }
+    }
+  }
+
+  let systemText = config.systemInstruction;
+  if (config.responseMimeType === 'application/json' && !systemText) {
+    systemText = 'You are a highly precise document extraction engine. You MUST output ONLY valid JSON without markdown fences (no ```json ... ```) and no explanations.';
+  }
+
+  const payload: Record<string, any> = {
+    model,
+    max_tokens: config.maxOutputTokens || 8192,
+    messages: [
+      {
+        role: 'user',
+        content: contentParts
+      }
+    ]
+  };
+
+  if (systemText) {
+    payload.system = typeof systemText === 'string' ? systemText : JSON.stringify(systemText);
+  }
+
+  // Newer Claude models deprecate the temperature parameter
+  if (config.temperature !== undefined && !model.includes('-5') && !model.includes('sonnet-5') && !model.includes('haiku-5')) {
+    payload.temperature = config.temperature;
+  }
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorJson = await response.json().catch(() => ({}));
+    const errorMessage = errorJson?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+    const err: any = new Error(`[${label}] Claude error: ${errorMessage}`);
+    err.status = response.status;
+    err.errorType = errorJson?.error?.type;
+    throw err;
+  }
+
+  const data = await response.json();
+  const text = (data.content || [])
+    .filter((c: any) => c.type === 'text')
+    .map((c: any) => c.text || '')
+    .join('');
+
+  return text;
+}
+
+/**
+ * Universal AI model invocation with instant failover on rate limits.
+ * Automatically delegates to Claude Messages API (primary) or Google Gemini API.
+ */
+export const callAIWithFallback = async (
   client: any,
   primaryModel: string = getPrimaryModel(),
   fallbackModel: string = getFallbackModel(),
@@ -551,13 +793,57 @@ export const callGeminiWithFallback = async (
   config: Record<string, any> = {},
   label = 'AI call'
 ): Promise<string> => {
+  // Check if client is a Claude client
+  const isClaude = client?.provider === 'claude' || client?.apiKey?.startsWith('sk-ant-') || (client?.apiKey && !client?.models);
+
+  if (isClaude) {
+    const claudeKey = client?.apiKey || client?.key || process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
+    const modelsToTry = [
+      primaryModel || getPrimaryModel(),
+      fallbackModel || getFallbackModel(),
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5-20251001'
+    ].filter((m, i, arr) => m && arr.indexOf(m) === i);
+
+    let lastErr: any = null;
+    for (const modelToUse of modelsToTry) {
+      try {
+        const text = await callClaudeMessagesApi(claudeKey, modelToUse, contents, config, label);
+        if (text && text.trim()) {
+          return text;
+        }
+        throw new Error(`[${label}] Claude model ${modelToUse} returned empty output.`);
+      } catch (err: any) {
+        lastErr = err;
+        const errStr = (err?.message || String(err)).toUpperCase();
+        if (errStr.includes('429') || errStr.includes('RATE_LIMIT') || errStr.includes('OVERLOADED') || errStr.includes('529')) {
+          throw err;
+        }
+        if (
+          errStr.includes('404') ||
+          errStr.includes('NOT_FOUND') ||
+          errStr.includes('MODEL') ||
+          errStr.includes('UNAVAILABLE') ||
+          errStr.includes('EMPTY OUTPUT')
+        ) {
+          console.warn(`[${label}] Claude model ${modelToUse} failed (${err?.message?.slice(0, 100)}). Trying fallback model...`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr || new Error(`[${label}] All Claude models returned empty output.`);
+  }
+
+  // Google Gemini Fallback
   const modelsToTry = [
-    primaryModel || getPrimaryModel(),
-    fallbackModel || getFallbackModel(),
+    process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash',
     'gemini-flash-latest'
   ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-  // Optimize token usage and speed: disable heavy thinking tokens
   const effectiveConfig = {
     ...config,
     thinkingConfig: config.thinkingConfig !== undefined ? config.thinkingConfig : { thinkingBudget: 0 }
@@ -582,8 +868,6 @@ export const callGeminiWithFallback = async (
       lastErr = err;
       const errStr = (err?.message || String(err)).toUpperCase();
 
-      // If key is rate-limited (429/RESOURCE_EXHAUSTED/QUOTA), do not waste 20s trying other models on this key!
-      // Immediately throw so runAIAction rotates to a FRESH key in the pool!
       if (errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('QUOTA')) {
         throw err;
       }
@@ -603,6 +887,8 @@ export const callGeminiWithFallback = async (
 
   throw lastErr || new Error(`[${label}] All models returned empty output.`);
 };
+
+export const callGeminiWithFallback = callAIWithFallback;
 
 const cleanBilingualDuplicates = (text: string): string => {
   if (!text) return text;
@@ -1545,7 +1831,7 @@ app.post('/api/extract', async (req, res) => {
       autoProofread = false,
       optionArrangement
     } = req.body;
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
     const elements = await extractLayoutWithRetry(
       base64Image, 
       ocrText, 
@@ -1576,7 +1862,7 @@ app.post('/api/extract', async (req, res) => {
 app.post('/api/proofread', async (req, res) => {
   try {
     const { rawText, isBilingual } = req.body;
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
     const questions = await proofreadWithRetry(rawText, isBilingual, userKey);
     res.json({ questions });
   } catch (error: any) {
@@ -1614,7 +1900,7 @@ ${HTML_LATEX_FORMAT_RULES}
 app.post('/api/mocktest-solve', async (req, res) => {
   try {
     const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option5_hi, option1_en, option2_en, option3_en, option4_en, option5_en, answer, question_type } = req.body;
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     const qPrompt = `You are an elite Indian Competitive Exam Educator and Master Test-Series Author (specializing in SSC CGL/CHSL, Railway RRB NTPC/ALP/Group-D, Banking IBPS/SBI, UPSC, State PSC, and YCT-style exam publications).
 Provide a THOROUGH, IN-DEPTH, STEP-BY-STEP PEDAGOGICAL SOLUTION tailored precisely to this question so that students of ANY level (from beginners to advanced) can easily understand the complete concept and derivation.
@@ -1704,7 +1990,7 @@ app.post('/api/mocktest-repair-item', async (req, res) => {
       return res.status(400).json({ error: "Missing question item in request body" });
     }
 
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     const repairPrompt = `You are an elite competitive exam test-series architect, educator, and question digitizer (SSC CGL, Railway RRB, Banking, UPSC).
 You are given an INCOMPLETE exam question item. Some fields may be blank, options may be missing or stuck at the end of the question stem, or the subject and solution may need deep pedagogical repair.
@@ -1797,7 +2083,7 @@ app.post('/api/mocktest-reverify', async (req, res) => {
     if (!item) {
       return res.status(400).json({ error: "Missing question item in request body" });
     }
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     const cleanImg = (img?: string) => {
       if (!img) return '';
@@ -1905,7 +2191,7 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
 app.post('/api/mocktest-extract', async (req, res) => {
   try {
     const { base64Image, rawText, setName = 'Exam Paper', pendingContext, pageNumber, generateSimilar = false } = req.body;
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     let cleanBase64 = base64Image || '';
     if (cleanBase64.includes(';base64,')) {
@@ -2175,7 +2461,7 @@ app.post('/api/mocktest-generate-similar-item', async (req, res) => {
     if (!item) {
       return res.status(400).json({ error: "Missing question item in request body" });
     }
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     const prompt = `You are an elite Competitive Exam Test-Series Architect, Question Creator, and Educator (SSC CGL, Railway RRB, Banking, UPSC, State PSC).
 
@@ -2266,7 +2552,7 @@ Output ONLY a JSON object matching this structure:
 app.post('/api/mocktest-proofread', async (req, res) => {
   try {
     const { items } = req.body;
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.json({ items: [] });
@@ -2351,7 +2637,7 @@ app.post('/api/mocktest-ai-chat', async (req, res) => {
     if (!item || !userPrompt) {
       return res.status(400).json({ error: "Missing item or userPrompt in request body" });
     }
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     // Format previous conversation history if present
     let conversationHistoryText = '';
@@ -2491,7 +2777,7 @@ app.post('/api/mocktest-add-question', async (req, res) => {
       return res.status(400).json({ error: "Please provide either question text, an instruction, or an image/screenshot." });
     }
 
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     let cleanBase64 = '';
     if (base64Image) {
@@ -2640,7 +2926,7 @@ Respond with ONLY a strict JSON object:
 app.post('/api/latex/repair', async (req, res) => {
   try {
     const { content, contentType = 'content', selectedFormula, item, scope } = req.body;
-    const userKey = (req.headers['x-user-gemini-key'] as string) || '';
+    const userKey = getUserKey(req);
 
     // Scope-level item repair (Entire MCQ, Question, Options, Solution)
     if (item && typeof item === 'object') {

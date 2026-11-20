@@ -368,7 +368,10 @@ app.post('/api/admin/login', (req, res) => {
   const adminUser = process.env.ADMIN_USERNAME;
   const adminPass = process.env.ADMIN_PASSWORD;
 
-  if (adminUser && adminPass && username === adminUser && password === adminPass) {
+  if (!adminUser || !adminPass) return res.status(503).json({
+    error: 'Admin login is not configured. Set ADMIN_USERNAME and ADMIN_PASSWORD in the server environment.'
+  });
+  if (username === adminUser && password === adminPass) {
     res.json({ success: true });
   } else {
     res.status(401).json({ error: "Invalid username or password" });

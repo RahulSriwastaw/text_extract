@@ -100,7 +100,11 @@ const AdminPanel = () => {
         setIsAuthenticated(true);
         fetchStats();
       } else {
-        setLoginError('Invalid username or password');
+        const detail = res.headers.get('content-type')?.includes('application/json')
+          ? await res.json().catch(() => null) : null;
+        setLoginError(res.status >= 500
+          ? detail?.error || 'Admin backend is unavailable (HTTP ' + res.status + '). Check Vercel Runtime Logs.'
+          : detail?.error || 'Invalid username or password');
       }
     } catch (err) {
       setLoginError('Login failed. Please check your server connection.');

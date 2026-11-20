@@ -46,7 +46,7 @@ interface KeyStats {
 }
 
 const AdminPanel = () => {
-  const [activeTab, setActiveTab] = useState('Overview');
+  const [activeTab, setActiveTab] = useState(new URLSearchParams(location.search).has('drive') ? 'Settings' : 'Overview');
   const [keyStats, setKeyStats] = useState<KeyStats[]>([]);
   const [deadKeys, setDeadKeys] = useState<KeyStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -278,7 +278,7 @@ const AdminPanel = () => {
         {/* Header */}
         <header className="h-20 bg-surface/50 backdrop-blur-md border-b border-line flex items-center justify-between px-8 z-10">
           <div className="flex items-center gap-4 flex-1">
-             <h1 className="text-[20px] font-bold tracking-tight">API Performance Dashboard</h1>
+             <h1 className="text-[20px] font-bold tracking-tight">{activeTab === 'Overview' ? 'API Performance Dashboard' : activeTab}</h1>
           </div>
 
           <div className="flex items-center gap-4">
@@ -311,7 +311,8 @@ const AdminPanel = () => {
 
         {/* Dashboard Content */}
         <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
-          <AdminDrive headers={getAuthHeader} />
+          {activeTab === 'Settings' && <AdminDrive headers={getAuthHeader} />}
+          {activeTab === 'Overview' && <>
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
@@ -335,6 +336,8 @@ const AdminPanel = () => {
             ))}
           </div>
 
+          </>}
+          {(activeTab === 'Overview' || activeTab === 'Reports') && <>
           {/* Charts Row */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 bg-surface p-6 rounded-2xl border border-line">
@@ -400,6 +403,8 @@ const AdminPanel = () => {
             </div>
           </div>
 
+          </>}
+          {(activeTab === 'Overview' || activeTab === 'Keys Health') && <>
           {/* Table Section */}
           <div className="bg-surface rounded-2xl border border-line overflow-hidden">
             <div className="p-6 border-b border-line flex items-center justify-between">
@@ -494,6 +499,7 @@ const AdminPanel = () => {
               </table>
             </div>
           </div>
+          </>}
         </div>
       </main>
     </div>

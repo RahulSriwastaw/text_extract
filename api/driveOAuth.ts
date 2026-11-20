@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export function registerDriveOAuth(app: Express, admin: RequestHandler) {
-  const attempts = new Map<string, { cookie: string; expires: number; redirect: string }>();
+  // Persist pending handshakes across development-server restarts.
+  const attemptsDir = path.resolve('.drive-oauth.local');
+  const cookieName = (state: string) => 'drive_oauth_' + state;
+
   app.get('/api/admin/drive', admin, (_req,res) => res.json({
     configured: !!(process.env.GOOGLE_DRIVE_CLIENT_ID && process.env.GOOGLE_DRIVE_CLIENT_SECRET),
     connected: !!process.env.GOOGLE_DRIVE_REFRESH_TOKEN,
@@ -12,15 +15,23 @@ export function registerDriveOAuth(app: Express, admin: RequestHandler) {
     folder: process.env.GOOGLE_DRIVE_FOLDER_URL || '',
     sheet: process.env.GOOGLE_QUESTIONS_SPREADSHEET_URL || '',
   }));
-  app.post('/api/admin/drive/connect', admin, (_req,res) => {
+  app.post('/api/admin/drive/connect', admin, (req,res) => {
     const client = process.env.GOOGLE_DRIVE_CLIENT_ID;
     const secret = process.env.GOOGLE_DRIVE_CLIENT_SECRET;
     const redirect = process.env.GOOGLE_DRIVE_REDIRECT_URI;
     if (!client || !secret || !redirect) return res.status(400).json({error:'Set GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET and GOOGLE_DRIVE_REDIRECT_URI in .env first.'});
-    for (const [key,value] of attempts) if (value.expires < Date.now()) attempts.delete(key);
+    const target = new URL(redirect);
+    if (req.get('origin') !== target.origin) return res.status(400).json({
+      error: 'Open the admin panel at ' + target.origin + '/admin and connect there so the Google callback uses the same browser host.'
+    });
+    fs.mkdirSync(attemptsDir, { recursive: true, mode: 0o700 });
+    for (const name of fs.readdirSync(attemptsDir)) {
+      const file = path.join(attemptsDir,name);
+      if (/^[a-f0-9]{64}\.json$/.test(name) && fs.statSync(file).mtimeMs < Date.now()-600000) fs.unlinkSync(file);
+    }
     const state = randomBytes(32).toString('hex'), cookie = randomBytes(32).toString('hex');
-    attempts.set(state,{cookie,expires:Date.now()+600000,redirect});
-    res.cookie('drive_oauth',cookie,{httpOnly:true,sameSite:'lax',secure:redirect.startsWith('https:'),maxAge:600000,path:'/api/admin/drive'});
+    fs.writeFileSync(path.join(attemptsDir,state+'.json'),JSON.stringify({cookie,expires:Date.now()+600000,redirect}),{mode:0o600,flag:'wx'});
+    res.cookie(cookieName(state),cookie,{httpOnly:true,sameSite:'lax',secure:redirect.startsWith('https:'),maxAge:600000,path:'/api/admin/drive'});
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({client_id:client,redirect_uri:redirect,response_type:'code',access_type:'offline',prompt:'consent',
       scope:'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets',state}).toString();
@@ -28,12 +39,17 @@ export function registerDriveOAuth(app: Express, admin: RequestHandler) {
   });
   app.get('/api/admin/drive/callback', async(req,res) => {
     const state = typeof req.query.state === 'string' ? req.query.state : '';
-    const attempt = attempts.get(state);
-    const cookie = req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith('drive_oauth='))?.slice(12) || '';
+    let attempt: { cookie: string; expires: number; redirect: string } | undefined;
+    const file = /^[a-f0-9]{64}$/.test(state) ? path.join(attemptsDir,state+'.json') : undefined;
+    try { if (file) attempt = JSON.parse(fs.readFileSync(file,'utf8')); } catch {}
+    const prefix = cookieName(state) + '=';
+
+    const cookie = req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith(prefix))?.slice(prefix.length) || '';
     if (!attempt || attempt.expires < Date.now() || cookie.length !== attempt.cookie.length ||
       !timingSafeEqual(Buffer.from(cookie),Buffer.from(attempt.cookie))) return res.status(400).send('Authorization expired or invalid. Open admin panel and connect again.');
-    attempts.delete(state);
-    res.clearCookie('drive_oauth',{path:'/api/admin/drive'});
+    // Consume synchronously before exchanging the code to reject callback replay.
+    try { fs.unlinkSync(file!); } catch { return res.status(400).send('Authorization already used. Connect again from admin.'); }
+    res.clearCookie(cookieName(state),{path:'/api/admin/drive'});
     const finish = (status: string) => res.redirect('/admin?drive='+status);
     if (req.query.error || typeof req.query.code !== 'string') return finish('cancelled');
     try {

@@ -4,7 +4,7 @@
  */
 
 (function() {
-  const EXT_VER = "2.5.16";
+  const EXT_VER = "2.5.17";
   if (window.__tfStudyAiGeminiVer === EXT_VER) return;
   const runtime = window.__studyAiRuntime;
   window.__tfStudyAiGeminiVer = EXT_VER;

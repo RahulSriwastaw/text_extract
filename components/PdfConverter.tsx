@@ -1,3 +1,4 @@
+import { ClaudeModelSelect } from './ClaudeModelSelect';
 import { useConverterSettings } from '../services/converterSettings';
 import { getReadyExport } from '../services/converterExport';
 import React, { useState, useEffect, useRef } from 'react';
@@ -68,7 +69,7 @@ const ToggleChip: React.FC<{ on: boolean; onClick: () => void; label: string; ti
 );
 
 const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClearInitialImages }) => {
-  const [{ autoDownload, numberingStyle, isBilingual, includeImages, figureMode, optionArrangement, mcqMode, showMcqNumbers, showAnswers, refineMode, autoProofread, aiEngine, provider }, updateSetting, syncError] = useConverterSettings(uid);
+  const [{ claudeModel, autoDownload, numberingStyle, isBilingual, includeImages, figureMode, optionArrangement, mcqMode, showMcqNumbers, showAnswers, refineMode, autoProofread, aiEngine, provider }, updateSetting, syncError] = useConverterSettings(uid);
   useEffect(() => { if (provider !== getStoredAiProvider()) setStoredAiProvider(provider); }, [provider]);
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [pages, setPages] = useState<ScannedPage[]>([]);
@@ -477,7 +478,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
       if (stopped()) return;
       if (!status.connected || status.protocolVersion !== 2) {
         useBridge = false;
-        setBridgeProgressMsg(`Bridge not connected (${status.error || 'extension did not respond'}) — using Direct Claude API for this run.`);
+        setBridgeProgressMsg(`Bridge not connected (${status.error || 'extension did not respond'}) — using Direct API for this run.`);
       }
     }
 
@@ -686,7 +687,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                   showAnswers,
                   showMcqNumbers,
                   autoProofread,
-                  optionArrangement, 0, pageAborter.signal, figureMode
+                  optionArrangement, 0, pageAborter.signal, figureMode, claudeModel
                 );
                 if (pageAborter.signal.aborted) return;
 
@@ -862,7 +863,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
         showAnswers,
         showMcqNumbers,
         autoProofread,
-        optionArrangement, 0, aborter.signal, figureMode
+        optionArrangement, 0, aborter.signal, figureMode, claudeModel
       );
       if (aborter.signal.aborted) return;
       
@@ -1203,7 +1204,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                 <button
                   onClick={() => setShowGeminiSettings(true)}
                   className="badge badge-success h-8 px-3 rounded-lg cursor-pointer hover:bg-emerald-500/20"
-                  title="Direct Claude API is active"
+                  title="Direct API is active"
                 >
                   <Check />
                   <span>Claude API active</span>
@@ -1441,13 +1442,14 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                                             aria-pressed={aiEngine === 'api'}
                                             onClick={() => updateSetting('aiEngine', 'api')}
                                             className="seg-item"
-                                            title="Direct Claude API (Uses Anthropic API Key)"
+                                            title="Direct API (Claude or Gemini)"
                                         >
                                             <Zap />
-                                            <span>Claude API</span>
+                                            <span>Direct API</span>
                                         </button>
                                     </div>
 
+                                    {aiEngine === 'api' && <ClaudeModelSelect value={claudeModel} onChange={m => updateSetting('claudeModel', m)} />}
                                     {aiEngine === 'extension' && (
                                         <select
                                             value={provider}

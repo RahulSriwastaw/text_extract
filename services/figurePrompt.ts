@@ -7,6 +7,6 @@ Ignore background watermarks, publisher or coaching logos, instructor portraits 
 When branding overlaps a real figure, select the actual figure and its labels as tightly as possible. Never select the watermark separately. Keep a logo or photograph only when the question or main text actually uses it as subject matter. For each retained image include "figureRole": "content".`;
 export function mcqFigureInstruction(mode: 'off' | 'crop' | 'svg') {
   if (mode === 'off') return '';
-  return '\n' + CONTENT_FIGURE_INSTRUCTION + '\nFor MCQs, place qualifying visuals in an extra "figures" array on the owning question. Each entry has "target" (question, option1 through option5, or solution), "sourcePage" (actual attached page number), "content" (short caption), and "bbox" [ymin,xmin,ymax,xmax] in 0–1000 page coordinates. Return [] for no figures. Keep image markup out of question and option text.\n' +
+  return '\n' + CONTENT_FIGURE_INSTRUCTION + '\nFor MCQs, place qualifying visuals in an extra "figures" array on the owning question. Each entry has "target" (question, option1 through option5, or solution), "sourcePage" (actual attached page number), "content" (short caption), and "bbox" [ymin,xmin,ymax,xmax] in 0–1000 page coordinates. Keep the original graph or chart as a figure even when its data is also transcribed into a table. For a shared passage attach it to the question introducing the passage. Return [] for no figures. Keep image markup out of question and option text.\n' +
     (mode === 'svg' ? SVG_FIGURE_INSTRUCTION : '');
 }

@@ -1,3 +1,4 @@
+import { defaultClaudeModel, type DirectModel } from './claudeModels';
 import { useEffect, useRef, useState } from 'react';
 import { doc, getFirestore, onSnapshot, setDoc } from 'firebase/firestore';
 import { NumberingStyle, OptionArrangement } from '../types';
@@ -5,12 +6,14 @@ import type { AiProvider } from './studyAiBridgeService';
 import type { DifficultyLevel, FigureMode } from '../types';
 
 const defaults = {
+  claudeModel: defaultClaudeModel as DirectModel,
   autoDownload: true, numberingStyle: NumberingStyle.HASH, isBilingual: false,
   includeImages: false, figureMode: 'crop' as FigureMode, optionArrangement: OptionArrangement.VERTICAL, mcqMode: false,
   showMcqNumbers: true, showAnswers: true, refineMode: false, autoProofread: false,
   aiEngine: 'extension' as 'extension' | 'api', provider: 'claude' as AiProvider,
 };
 const mcqDefaults = {
+  claudeModel: defaultClaudeModel as DirectModel,
   figureMode: 'off' as 'off' | FigureMode,
   aiEngine: 'bridge' as 'bridge' | 'api', selectedProvider: 'claude' as AiProvider,
   pagesPerRequest: 1, batchSize: 3, extractionMode: 'exact' as 'exact' | 'similar',

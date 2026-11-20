@@ -1,3 +1,5 @@
+import { resolveClaudeModel } from './claudeModelSelection.js';
+import type { ClaudeModel } from '../services/claudeModels.js';
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
@@ -284,16 +286,14 @@ export interface KeyPoolInfo {
   provider: 'claude' | 'gemini';
 }
 
-export const getActiveKeyPool = (userKeyInput?: string): KeyPoolInfo => {
-  const claudeKeys = getClaudeKeys(userKeyInput);
-  if (claudeKeys.length > 0) {
-    return { keys: claudeKeys, provider: 'claude' };
-  }
-  const geminiKeys = getGeminiLegacyKeys(userKeyInput);
-  if (geminiKeys.length > 0) {
-    return { keys: geminiKeys, provider: 'gemini' };
-  }
-  return { keys: [], provider: 'claude' };
+export const getActiveKeyPool = (userKeyInput?: string, requested?: KeyPoolInfo['provider']): KeyPoolInfo => {
+  const keys = (userKeyInput || '').split(/[,\n]/).map(key => key.trim());
+  const anthropic = keys.filter(key => key.startsWith('sk-ant-')).join(',');
+  const google = keys.filter(key => /^(AIza|AQ\.)/.test(key)).join(',');
+  if (requested === 'gemini') return { keys: getGeminiLegacyKeys(google), provider: 'gemini' };
+  const claudeKeys = getClaudeKeys(anthropic);
+  if (requested === 'claude' || claudeKeys.length) return { keys: claudeKeys, provider: 'claude' };
+  return { keys: getGeminiLegacyKeys(google), provider: 'gemini' };
 };
 
 /**
@@ -303,6 +303,38 @@ export const getActiveKeyPool = (userKeyInput?: string): KeyPoolInfo => {
 const getAllKeys = (userKeyInput?: string): string[] => {
   return getActiveKeyPool(userKeyInput).keys;
 };
+
+app.get('/api/models/:provider', async (req, res) => {
+  const provider = req.params.provider;
+  if (provider !== 'claude' && provider !== 'gemini') return res.sendStatus(404);
+  const { keys } = getActiveKeyPool(getUserKey(req), provider);
+  const google = provider === 'gemini';
+  for (const key of keys) {
+    try {
+      const url = new URL(google ? 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000' : 'https://api.anthropic.com/v1/models?limit=100');
+      const headers: Record<string, string> = google ? { 'x-goog-api-key': key } : { 'x-api-key': key, 'anthropic-version': '2023-06-01' };
+      const models = [];
+      while (true) {
+        const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+        if (!response.ok) {
+          if ([401, 403, 429].includes(response.status)) break;
+          return res.status(503).json({ error: 'Provider catalog unavailable' });
+        }
+        const page = await response.json();
+        for (const m of google ? page.models : page.data) {
+          const id = google ? m.name.replace(/^models\//, '') : m.id;
+          const disabled = google && (!m.supportedGenerationMethods?.includes('generateContent') || /tts|native-audio|image-generation|image-preview|robotics|computer-use/i.test(id));
+          models.push({ id, name: google ? m.displayName : m.display_name, disabled });
+        }
+        const token = google ? page.nextPageToken : page.has_more && page.last_id;
+        const param = google ? 'pageToken' : 'after_id';
+        if (!token || token === url.searchParams.get(param)) return res.set('Cache-Control', 'no-store').json({ models });
+        url.searchParams.set(param, token);
+      }
+    } catch { break; }
+  }
+  return res.status(503).json({ error: 'Model list unavailable. Check the provider API key.' });
+});
 
 // Admin Auth Middleware
 const checkAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -414,13 +446,13 @@ app.post('/api/admin/reset-key-health', checkAdminAuth, (req, res) => {
  * - Excludes keys currently in deadKeys, dailyExhaustedKeys, or temporary cooldown.
  * - Distributes load smoothly across all healthy keys in the pool without bottle-necking.
  */
-export const getAIClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: string) => {
-  const { keys: allKeys, provider } = getActiveKeyPool(userKeyInput);
+export const getAIClient = (skipKeys: Set<string> | string[] = [], userKeyInput?: string, requested?: KeyPoolInfo['provider']) => {
+  const { keys: allKeys, provider } = getActiveKeyPool(userKeyInput, requested);
   const now = Date.now();
   const skipSet = skipKeys instanceof Set ? skipKeys : new Set(skipKeys);
 
   if (allKeys.length === 0) {
-    throw new Error("No valid Claude API keys found. Please set ANTHROPIC_API_KEY in .env or add your Claude API key in Settings.");
+    throw new Error(`No active ${provider} API keys are configured.`);
   }
 
   const total = allKeys.length;
@@ -595,9 +627,9 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export async function runAIAction(
   action: (client: any) => Promise<any>, 
   userKeyInput?: string,
-  maxRetries?: number
+  maxRetries?: number, requested?: KeyPoolInfo['provider']
 ) {
-  const allKeys = getAllKeys(userKeyInput);
+  const allKeys = getActiveKeyPool(userKeyInput, requested).keys;
   const effectiveRetries = maxRetries ?? Math.max(12, allKeys.length * 2);
   const triedKeys = new Set<string>();
   let lastError: any = null;
@@ -610,7 +642,7 @@ export async function runAIAction(
 
     let clientInfo: ReturnType<typeof getGeminiClient>;
     try {
-      clientInfo = getGeminiClient(triedKeys, userKeyInput);
+      clientInfo = getGeminiClient(triedKeys, userKeyInput, requested);
     } catch (e: any) {
       throw e;
     }
@@ -811,7 +843,9 @@ export const callAIWithFallback = async (
 
   if (isClaude) {
     const claudeKey = client?.apiKey || client?.key || process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
-    const modelsToTry = [
+    const selected = config.claudeModel;
+    const modelsToTry = selected ? [/^anthropic:claude-[a-z0-9.-]+$/.test(selected)
+      ? selected.slice(10) : await resolveClaudeModel(selected, claudeKey, config.abortSignal)] : [
       primaryModel || getPrimaryModel(),
       fallbackModel || getFallbackModel(),
       'claude-sonnet-5-5',
@@ -850,17 +884,17 @@ export const callAIWithFallback = async (
     throw lastErr || new Error(`[${label}] All Claude models returned empty output.`);
   }
 
+  if (config.claudeModel) throw new Error('The selected Claude model requires an Anthropic API key.');
   // Google Gemini Fallback
-  const modelsToTry = [
+  const { geminiModel, claudeModel: ignoredClaude, ...generationConfig } = config;
+  if (geminiModel && !/^[a-zA-Z0-9._-]+$/.test(geminiModel)) throw new Error('Invalid Gemini model ID.');
+  const modelsToTry = geminiModel ? [geminiModel] : [
     process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash',
     'gemini-flash-latest'
   ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-  const effectiveConfig = {
-    ...config,
-    thinkingConfig: config.thinkingConfig !== undefined ? config.thinkingConfig : { thinkingBudget: 0 }
-  };
+  const effectiveConfig = geminiModel ? generationConfig : { ...generationConfig, thinkingConfig: config.thinkingConfig ?? { thinkingBudget: 0 } };
 
   const effectiveContents = typeof contents === 'string' ? [{ text: contents }] : contents;
 
@@ -1470,7 +1504,8 @@ const extractLayoutWithRetry = async (
   autoProofread: boolean = false,
   optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
   signal?: AbortSignal,
-  figureMode: FigureMode = 'crop'
+  figureMode: FigureMode = 'crop',
+  claudeModel?: ClaudeModel, geminiModel?: string
 ): Promise<any> => {
   const inlineImage = readInlineImage(base64Image);
 
@@ -1659,7 +1694,7 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
       ];
 
       const generateConfig = {
-        abortSignal: signal,
+        abortSignal: signal, claudeModel, geminiModel,
         temperature: 0.1,
         responseMimeType: "application/json",
       };
@@ -1754,7 +1789,7 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
     });
   };
 
-  return runAIAction(executeCall, userKey);
+  return runAIAction(executeCall, userKey, undefined, geminiModel ? 'gemini' : claudeModel ? 'claude' : undefined);
 };
 
 const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false, userKey?: string): Promise<any> => {
@@ -1864,7 +1899,7 @@ app.post('/api/extract', async (req, res) => {
       autoProofread,
       optionArrangement,
       controller.signal,
-      req.body.figureMode === 'svg' ? 'svg' : 'crop'
+      req.body.figureMode === 'svg' ? 'svg' : 'crop', req.body.claudeModel, req.body.geminiModel
     );
     if (controller.signal.aborted) return;
     res.json({ elements });
@@ -1986,12 +2021,12 @@ Output ONLY valid JSON:
         getPrimaryModel(),
         getFallbackModel(),
         [{ text: qPrompt }],
-        { temperature: 0.15, responseMimeType: 'application/json' },
+        { geminiModel: req.body.geminiModel, claudeModel: req.body.claudeModel, temperature: 0.15, responseMimeType: 'application/json' },
         'mocktest-solve'
       );
 
 
-    const rawJson = await runAIAction(executeSolve, userKey);
+    const rawJson = await runAIAction(executeSolve, userKey, undefined, req.body.geminiModel ? 'gemini' : req.body.claudeModel ? 'claude' : undefined);
 
     const parsed = safeParseAiJsonObject(rawJson);
     res.json({
@@ -2357,8 +2392,7 @@ Output ONLY a valid JSON array of objects:
       if (cleanBase64) {
         contents.push({
           inlineData: {
-            mimeType: 'image/png',
-            data: cleanBase64
+            ...readInlineImage(cleanBase64)
           }
         });
       }
@@ -2376,6 +2410,7 @@ Output ONLY a valid JSON array of objects:
         getFallbackModel(),
         contents,
         {
+          geminiModel: req.body.geminiModel, claudeModel: req.body.claudeModel,
           temperature: generateSimilar ? 0.35 : 0.1,
           responseMimeType: "application/json"
         },
@@ -2385,7 +2420,7 @@ Output ONLY a valid JSON array of objects:
     };
 
 
-    const rawJson = await runAIAction(executeExtract, userKey);
+    const rawJson = await runAIAction(executeExtract, userKey, undefined, req.body.geminiModel ? 'gemini' : req.body.claudeModel ? 'claude' : undefined);
 
     const parsed = safeParseAiJson(rawJson);
     const rawItems = Array.isArray(parsed) ? parsed : [];
@@ -2877,8 +2912,7 @@ Respond with ONLY a strict JSON object:
       if (cleanBase64) {
         contents.push({
           inlineData: {
-            mimeType: 'image/png',
-            data: cleanBase64
+            ...readInlineImage(cleanBase64)
           }
         });
       }

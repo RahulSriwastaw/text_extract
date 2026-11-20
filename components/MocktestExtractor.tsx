@@ -1,4 +1,6 @@
+import { ClaudeModelSelect } from './ClaudeModelSelect';
 import { McqFigureReview } from './McqFigureReview';
+import { QuestionFigureActions } from './QuestionFigureActions';
 import { mcqFigureInstruction } from '../services/figurePrompt';
 import { resolveMcqFigure } from '../services/mcqFigures';
 import { useMcqSettings } from '../services/converterSettings';
@@ -176,12 +178,14 @@ export interface MocktestExtractorProps {
 }
 
 export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initialPages, onClearInitialPages }) => {
-  const [{ aiEngine, batchSize, selectedProvider, pagesPerRequest, difficulty, answerFormat,
+  const [{ claudeModel, aiEngine, batchSize, selectedProvider, pagesPerRequest, difficulty, answerFormat,
     mathFormat, autoDeepSolveAll, extractionMode, figureMode }, updateSetting, settingsError] = useMcqSettings(uid);
   useEffect(() => {
     if (getStoredAiProvider() !== selectedProvider) setStoredAiProvider(selectedProvider);
   }, [selectedProvider]);
   // Page queue state
+  const solveWithRunModel = (item: MockTestMcqItem) => generateDeepSolutionForItem(item,
+    aiEngine === 'api' ? claudeModel : undefined, aiEngine === 'api');
   const [pages, setPages] = useState<PageQueueItem[]>([]);
   const [isProcessingAll, setIsProcessingAll] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -910,7 +914,7 @@ Rules:
           if (abortController.signal.aborted) return item;
           if (item.solution_hi && item.solution_hi.length > 35 && item.solution_en && item.solution_en.length > 35) return item;
           try {
-            const solRes = await generateDeepSolutionForItem(item);
+            const solRes = await solveWithRunModel(item);
             return { ...item, solution_hi: solRes.solution_hi || item.solution_hi, solution_en: solRes.solution_en || item.solution_en, difficulty_level: solRes.difficulty_level || item.difficulty_level };
           } catch (e) {
             console.warn(`Deep research failed for Q#${item.question_r}:`, e);
@@ -1116,7 +1120,7 @@ Rules:
           page.pageNumber,
           isSimilar,
           page.rawTextContent,
-          abortController.signal, figureMode
+          abortController.signal, figureMode, claudeModel
         );
       }
 
@@ -1193,7 +1197,7 @@ Rules:
               return item;
             }
             try {
-              const solRes = await generateDeepSolutionForItem(item);
+              const solRes = await solveWithRunModel(item);
               return {
                 ...item,
                 solution_hi: solRes.solution_hi || item.solution_hi,
@@ -1339,7 +1343,7 @@ Rules:
         // on Bridge, so the next run uses it again once the extension is back.
         activeEngine = 'api';
         setLiveStatusText(
-          `Bridge not connected (${ping.error || 'extension did not respond'}) — switched to Direct Gemini API for this run.`
+          `Bridge not connected (${ping.error || 'extension did not respond'}) — switched to Direct API for this run.`
         );
       }
     }
@@ -1978,7 +1982,7 @@ Rules:
 
         setSolvingId(item.id);
         try {
-          const res = await generateDeepSolutionForItem(item);
+          const res = await solveWithRunModel(item);
           updateItem(item.id, {
             solution_hi: res.solution_hi || item.solution_hi,
             solution_en: res.solution_en || item.solution_en,
@@ -1999,7 +2003,7 @@ Rules:
   const handleSolveSingle = async (item: MockTestMcqItem) => {
     setSolvingId(item.id);
     try {
-      const res = await generateDeepSolutionForItem(item);
+      const res = await solveWithRunModel(item);
       updateItem(item.id, {
         solution_hi: res.solution_hi || item.solution_hi,
         solution_en: res.solution_en || item.solution_en,
@@ -2754,7 +2758,7 @@ Rules:
                 : 'not connected'}
             </span>
           ) : (
-            <span className="badge badge-info"><Key /> Direct Gemini API</span>
+            <span className="badge badge-info"><Key /> Direct API</span>
           )}
           <span className="badge badge-neutral">{extractionMode === 'exact' ? 'Exact PDF' : 'Ref mode (new MCQs)'}</span>
           <span className="badge badge-neutral">
@@ -2791,7 +2795,7 @@ Rules:
                       <Zap /> Extension bridge
                     </button>
                     <button type="button" aria-pressed={aiEngine === 'api'} onClick={() => updateSetting('aiEngine', 'api')} className="seg-item">
-                      <Key /> Direct Gemini API
+                      <Key /> Direct API
                     </button>
                   </div>
                 </div>
@@ -2902,6 +2906,7 @@ Rules:
                 )}
               </div>
 
+              {aiEngine === 'api' && <ClaudeModelSelect value={claudeModel} onChange={m => updateSetting('claudeModel', m)} />}
               <label className="block"><span className="field-label">Figures from original questions</span>
                 <select className="select w-48" value={figureMode}
                   onChange={e => updateSetting('figureMode', e.target.value as typeof figureMode)}>
@@ -4296,6 +4301,8 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                   </div>
                                 )}
 
+                                <QuestionFigureActions image={page.imageUrl} engine={aiEngine} provider={selectedProvider} model={claudeModel}
+                                  attach={png => updateItemDraft(item.id, resolveMcqFigure(item, { id: 'manual-question', target: 'question', type: 'image', content: 'Question figure' }, png))} />
                                 {item.figures?.map(figure => <McqFigureReview key={figure.id} figure={figure}
                                   image={figure.sourcePage ? pages.find(p => p.pageNumber === figure.sourcePage)?.imageUrl : page.imageUrl}
                                   mode={figure.svg || figureMode === 'svg' ? 'svg' : 'crop'}

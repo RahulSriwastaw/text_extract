@@ -1,3 +1,4 @@
+import { directModelFields, type DirectModel } from './claudeModels';
 import { readMcqFigures } from './mcqFigures';
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
 import { getAiSettings } from './aiDbService';
@@ -1919,14 +1920,14 @@ Respond ONLY with the JSON array inside \`\`\`json ... \`\`\`.`;
  * Call the AI service to generate rich, step-by-step Hindi & English solutions for a single MCQ item.
  */
 export async function generateDeepSolutionForItem(
-  item: MockTestMcqItem
+  item: MockTestMcqItem, claudeModel?: DirectModel, directOnly = false
 ): Promise<{ solution_hi: string; solution_en: string; difficulty_level?: DifficultyLevel }> {
   const settings = await getAiSettings();
 
   // If using Extension Bridge or user has no API key, execute via Extension Bridge
   try {
     const status = await pingStudyAiExtension(800);
-    if (status.connected && (!settings.apiKey || (settings.authType as string) === 'extension')) {
+    if (!directOnly && status.connected && (!settings.apiKey || (settings.authType as string) === 'extension')) {
       const bridgeSol = await solveQuestionWithStudyAiBridge(item);
       return {
         solution_hi: cleanMocktestText(bridgeSol.solution_hi || ''),
@@ -1949,6 +1950,7 @@ export async function generateDeepSolutionForItem(
       method: 'POST',
       headers,
       body: JSON.stringify({
+        ...directModelFields(claudeModel),
         question_hi: item.question_hi,
         question_en: item.question_en,
         option1_hi: item.option1_hi,
@@ -1970,7 +1972,7 @@ export async function generateDeepSolutionForItem(
       // Resilient fallback to Extension Bridge
       try {
         const status = await pingStudyAiExtension(800);
-        if (status.connected) {
+        if (!directOnly && status.connected) {
           const bridgeSol = await solveQuestionWithStudyAiBridge(item);
           return {
             solution_hi: cleanMocktestText(bridgeSol.solution_hi || ''),
@@ -1993,7 +1995,7 @@ export async function generateDeepSolutionForItem(
   } catch (err) {
     try {
       const status = await pingStudyAiExtension(800);
-      if (status.connected) {
+      if (!directOnly && status.connected) {
         const bridgeSol = await solveQuestionWithStudyAiBridge(item);
         return {
           solution_hi: cleanMocktestText(bridgeSol.solution_hi || ''),
@@ -2782,7 +2784,8 @@ export async function extractMockTestWithDirectApi(
   generateSimilar: boolean = false,
   rawText?: string,
   signal?: AbortSignal,
-  figureMode: 'off' | 'crop' | 'svg' = 'off'
+  figureMode: 'off' | 'crop' | 'svg' = 'off',
+  claudeModel?: DirectModel
 ): Promise<MockTestMcqItem[]> {
   const settings = await getAiSettings();
   const headers: Record<string, string> = {
@@ -2811,7 +2814,7 @@ export async function extractMockTestWithDirectApi(
           setName,
           pendingContext: pendingContext || undefined,
           pageNumber: pageNumber || undefined,
-          generateSimilar, figureMode
+          generateSimilar, figureMode, ...directModelFields(claudeModel)
         })
       });
 
@@ -2865,6 +2868,7 @@ export async function extractMockTestWithDirectApi(
     signal,
     body: JSON.stringify({
       base64Image,
+      ...directModelFields(claudeModel),
       numberingStyle: 1, // NumberingStyle.HASH
       includeImages: false,
       isBilingual: true,

@@ -5,8 +5,8 @@ import { normalizeFigureBox } from '../services/converterFigures';
 
 type ApplyFigure = (image: string, bbox?: BoundingBox) => void;
 
-function CropDialog({ pageImage, initial, apply, close }: {
-  pageImage: string; initial?: BoundingBox; apply: ApplyFigure; close: () => void;
+export function CropDialog({ pageImage, initial, apply, close, actionLabel = "Add crop" }: {
+  pageImage: string; initial?: BoundingBox; actionLabel?: string; apply: ApplyFigure; close: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
@@ -72,7 +72,7 @@ function CropDialog({ pageImage, initial, apply, close }: {
               onChange={e => setBox({ xmin: 0, ymin: 0, xmax: 1000, ymax: 1000, ...box,
                 [field]: Math.max(0, Math.min(1000, Math.round(Number(e.target.value) * 10))) })} />
           </label>)}
-        <button type="button" className="btn btn-primary ml-auto" disabled={!selection || busy} onClick={save}>Add crop</button>
+        <button type="button" className="btn btn-primary ml-auto" disabled={!selection || busy} onClick={save}>{actionLabel}</button>
       </div>
       {error && <p role="alert">{error}</p>}
     </div>

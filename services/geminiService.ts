@@ -1,3 +1,4 @@
+import { directModelFields, type DirectModel } from './claudeModels';
 import { NumberingStyle, ExtractedElement, OptionArrangement } from "../types";
 import type { FigureMode } from '../types';
 import { performOCR } from './ocrService';
@@ -18,7 +19,8 @@ export const extractLayoutFromImage = async (
   optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
   retryCount: number = 0,
   signal?: AbortSignal,
-  figureMode: FigureMode = 'crop'
+  figureMode: FigureMode = 'crop',
+  claudeModel?: DirectModel
 ): Promise<ExtractedElement[]> => {
   // Skipping client-side OCR for speed when processing in parallel.
   const ocrText = '';
@@ -43,7 +45,7 @@ export const extractLayoutFromImage = async (
       ocrText,
       numberingStyle,
       includeImages,
-      figureMode,
+      figureMode, ...directModelFields(claudeModel),
       isBilingual,
       mcqMode,
       refineMode,
@@ -60,7 +62,7 @@ export const extractLayoutFromImage = async (
       const waitTime = Math.min(errorData.waitTime || (1000 + retryCount * 1000), 4000);
       console.warn(`[Client] API error (${response.status}). Fast-retrying with rotated key in ${waitTime}ms (Attempt ${retryCount + 1}/3)...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, showMcqNumbers, autoProofread, optionArrangement, retryCount + 1, signal, figureMode);
+      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, showMcqNumbers, autoProofread, optionArrangement, retryCount + 1, signal, figureMode, claudeModel);
     }
     
     if (response.status === 429) {

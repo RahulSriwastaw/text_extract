@@ -17,7 +17,7 @@ const attributes = new Set(('xmlns viewBox width height x y x1 y1 x2 y2 dx dy cx
   'fill-rule font-family font-size font-weight font-style text-anchor dominant-baseline').split(' '));
 
 /** Render only self-contained diagram primitives, into the same PNG used for review and Word. */
-async function renderFigureSvg(source: string): Promise<string | undefined> {
+export async function renderFigureSvg(source: string): Promise<string | undefined> {
   if (typeof source !== 'string' || source.length > 100_000 || /<!|<\?/.test(source)) return;
   const xml = new DOMParser().parseFromString(source, 'image/svg+xml');
   const root = xml.documentElement;

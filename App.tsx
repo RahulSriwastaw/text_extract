@@ -146,7 +146,7 @@ function ExistingApp() {
               exit={{ opacity: 0, y: 20 }}
               className="pt-14"
             >
-              <MocktestExtractor 
+              <MocktestExtractor key={user.uid} uid={user.uid}
                 initialPages={preloadedPages}
                 onClearInitialPages={() => setPreloadedPages([])}
               />

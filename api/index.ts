@@ -2,7 +2,7 @@ import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
 import type { FigureMode } from '../types.js';
-import { SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
+import { mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -1410,7 +1410,7 @@ const cleanRefinedText = (text: string): string => {
   ];
 
   const examPattern = `(?:${examKeywords.join('|')})`;
-  const examRegex = new RegExp(`\\b${examPattern}`, 'i');
+  const examRegex = new RegExp(`(?<![\\p{L}\\p{M}\\\\])${examPattern}(?![\\p{L}\\p{M}])`, 'iu');
 
   const lines = res.split('\n');
   const cleanedLines: string[] = [];
@@ -1649,6 +1649,7 @@ Each object in the array must have the following structure:
 **BBOX INSTRUCTIONS**:
 1. **Text Elements**: bbox is optional but recommended if possible.
 ${imageFormattingInstruction}
+${includeImages ? CONTENT_FIGURE_INSTRUCTION : ''}
 ${includeImages && figureMode === 'svg' ? SVG_FIGURE_INSTRUCTION : ''}
 3. **Table Elements**: Provide the bbox for the entire table.
 
@@ -2339,6 +2340,9 @@ Output ONLY a valid JSON array of objects:
 ]`;
     }
 
+    if (cleanBase64 && !generateSimilar && ['svg', 'crop'].includes(req.body.figureMode)) {
+      promptText += mcqFigureInstruction(req.body.figureMode);
+    }
     const executeExtract = async (client: any) => {
       // Helper: extract text from a Gemini response safely
       const extractText = (resp: any): string => {

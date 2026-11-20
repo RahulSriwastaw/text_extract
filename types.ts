@@ -33,6 +33,7 @@ export interface ExtractedElement {
   imageB64?: string;
   svg?: string;
   figureReview?: FigureReview;
+  figureRole?: string;
   bbox?: BoundingBox;
   id: string;
 }
@@ -89,6 +90,7 @@ export type QuestionType = 'MCQ' | 'MSQ' | 'NAT';
 export type DifficultyLevel = 'easy' | 'medium' | 'hard';
 
 export interface MockTestMcqItem {
+  figures?: McqFigure[];
   id: string;
   question_r: number;
   question_type: QuestionType;
@@ -129,6 +131,11 @@ export interface MockTestMcqItem {
   passage_en?: string;
   pageNumber?: number;
   pageId?: string;
+}
+
+export interface McqFigure extends ExtractedElement {
+  target: 'question' | 'solution' | 'option1' | 'option2' | 'option3' | 'option4' | 'option5';
+  sourcePage?: number;
 }
 
 export type LatexRepairScope = 'entire_mcq' | 'question' | 'options' | 'solution';

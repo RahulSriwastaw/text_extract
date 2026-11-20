@@ -28,8 +28,8 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL']);
     }
 
-    match /users/{userId}/preferences/converter {
-      allow get, create, update: if isOwner(userId);
+    match /users/{userId}/preferences/{tool} {
+      allow get, create, update: if isOwner(userId) && tool in ['converter', 'mcq'];
     }
 
     // History items (PDF conversions)

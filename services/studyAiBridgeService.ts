@@ -7,7 +7,7 @@
 
 import { ExtractedElement, NumberingStyle, OptionArrangement } from '../types';
 import type { FigureMode } from '../types';
-import { SVG_FIGURE_INSTRUCTION } from './figurePrompt';
+import { CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from './figurePrompt';
 import { HTML_LATEX_FORMAT_RULES, safeParseAiJsonObject } from './textCleanService';
 
 export const PAGE_SOURCE = 'tf-study-ai';
@@ -414,7 +414,8 @@ export function buildBridgePrompt(
   // 8. Images & Diagrams Feature Connection
   const imageInstruction = includeImages
     ? `FIGURES, DIAGRAMS AND TABLES (KEEP IMAGES ENABLED):
-- For every diagram, chart, pattern series, geometry figure, circuit diagram, map, or visual illustration, output a separate element:
+- ${CONTENT_FIGURE_INSTRUCTION}
+- For each qualifying visual, output a separate element:
   { "type": "image", "content": "Concise descriptive title of what the diagram shows", "bbox": [ymin, xmin, ymax, xmax] }
 - For every table or structured data grid, output: { "type": "table", "content": "Markdown table (| Col 1 | Col 2 |)", "bbox": [ymin, xmin, ymax, xmax] }
 - bbox uses NORMALIZED coordinates from 0 to 1000 relative to the page image, in the order [ymin, xmin, ymax, xmax].
@@ -1096,6 +1097,7 @@ export function parseExtensionOutputToElements(raw: string): ExtractedElement[] 
           content: item.content || '',
           ...(item.type === 'image' && typeof item.svg === 'string' ? { svg: item.svg } : {}),
           bbox: normalizeBbox(item.bbox),
+          ...(item.type === 'image' ? { figureRole: item.figureRole } : {}),
           continues_previous: item.continues_previous === true,
         };
       }

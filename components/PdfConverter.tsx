@@ -1,4 +1,5 @@
 import { useConverterSettings } from '../services/converterSettings';
+import { getReadyExport } from '../services/converterExport';
 import React, { useState, useEffect, useRef } from 'react';
 import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers, Bot, FileSpreadsheet, MoreHorizontal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -9,7 +10,7 @@ import McqSidebar from './McqSidebar';
 import MocktestStudioModal from './MocktestStudioModal';
 import UploadProgressBar, { UploadProgressData } from './UploadProgressBar';
 import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem, MockTestMcqItem, ExtractedElement } from '../types';
-import { prepareConverterFigures } from '../services/converterFigures';
+import { prepareConverterFigures, removeConverterFigure } from '../services/converterFigures';
 import type { FigureMode, BoundingBox } from '../types';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
@@ -131,8 +132,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
   const prepareFigures = (imageUrl: string, elements: ExtractedElement[]) =>
     includeImages ? prepareConverterFigures(imageUrl, elements, figureMode) : Promise.resolve(elements);
 
-  const pendingFigures = includeImages ? pages.filter(p => p.isSelected && p.status === 'done')
-    .reduce((count, page) => count + (page.elements?.filter(el => el.figureReview).length || 0), 0) : 0;
+  const readyExport = React.useMemo(() => getReadyExport(pages, includeImages), [pages, includeImages]);
+  const { pendingFigures } = readyExport;
   const needsReview = pendingFigures > 0;
 
   function applyFigure(pageId: string, figure: ExtractedElement, imageB64: string, bbox?: BoundingBox) {
@@ -1004,20 +1005,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
   };
 
   const downloadDocx = async () => {
-    if (needsReview) return;
-    // Collect all elements from all selected and completed pages
-    const allElements = pages
-      .filter(p => p.isSelected && p.status === 'done')
-      .flatMap(p => {
-        if (p.elements && p.elements.length > 0) {
-          return p.elements;
-        }
-        if (p.extractedText) {
-          return [{ id: `el_${p.id}`, type: 'text' as const, content: p.extractedText }];
-        }
-        return [];
-      })
-      .filter(el => includeImages || el.type !== 'image');
+    const allElements = readyExport.elements;
     
     if (allElements.length === 0) {
         if (!autoDownload) setErrorMsg("No content extracted to save.");
@@ -1396,6 +1384,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                                 <div className="flex items-center gap-1 text-xs text-ink-3">
                                     <span className="font-semibold text-ink tabular-nums px-1">{selectedCount}/{totalCount} selected</span>
                                     <button onClick={() => toggleAllSelection(true)} className="btn btn-ghost btn-xs">All</button>
+                                    {hasCompletedPages && <button type="button" onClick={() => setPages(prev =>
+                                      prev.map(page => ({ ...page, isSelected: page.status === 'done' })))}
+                                      className="btn btn-ghost btn-xs" title="Select all completed pages">Ready only</button>}
                                     <button onClick={() => toggleAllSelection(false)} className="btn btn-ghost btn-xs">None</button>
                                 </div>
                             )}
@@ -1508,11 +1499,12 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                                     </button>
                                     <button
                                         onClick={downloadDocx}
-                                        disabled={needsReview}
+                                        disabled={!readyExport.pageCount}
+                                        title={pendingFigures ? `Download ready content; ${pendingFigures} unreviewed figure(s) will be skipped.` : 'Download selected completed pages'}
                                         className={`btn ${appState !== AppState.ANALYZING && selectedPendingCount === 0 && !hasErrorPages ? 'btn-primary' : 'btn-secondary'}`}
                                     >
                                         <FileDown />
-                                        Download DOCX
+                                        Download DOCX{readyExport.pageCount > 0 && ` · ${readyExport.pageCount} ${readyExport.pageCount === 1 ? 'page' : 'pages'}`}
                                     </button>
                                 </>
                             )}
@@ -1564,7 +1556,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                         <ToggleChip on={refineMode} onClick={() => updateSetting('refineMode', !refineMode)} label="Refine" title="Remove exam tags, shift dates, page numbers and watermarks" />
                         <ToggleChip on={autoProofread} onClick={() => updateSetting('autoProofread', !autoProofread)} label="Auto proofread" />
                         <ToggleChip on={includeImages} onClick={() => updateSetting('includeImages', !includeImages)} label="Keep images" />
-                        {includeImages && <select className="select" aria-label="Figure mode" value={figureMode}
+                        {includeImages && <select className="select" style={{ width: 'auto' }} aria-label="Figure mode" value={figureMode}
                             onChange={e => updateSetting('figureMode', e.target.value as FigureMode)}>
                             <option value="crop">Crop from page</option>
                             <option value="svg">Recreate as SVG</option>
@@ -1649,12 +1641,16 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                 )}
 
                 {needsReview && <p role="status" className="text-sm text-amber-300">
-                    Review {pendingFigures} {pendingFigures === 1 ? 'figure' : 'figures'} below to finish your DOCX.
+                    {pendingFigures} {pendingFigures === 1 ? 'figure needs' : 'figures need'} review.
+                    {readyExport.pageCount ? ' Download now to skip unreviewed figures, or review them below to include them.' : ' Review a figure or select a ready page with text to download.'}
                 </p>}
                 {/* Grid of Pages */}
                 <ProcessingList
                     pages={pages}
                     onApplyFigure={applyFigure}
+                    onRemoveFigure={(pageId, figure) => setPages(prev => prev.map(page =>
+                      page.id === pageId ? removeConverterFigure(page, figure) : page))}
+                    optionArrangement={optionArrangement}
                     onUpdateText={updatePageText}
                     onRetry={retryPage}
                     onRecapture={handleRecapturePage}

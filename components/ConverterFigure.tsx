@@ -79,12 +79,11 @@ function CropDialog({ pageImage, initial, apply, close }: {
   </dialog>;
 }
 
-export function ConverterFigure({ element, pageImage, apply }: {
-  element: ExtractedElement; pageImage: string; apply: ApplyFigure;
+export function ConverterFigure({ element, pageImage, apply, remove }: {
+  element: ExtractedElement; pageImage: string; apply: ApplyFigure; remove: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const review = element.figureReview;
-  if (!review && !element.imageB64) return null;
   const original = review?.original;
   function accept(image: string, bbox = element.bbox) {
     apply(image, bbox);
@@ -109,6 +108,7 @@ export function ConverterFigure({ element, pageImage, apply }: {
       <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
         {review?.mode === 'svg' ? review.recreation ? 'Crop original' : 'Crop manually' : original || !review ? 'Adjust crop' : 'Crop manually'}
       </button>
+      <button type="button" className="btn btn-danger btn-sm" onClick={remove}>Remove image</button>
     </div>
     {editing && <CropDialog pageImage={pageImage} initial={element.bbox} apply={accept} close={() => setEditing(false)} />}
   </section>;

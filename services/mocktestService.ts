@@ -1,3 +1,4 @@
+import { readMcqFigures } from './mcqFigures';
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
 import { getAiSettings } from './aiDbService';
 import { hasFigureImage } from './figureStorageService';
@@ -2622,6 +2623,7 @@ export function parseAiOutputToMockTestItems(
             test_time: obj.test_time || '',
             subject: cleanSubject,
             subject_level: obj.subject_level || '',
+            figures: readMcqFigures(obj.figures),
             figure_notes: obj.figure_notes || '',
             correction_notes: obj.correction_notes || '',
             source_pdf: obj.source_pdf || '',
@@ -2779,7 +2781,8 @@ export async function extractMockTestWithDirectApi(
   pageNumber?: number,
   generateSimilar: boolean = false,
   rawText?: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  figureMode: 'off' | 'crop' | 'svg' = 'off'
 ): Promise<MockTestMcqItem[]> {
   const settings = await getAiSettings();
   const headers: Record<string, string> = {
@@ -2808,7 +2811,7 @@ export async function extractMockTestWithDirectApi(
           setName,
           pendingContext: pendingContext || undefined,
           pageNumber: pageNumber || undefined,
-          generateSimilar
+          generateSimilar, figureMode
         })
       });
 

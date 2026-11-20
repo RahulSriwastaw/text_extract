@@ -1,3 +1,7 @@
+import { McqFigureReview } from './McqFigureReview';
+import { mcqFigureInstruction } from '../services/figurePrompt';
+import { resolveMcqFigure } from '../services/mcqFigures';
+import { useMcqSettings } from '../services/converterSettings';
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   FileSpreadsheet, Upload, Play, Pause, RotateCw, Trash2, CheckCircle2, 
@@ -166,11 +170,17 @@ export { LatexRenderer, useMathJax };
 
 
 export interface MocktestExtractorProps {
+  uid: string;
   initialPages?: string[];
   onClearInitialPages?: () => void;
 }
 
-export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPages, onClearInitialPages }) => {
+export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initialPages, onClearInitialPages }) => {
+  const [{ aiEngine, batchSize, selectedProvider, pagesPerRequest, difficulty, answerFormat,
+    mathFormat, autoDeepSolveAll, extractionMode, figureMode }, updateSetting, settingsError] = useMcqSettings(uid);
+  useEffect(() => {
+    if (getStoredAiProvider() !== selectedProvider) setStoredAiProvider(selectedProvider);
+  }, [selectedProvider]);
   // Page queue state
   const [pages, setPages] = useState<PageQueueItem[]>([]);
   const [isProcessingAll, setIsProcessingAll] = useState(false);
@@ -182,9 +192,6 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
 
   // Engine Mode & Concurrency Batch Size (default to direct API to avoid bridge 503 errors)
   // Bridge is the default; a run falls back to the direct API by itself when the bridge is not connected.
-  const [aiEngine, setAiEngine] = useState<'bridge' | 'api'>('bridge');
-  const [batchSize, setBatchSize] = useState<number>(3);
-  const [selectedProvider, setSelectedProvider] = useState<AiProvider>(getStoredAiProvider());
   // Active document session for AI Bridge (1 document = 1 continuous chat thread)
   const [documentChatUrl, setDocumentChatUrlState] = useState<string | null>(null);
   const documentChatUrlRef = useRef<string | null>(null);
@@ -195,19 +202,6 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   const [documentSessionId, setDocumentSessionId] = useState<string>(() => `doc_${Date.now()}`);
   // Requests per AI chat before the bridge opens a fresh one (0 = one chat for the whole document).
   const [chatRotation] = useState<number>(() => getChatRotationInterval());
-  // Bridge batch size: consecutive page images sent in ONE request. 1 = one page per request.
-  const PAGES_PER_REQUEST_KEY = 'study_ai_pages_per_request';
-  const [pagesPerRequest, setPagesPerRequestState] = useState<number>(() => {
-    try {
-      const stored = Number(localStorage.getItem(PAGES_PER_REQUEST_KEY));
-      return [1, 2, 3, 5].includes(stored) ? stored : 1;
-    } catch { return 1; }
-  });
-  const setPagesPerRequest = (count: number) => {
-    setPagesPerRequestState(count);
-    try { localStorage.setItem(PAGES_PER_REQUEST_KEY, String(count)); } catch {}
-  };
-
   // Direct Text Input state
   const [inputMode, setInputMode] = useState<'upload' | 'direct_text'>('upload');
   const [directTextInput, setDirectTextInput] = useState<string>('');
@@ -216,14 +210,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
   // Configuration state
   const [outputFileName, setOutputFileName] = useState<string>('');
   const [setName, setSetName] = useState<string>('RRB NTPC 2024 CBT-1');
-  const [difficulty, setDifficulty] = useState<DifficultyLevel>('medium');
-  const [answerFormat, setAnswerFormat] = useState<'letters' | 'numbers'>('letters');
-  const [mathFormat, setMathFormat] = useState<'mathjax' | 'unicode'>('mathjax');
   const [isGeneratingDocx, setIsGeneratingDocx] = useState(false);
   const [docxLang, setDocxLang] = useState<'hi' | 'en' | 'both'>('both');
-  const [autoDeepSolveAll, setAutoDeepSolveAll] = useState<boolean>(true);
   // Extraction Mode: 'exact' (Extract as written) vs 'similar' (Input PDF as Reference -> Generate Brand-New Practice Questions)
-  const [extractionMode, setExtractionMode] = useState<'exact' | 'similar'>('exact');
   const [generatingSimilarId, setGeneratingSimilarId] = useState<string | null>(null);
   const [isGeneratingSimilarBatch, setIsGeneratingSimilarBatch] = useState(false);
 
@@ -312,6 +301,10 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ initialPag
     const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const cleanField = (val: string | undefined) => {
       if (!val) return '';
+      if (urlToRemove.startsWith('data:image/')) {
+        return val.replace(/<img\b[^>]*>/gi, tag => extractFigureUrls(tag).includes(urlToRemove) ? '' : tag)
+          .replace(/<p>\s*<\/p>/gi, '').trim();
+      }
       return val
         .replace(new RegExp(`<p>\\s*<img[^>]*src=["']${escapeRegex(urlToRemove)}["'][^>]*>\\s*<\\/p>`, 'gi'), '')
         .replace(new RegExp(`<img[^>]*src=["']${escapeRegex(urlToRemove)}["'][^>]*>`, 'gi'), '')
@@ -582,8 +575,7 @@ Rules:
   }, []);
 
   const handleProviderChange = (prov: AiProvider) => {
-    setSelectedProvider(prov);
-    setStoredAiProvider(prov);
+    updateSetting('selectedProvider', prov);
     setBridgeStatus(prev => ({ ...prev, provider: prov }));
     setDocumentChatUrl('');
   };
@@ -812,7 +804,7 @@ Rules:
     batch.forEach(p => activeAbortControllersRef.current.set(p.id, abortController));
 
     try {
-      const prompt = buildMockTestBridgePrompt(setName, pendingContext, first.pageNumber) +
+      const prompt = buildMockTestBridgePrompt(setName, pendingContext, first.pageNumber) + mcqFigureInstruction(figureMode) +
         `\n\nBATCH OF ${batch.length} PAGES (CRITICAL):\n` +
         `- ${batch.length} page images are attached IN ORDER: ${batch.map((p, i) => `Image ${i + 1} = Page ${p.pageNumber}`).join(', ')}.\n` +
         `- Extract ALL MCQs from ALL attached pages in reading order (Page ${first.pageNumber} first, Page ${last.pageNumber} last). Never skip a page.\n` +
@@ -1017,6 +1009,7 @@ Rules:
           ? buildMockTestSimilarBridgePrompt(setName, pendingContext, page.pageNumber)
           : buildMockTestBridgePrompt(setName, pendingContext, page.pageNumber);
 
+        if (page.imageUrl && !isSimilar) prompt += mcqFigureInstruction(figureMode);
         if (page.rawTextContent) {
           prompt = `${prompt}\n\nRAW EXAM DOCUMENT TEXT TO EXTRACT:\n\`\`\`\n${page.rawTextContent}\n\`\`\``;
         }
@@ -1123,7 +1116,7 @@ Rules:
           page.pageNumber,
           isSimilar,
           page.rawTextContent,
-          abortController.signal
+          abortController.signal, figureMode
         );
       }
 
@@ -1303,7 +1296,7 @@ Rules:
   // Multi-Page Sequential Extraction Loop with Carry-Over Context
   const handleStartExtraction = async (targetMode?: 'exact' | 'similar', forceAll: boolean = false) => {
     const mode = targetMode || extractionMode;
-    if (targetMode) setExtractionMode(targetMode);
+    if (targetMode) updateSetting('extractionMode', targetMode);
 
     let selectedPages = pages.filter(p => p.isSelected);
     if (selectedPages.length === 0) {
@@ -2661,7 +2654,7 @@ Rules:
               title="Save this question set to your user account history"
             >
               {isSavedToHistory ? <Check /> : <Save />}
-              <span>{isSavedToHistory ? 'Saved' : 'Save'}</span>
+              <span>{isSavedToHistory ? 'Set saved' : 'Save set'}</span>
             </button>
 
             {/* Export: primary action of the page */}
@@ -2781,6 +2774,9 @@ Rules:
           </button>
         </div>
 
+        {showPaperSettings && <p role="status" className="px-4 py-2 text-xs text-ink-3">
+          {settingsError || 'Run settings save automatically for your account.'}
+        </p>}
         {/* Run settings panel */}
         {showPaperSettings && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-px bg-line border-t border-line animate-fadeIn">
@@ -2791,10 +2787,10 @@ Rules:
                 <div>
                   <span className="field-label">Engine</span>
                   <div className="seg" role="group" aria-label="AI engine">
-                    <button type="button" aria-pressed={aiEngine === 'bridge'} onClick={() => setAiEngine('bridge')} className="seg-item">
+                    <button type="button" aria-pressed={aiEngine === 'bridge'} onClick={() => updateSetting('aiEngine', 'bridge')} className="seg-item">
                       <Zap /> Extension bridge
                     </button>
-                    <button type="button" aria-pressed={aiEngine === 'api'} onClick={() => setAiEngine('api')} className="seg-item">
+                    <button type="button" aria-pressed={aiEngine === 'api'} onClick={() => updateSetting('aiEngine', 'api')} className="seg-item">
                       <Key /> Direct Gemini API
                     </button>
                   </div>
@@ -2817,7 +2813,7 @@ Rules:
                       {bridgeStatus.connected ? (
                         <button
                           type="button"
-                          onClick={() => { void disconnectStudyAiBridge(); setAiEngine('api'); }}
+                          onClick={() => { void disconnectStudyAiBridge(); updateSetting('aiEngine', 'api'); }}
                           className="btn btn-ghost btn-sm"
                           title="Disconnect Bridge (stops auto-reconnect until you connect again)"
                         >
@@ -2847,7 +2843,7 @@ Rules:
                     <button
                       type="button"
                       aria-pressed={extractionMode === 'exact'}
-                      onClick={() => setExtractionMode('exact')}
+                      onClick={() => updateSetting('extractionMode', 'exact')}
                       className="seg-item"
                       title="Extract exact questions directly as written in the PDF"
                     >
@@ -2856,7 +2852,7 @@ Rules:
                     <button
                       type="button"
                       aria-pressed={extractionMode === 'similar'}
-                      onClick={() => setExtractionMode('similar')}
+                      onClick={() => updateSetting('extractionMode', 'similar')}
                       className="seg-item"
                       title="PDF questions act strictly as conceptual reference; AI generates brand-new practice MCQs (No duplicates)"
                     >
@@ -2874,7 +2870,7 @@ Rules:
                           key={count}
                           type="button"
                           aria-pressed={batchSize === count}
-                          onClick={() => setBatchSize(count)}
+                          onClick={() => updateSetting('batchSize', count)}
                           className="seg-item"
                           title={`Process ${count} page(s) simultaneously via Direct API key rotation`}
                         >
@@ -2892,7 +2888,7 @@ Rules:
                           key={count}
                           type="button"
                           aria-pressed={pagesPerRequest === count}
-                          onClick={() => setPagesPerRequest(count)}
+                          onClick={() => updateSetting('pagesPerRequest', count)}
                           className="seg-item"
                           title={count === 1
                             ? 'Har page alag request (sabse reliable)'
@@ -2906,11 +2902,19 @@ Rules:
                 )}
               </div>
 
+              <label className="block"><span className="field-label">Figures from original questions</span>
+                <select className="select w-48" value={figureMode}
+                  onChange={e => updateSetting('figureMode', e.target.value as typeof figureMode)}>
+                  <option value="off">Manual only</option>
+                  <option value="crop">Crop from page</option>
+                  <option value="svg">Recreate as SVG</option>
+                </select>
+              </label>
               <label className="flex items-start gap-2.5 cursor-pointer select-none" title="Image bhejte hi Question, Options, Answer, Subject, aur Solutions ek sath fill honge">
                 <input
                   type="checkbox"
                   checked={autoDeepSolveAll}
-                  onChange={(e) => setAutoDeepSolveAll(e.target.checked)}
+                  onChange={(e) => updateSetting('autoDeepSolveAll', e.target.checked)}
                   className="mt-0.5 w-4 h-4 cursor-pointer"
                 />
                 <span className="text-sm text-ink-2">
@@ -2927,10 +2931,10 @@ Rules:
                 <div>
                   <span className="field-label">Answer format</span>
                   <div className="seg w-full" role="group" aria-label="Answer format">
-                    <button type="button" aria-pressed={answerFormat === 'letters'} onClick={() => setAnswerFormat('letters')} className="seg-item flex-1">
+                    <button type="button" aria-pressed={answerFormat === 'letters'} onClick={() => updateSetting('answerFormat', 'letters')} className="seg-item flex-1">
                       Letters (A–D)
                     </button>
-                    <button type="button" aria-pressed={answerFormat === 'numbers'} onClick={() => setAnswerFormat('numbers')} className="seg-item flex-1">
+                    <button type="button" aria-pressed={answerFormat === 'numbers'} onClick={() => updateSetting('answerFormat', 'numbers')} className="seg-item flex-1">
                       Numbers (1–4)
                     </button>
                   </div>
@@ -2939,10 +2943,10 @@ Rules:
                 <div>
                   <span className="field-label">Math notation</span>
                   <div className="seg w-full" role="group" aria-label="Math notation">
-                    <button type="button" aria-pressed={mathFormat === 'mathjax'} onClick={() => setMathFormat('mathjax')} title="LaTeX standard \(...\)" className="seg-item flex-1">
+                    <button type="button" aria-pressed={mathFormat === 'mathjax'} onClick={() => updateSetting('mathFormat', 'mathjax')} title="LaTeX standard \(...\)" className="seg-item flex-1">
                       LaTeX \(...\)
                     </button>
-                    <button type="button" aria-pressed={mathFormat === 'unicode'} onClick={() => setMathFormat('unicode')} title="Plain Unicode and HTML" className="seg-item flex-1">
+                    <button type="button" aria-pressed={mathFormat === 'unicode'} onClick={() => updateSetting('mathFormat', 'unicode')} title="Plain Unicode and HTML" className="seg-item flex-1">
                       Unicode / HTML
                     </button>
                   </div>
@@ -2955,7 +2959,7 @@ Rules:
                     value={difficulty}
                     onChange={(e) => {
                       const diff = e.target.value as DifficultyLevel;
-                      setDifficulty(diff);
+                      updateSetting('difficulty', diff);
                       setExtractedMcqs(prev => prev.map(i => ({ ...i, difficulty_level: diff })));
                     }}
                     className="select"
@@ -3995,7 +3999,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                             <button
                               type="button"
                               onClick={() => {
-                                setAiEngine('api');
+                                updateSetting('aiEngine', 'api');
                                 setTimeout(() => handleRetryPage(page, idx, 'exact'), 50);
                               }}
                               className="btn btn-secondary btn-sm"
@@ -4292,6 +4296,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                   </div>
                                 )}
 
+                                {item.figures?.map(figure => <McqFigureReview key={figure.id} figure={figure}
+                                  image={figure.sourcePage ? pages.find(p => p.pageNumber === figure.sourcePage)?.imageUrl : page.imageUrl}
+                                  mode={figure.svg || figureMode === 'svg' ? 'svg' : 'crop'}
+                                  resolve={png => updateItemDraft(item.id, resolveMcqFigure(item, figure, png))} />)}
                                 {/* Extra metadata (edit mode) */}
                                 {isEditing && (
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 panel p-3">
@@ -5104,6 +5112,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
       />
 
       <GeminiConnectModal
+        onProviderChange={handleProviderChange}
         isOpen={showConnectModal}
         onClose={() => setShowConnectModal(false)}
         onConnected={() => setShowConnectModal(false)}

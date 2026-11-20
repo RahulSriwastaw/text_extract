@@ -18,7 +18,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { ConverterFigure } from './ConverterFigure';
-import { ScannedPage, NumberingStyle, ExtractedElement, BoundingBox } from '../types';
+import { ScannedPage, NumberingStyle, OptionArrangement, ExtractedElement, BoundingBox } from '../types';
 import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon, Sparkles, Camera } from 'lucide-react';
 import { formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 import GeminiExplanationPanel from './GeminiExplanationPanel';
@@ -26,6 +26,7 @@ import GeminiExplanationPanel from './GeminiExplanationPanel';
 interface ProcessingListProps {
   pages: ScannedPage[];
   onApplyFigure: (pageId: string, figure: ExtractedElement, image: string, bbox?: BoundingBox) => void;
+  onRemoveFigure: (pageId: string, figure: ExtractedElement) => void;
   onUpdateText: (id: string, newText: string) => void;
   onRetry: (id: string) => void;
   onRecapture?: (id: string) => void;
@@ -34,6 +35,7 @@ interface ProcessingListProps {
   showAnswers?: boolean;
   showMcqNumbers?: boolean;
   numberingStyle?: NumberingStyle;
+  optionArrangement: OptionArrangement;
   mcqMode?: boolean;
 }
 
@@ -100,6 +102,7 @@ const processTextForDisplay = (
 const ProcessingList: React.FC<ProcessingListProps> = ({ 
   pages, 
   onApplyFigure,
+  onRemoveFigure,
   onUpdateText, 
   onRetry, 
   onRecapture,
@@ -108,6 +111,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
   showAnswers = true,
   showMcqNumbers = true,
   numberingStyle = NumberingStyle.QUESTION_DOT,
+  optionArrangement,
   mcqMode = false
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -342,6 +346,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
             <div className="flex-1 overflow-auto p-4 sm:p-5 relative">
                {includeImages && page.status === 'done' && page.elements?.filter(el => el.type === 'image').map(el =>
                  <ConverterFigure key={el.id} element={el} pageImage={page.imageUrl}
+                   remove={() => onRemoveFigure(page.id, el)}
                    apply={(image, box) => onApplyFigure(page.id, el, image, box)} />)}
                {editingId === page.id ? (
                    <textarea
@@ -355,7 +360,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                    <div>
                       {page.status === 'done' && page.extractedText ? (
                           <>
-                            <div className="markdown-body max-w-none text-sm leading-relaxed">
+                            <div className={`markdown-body max-w-none text-sm leading-relaxed ${optionArrangement === OptionArrangement.VERTICAL ? '[&_p]:whitespace-pre-line' : ''}`}>
                                 <ReactMarkdown
                                   remarkPlugins={[remarkGfm, remarkMath]}
                                   rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore', errorColor: '#f87171' }]]}

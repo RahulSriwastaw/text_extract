@@ -4,7 +4,7 @@
  * Fixed: No Paragraph spreading, proper docx v8 API usage.
  */
 import {
-  Document, Packer, Paragraph, TextRun,
+  Document, Packer, Paragraph, TextRun, ImageRun,
   AlignmentType, BorderStyle, ShadingType,
   convertMillimetersToTwip, HeadingLevel,
   LevelFormat,
@@ -251,6 +251,24 @@ async function htmlToParas(
   ctx: RunsCtx,
   indent?: number
 ): Promise<Paragraph[]> {
+  // Reviewed crops and SVG recreations are embedded PNGs in the bilingual fields.
+  const chunks = html.split(/(<img\b[^>]*\bsrc=["']data:image\/png;base64,[A-Za-z0-9+/=]+["'][^>]*>)/gi);
+  if (chunks.length > 1) {
+    const paragraphs: Paragraph[] = [];
+    for (const chunk of chunks) {
+      const image = /^<img\b[^>]*\bsrc=["'](data:image\/png;base64,([A-Za-z0-9+/=]+))["']/i.exec(chunk);
+      if (!image) { paragraphs.push(...await htmlToParas(chunk, ctx, indent)); continue; }
+      const header = Uint8Array.from(atob(image[2].slice(0, 32)), c => c.charCodeAt(0));
+      if (header.length < 24) continue;
+      const view = new DataView(header.buffer);
+      const width = view.getUint32(16), height = view.getUint32(20);
+      if (!width || !height) continue;
+      const scale = Math.min(1, 400 / width, 350 / height);
+      paragraphs.push(new Paragraph({ children: [new ImageRun({ data: image[1],
+        transformation: { width: Math.max(1, width * scale), height: Math.max(1, height * scale) } })] }));
+    }
+    return paragraphs;
+  }
   const plain = stripHtml(html);
   if (!plain.trim()) return [];
 
@@ -452,7 +470,7 @@ export async function downloadMcqAsDocx(
       if (qeHi.length > 0) kids.push(...qeHi);
 
       // Options (Hindi)
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < OPT_LABELS.length; i++) {
         const val = (item as any)[OPT_HI[i]] as string | undefined;
         if (!val) continue;
         const correct = OPT_LABELS[i] === ans;
@@ -503,7 +521,7 @@ export async function downloadMcqAsDocx(
       if (qeEn.length > 0) kids.push(...qeEn);
 
       // Options (English)
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < OPT_LABELS.length; i++) {
         const val = (item as any)[OPT_EN[i]] as string | undefined;
         if (!val) continue;
         const correct = OPT_LABELS[i] === ans;

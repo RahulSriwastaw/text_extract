@@ -1,3 +1,4 @@
+import { protectMath, restoreMath } from '../services/htmlLatex.js';
 import katex from 'katex';
 import { LatexRepairResponse, LatexRepairStatus, LatexValidationIssue, MockTestMcqItem } from '../types.js';
 import { cleanMocktestText, safeParseAiJsonObject, HTML_LATEX_FORMAT_RULES, normalizeHtmlLatex } from '../services/textCleanService.js';
@@ -144,13 +145,12 @@ export function normalizeLatexLocally(content: string): string {
   res = res.replace(/[\x09\b]imes/g, '\\times');
   res = res.replace(/[\r\x0d]?\\?r?ightarrow\b/gi, '\\rightarrow');
 
-  // 5. Wrap naked fractions outside $...$ in $...$
-  res = res.replace(/(?<!\$|\\)(?:(\d+)\s*)?\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}(?!\$)/g, (_m, whole, n, d) => {
-    return whole ? `$${whole}\\frac{${n}}{${d}}$` : `$\\frac{${n}}{${d}}$`;
-  });
-
-  // 6. Wrap naked \sqrt outside $...$ in $...$
-  res = res.replace(/(?<!\$|\\)\\sqrt(?:\s*\[[^\]]+\])?\s*\{([^{}]+)\}(?!\$)/g, (_m, inner) => `$\\sqrt{${inner}}$`);
+  // Protect complete formulas before wrapping bare commands in the surrounding prose.
+  const protectedMath = protectMath(res);
+  let prose = protectedMath.text.replace(/(?:(\d+)\s*)?\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g,
+    (_, whole, n, d) => `$${whole || ''}\\frac{${n}}{${d}}$`);
+  prose = prose.replace(/\\sqrt(?:\s*\[[^\]]+\])?\s*\{[^{}]+\}/g, root => `$${root}$`);
+  res = restoreMath(prose, protectedMath.math, ({ tex, display }) => display ? `$$${tex}$$` : `$${tex}$`);
 
   // 7. Clean trailing backslashes at end of lines/paragraphs
   res = res.replace(/\\+(\s*<\/p>|\s*$)/gm, '$1');

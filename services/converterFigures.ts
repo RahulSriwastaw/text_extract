@@ -1,4 +1,4 @@
-import type { BoundingBox, ExtractedElement, FigureMode, FigureReview } from '../types';
+import type { BoundingBox, ExtractedElement, FigureMode, FigureReview, ScannedPage } from '../types';
 import { cropImage } from './pdfUtils';
 
 export function normalizeFigureBox(box?: BoundingBox): BoundingBox | undefined {
@@ -53,9 +53,29 @@ async function renderFigureSvg(source: string): Promise<string | undefined> {
   }
 }
 
+export function isPageDecoration(element: ExtractedElement) {
+  if (element.type !== 'image') return false;
+  if (['branding', 'watermark', 'decoration'].includes(element.figureRole)) return true;
+  const caption = element.content || '';
+  if (/\b(?:question|option|solution|passage|identif(?:y|ication)|asked about)\b/i.test(caption)) return false;
+  return /^(?:(?:a|an|the)\s+)?(?:background\s+)?watermark\b/i.test(caption)
+    || /^(?:photo(?:graph)?|portrait|logo|image)\b.*\b(?:as|used as) (?:a |the )?(?:background )?watermark\b/i.test(caption)
+    || /^(?:(?:a|the|circular|publisher|coaching|school|institute|header|footer)\s+)*logo\b.*\b(?:header|footer|banner|branding)\b/i.test(caption);
+}
+
+export function removeConverterFigure(page: ScannedPage, figure: ExtractedElement): ScannedPage {
+  if (figure.type !== 'image' || !page.elements?.includes(figure)) return page;
+  const marker = '[Image: ' + (figure.content || '') + ']';
+  let occurrence = page.elements.slice(0, page.elements.indexOf(figure))
+    .filter(el => el.type !== 'text' && el.content === figure.content).length;
+  const extractedText = page.extractedText?.split('\n\n').filter(block => block !== marker || occurrence-- !== 0).join('\n\n');
+  return { ...page, extractedText, elements: page.elements.filter(el => el !== figure) };
+}
+
 export async function prepareConverterFigures(pageImage: string, elements: ExtractedElement[], mode: FigureMode) {
   const prepared: ExtractedElement[] = [];
   for (const element of elements) {
+    if (isPageDecoration(element)) continue;
     if (element.type !== 'image' && element.type !== 'table') {
       prepared.push(element);
       continue;

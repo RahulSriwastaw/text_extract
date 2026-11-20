@@ -200,13 +200,18 @@ export function cleanMocktestText(text: string): string {
   res = res.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$');
   res = res.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
 
-  // 14. Fix stray $= and =$ around operators and currency
-  res = res.replace(/\$\s*=\s*₹/g, '= ₹');
-  res = res.replace(/\s*=\s*\$\s*₹/g, ' = ₹');
-  res = res.replace(/\$\s*₹\s*([0-9,]+(?:\.[0-9]+)?)\s*\$/g, '₹$1');
-  res = res.replace(/\$\s*₹\s*/g, '₹');
-  res = res.replace(/₹\s*\$/g, '₹');
-  res = res.replace(/(₹\s*[0-9,]+(?:\.[0-9]+)?)\$/g, '$1');
+  // A closing dollar after a rupee amount belongs to the enclosing equation.
+  // Older exports also lost the boundary between that equation and the next step.
+  res = res.replace(/(₹[\d,]+(?:\.\d+)?\$)(?=(?:[a-z]\\?%|\d+)\s*=\s*\$\\frac)/gi, (_, amount) => amount + '<br>$');
+  // Undo a legacy extra pair of delimiters around a fraction inside an equation.
+  res = res.replace(/(\$(?!\$)[^$<>\n]*[=×+*/−-]\s*)\$(\\frac\{[^{}]+\}\{[^{}]+\})\$(?=\s*(?:[=×+*/−-]|\\times|\\div))/g, '$1$2');
+  // A price at the end of one calculation can be glued to the next step's label.
+  res = res.replace(/(\$[^$<>\n]*=\s*₹[\d,]+)(?=[\p{L}][^$<>=\n]{1,50}=\s*\$)/gu,
+    (_, equation) => equation + '$<br>');
+  res = res.replace(/(\\%\$)(?=[\p{L}][^$<>=\n]{1,50}=\s*\$)/gu, (_, end) => end + '<br>');
+  // Restore a missing closing delimiter on a final equation ending in a rupee amount.
+  res = res.replace(/(?:^|<[^>]+>|\n)([^<>\n]*₹[\d,]+(?:\.\d+)?)(?=<|\n|$)/g, (whole, step) =>
+    (step.match(/(?<!\\)\$/g) || []).length % 2 && /\$[^$]*=\s*₹/.test(step) ? whole + '$' : whole);
 
   // 15. Simplify simple number options wrapped in $: e.g. "$420$ litres" or "$420$ लीटर"
   res = res.replace(/<p>\s*\$\s*(\d+(?:\.\d+)?)\s*\$\s*([a-zA-Z\u0900-\u097F\s]*)<\/p>/gi, '<p>$1 $2</p>');

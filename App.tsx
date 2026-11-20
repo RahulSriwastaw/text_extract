@@ -131,7 +131,7 @@ function ExistingApp() {
               exit={{ opacity: 0, y: 20 }}
               className="pt-14"
             >
-              <PdfConverter 
+              <PdfConverter key={user.uid} uid={user.uid}
                 initialImages={preloadedPages}
                 onClearInitialImages={() => setPreloadedPages([])}
               />

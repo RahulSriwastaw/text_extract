@@ -1,6 +1,8 @@
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
+import type { FigureMode } from '../types.js';
+import { SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -696,6 +698,18 @@ const safeExtractResponseText = (response: any): string => {
 /**
  * Invokes Anthropic Claude Messages API directly with vision & text payloads.
  */
+function readInlineImage(input: string, declaredType = 'image/png') {
+  const match = /^data:(image\/[\w.+-]+);base64,/i.exec(input.trim());
+  const data = input.trim().slice(match?.[0].length ?? 0);
+  const header = Buffer.from(data.slice(0, 16), 'base64');
+  let mimeType = match?.[1].toLowerCase() || declaredType;
+  if (header.subarray(0, 3).toString('hex') === 'ffd8ff') mimeType = 'image/jpeg';
+  else if (header.subarray(0, 8).toString('hex') === '89504e470d0a1a0a') mimeType = 'image/png';
+  else if (['GIF87a', 'GIF89a'].includes(header.toString('ascii', 0, 6))) mimeType = 'image/gif';
+  else if (header.toString('ascii', 0, 4) === 'RIFF' && header.toString('ascii', 8, 12) === 'WEBP') mimeType = 'image/webp';
+  return { data, mimeType: mimeType === 'image/jpg' ? 'image/jpeg' : mimeType };
+}
+
 export async function callClaudeMessagesApi(
   apiKey: string,
   model: string,
@@ -712,9 +726,7 @@ export async function callClaudeMessagesApi(
     } else if (item?.text) {
       contentParts.push({ type: 'text', text: item.text });
     } else if (item?.inlineData) {
-      let mime = item.inlineData.mimeType || 'image/png';
-      if (mime === 'image/jpg') mime = 'image/jpeg';
-      const cleanData = String(item.inlineData.data || '').replace(/^data:image\/[a-zA-Z]+;base64,/, '').trim();
+      const { data: cleanData, mimeType: mime } = readInlineImage(String(item.inlineData.data || ''), item.inlineData.mimeType);
       if (cleanData) {
         contentParts.push({
           type: 'image',
@@ -755,6 +767,7 @@ export async function callClaudeMessagesApi(
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
+    signal: config.abortSignal,
     headers: {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
@@ -1455,9 +1468,11 @@ const extractLayoutWithRetry = async (
   userKey?: string,
   showMcqNumbers: boolean = true,
   autoProofread: boolean = false,
-  optionArrangement: OptionArrangement = OptionArrangement.VERTICAL
+  optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
+  signal?: AbortSignal,
+  figureMode: FigureMode = 'crop'
 ): Promise<any> => {
-  const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
+  const inlineImage = readInlineImage(base64Image);
 
   // 1. Question Numbering Feature Connection
   let numberingInstruction = '';
@@ -1575,14 +1590,12 @@ ${showAnswers ? '  Answer: [Correct Option Letter]' : ''}
   7. **DO NOT FORCE QUESTIONS**: Do NOT convert general text into question format.`;
 
   const executeCall = async (client: any) => {
+    signal?.throwIfAborted();
     const primaryModel = getPrimaryModel();
     const fallbackModel = getFallbackModel();
     const contents = [
       {
-        inlineData: {
-          mimeType: 'image/png',
-          data: cleanBase64
-        }
+        inlineData: inlineImage
       },
       {
         text: `You are an elite, highly precise Universal Document Digitizer and PDF-to-Text Conversion Engine. Analyze the provided image and extract all elements in their correct reading order with 100% fidelity.
@@ -1636,6 +1649,7 @@ Each object in the array must have the following structure:
 **BBOX INSTRUCTIONS**:
 1. **Text Elements**: bbox is optional but recommended if possible.
 ${imageFormattingInstruction}
+${includeImages && figureMode === 'svg' ? SVG_FIGURE_INSTRUCTION : ''}
 3. **Table Elements**: Provide the bbox for the entire table.
 
 Ensure the elements in the JSON array are ordered exactly as they should be read from top to bottom, left to right.
@@ -1644,6 +1658,7 @@ Ensure the elements in the JSON array are ordered exactly as they should be read
       ];
 
       const generateConfig = {
+        abortSignal: signal,
         temperature: 0.1,
         responseMimeType: "application/json",
       };
@@ -1817,6 +1832,8 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
 };
 
 app.post('/api/extract', async (req, res) => {
+  const controller = new AbortController();
+  res.once('close', () => { if (!res.writableEnded) controller.abort(); });
   try {
     const { 
       base64Image, 
@@ -1844,10 +1861,14 @@ app.post('/api/extract', async (req, res) => {
       userKey,
       showMcqNumbers,
       autoProofread,
-      optionArrangement
+      optionArrangement,
+      controller.signal,
+      req.body.figureMode === 'svg' ? 'svg' : 'crop'
     );
+    if (controller.signal.aborted) return;
     res.json({ elements });
   } catch (error: any) {
+    if (controller.signal.aborted) return;
     console.warn("Extraction failed:", error?.message || error);
     try {
       const parsedError = JSON.parse(error.message);

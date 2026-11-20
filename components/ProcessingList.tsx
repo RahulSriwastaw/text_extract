@@ -17,13 +17,15 @@ function normalizePreviewMath(text: string): string {
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { ScannedPage, NumberingStyle } from '../types';
+import { ConverterFigure } from './ConverterFigure';
+import { ScannedPage, NumberingStyle, ExtractedElement, BoundingBox } from '../types';
 import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon, Sparkles, Camera } from 'lucide-react';
 import { formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 import GeminiExplanationPanel from './GeminiExplanationPanel';
 
 interface ProcessingListProps {
   pages: ScannedPage[];
+  onApplyFigure: (pageId: string, figure: ExtractedElement, image: string, bbox?: BoundingBox) => void;
   onUpdateText: (id: string, newText: string) => void;
   onRetry: (id: string) => void;
   onRecapture?: (id: string) => void;
@@ -97,6 +99,7 @@ const processTextForDisplay = (
 
 const ProcessingList: React.FC<ProcessingListProps> = ({ 
   pages, 
+  onApplyFigure,
   onUpdateText, 
   onRetry, 
   onRecapture,
@@ -337,6 +340,9 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
             </div>
 
             <div className="flex-1 overflow-auto p-4 sm:p-5 relative">
+               {includeImages && page.status === 'done' && page.elements?.filter(el => el.type === 'image').map(el =>
+                 <ConverterFigure key={el.id} element={el} pageImage={page.imageUrl}
+                   apply={(image, box) => onApplyFigure(page.id, el, image, box)} />)}
                {editingId === page.id ? (
                    <textarea
                      value={editText}

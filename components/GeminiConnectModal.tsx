@@ -36,6 +36,7 @@ import {
 interface GeminiConnectModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onProviderChange?: (provider: AiProvider) => void;
   onConnected?: () => void;
 }
 
@@ -63,7 +64,7 @@ const PROVIDERS: { id: AiProvider; name: string; url: string; badge: string; des
   }
 ];
 
-const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose, onConnected }) => {
+const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose, onConnected, onProviderChange }) => {
   const [activeTab, setActiveTab] = useState<'extension' | 'chrome_key' | 'oauth'>('extension');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [clientIdInput, setClientIdInput] = useState('');
@@ -123,6 +124,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
   const handleProviderSelect = (provider: AiProvider) => {
     setSelectedProvider(provider);
     setStoredAiProvider(provider);
+    onProviderChange?.(provider);
     setBridgeStatus(prev => ({ ...prev, provider }));
     setStatusMessage({
       type: 'success',

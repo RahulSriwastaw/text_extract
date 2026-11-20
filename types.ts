@@ -18,11 +18,21 @@ export interface BoundingBox {
   xmax: number;
 }
 
+export type FigureMode = 'crop' | 'svg';
+
+export interface FigureReview {
+  mode: FigureMode;
+  original?: string;
+  recreation?: string;
+}
+
 export interface ExtractedElement {
   type: 'text' | 'image' | 'table';
   continues_previous?: boolean;
   content?: string;
   imageB64?: string;
+  svg?: string;
+  figureReview?: FigureReview;
   bbox?: BoundingBox;
   id: string;
 }

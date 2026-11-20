@@ -49,7 +49,12 @@ export async function signInWithGoogle(): Promise<User> {
     throw new Error('Firebase Auth is not configured on this deployment.');
   }
 
-  const result = await signInWithPopup(auth, googleProvider);
+  const result = await signInWithPopup(auth, googleProvider).catch((error) => {
+    if (error?.code === 'auth/popup-blocked') {
+      throw new Error('Allow pop-ups for this site and try again. If you are using an in-app browser, open this page in Chrome or Edge to sign in.');
+    }
+    throw error;
+  });
   const appUser: User = {
     uid: result.user.uid,
     email: result.user.email,

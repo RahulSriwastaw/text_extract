@@ -1,3 +1,4 @@
+import { useConverterSettings } from '../services/converterSettings';
 import React, { useState, useEffect, useRef } from 'react';
 import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers, Bot, FileSpreadsheet, MoreHorizontal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -8,7 +9,9 @@ import McqSidebar from './McqSidebar';
 import MocktestStudioModal from './MocktestStudioModal';
 import UploadProgressBar, { UploadProgressData } from './UploadProgressBar';
 import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem, MockTestMcqItem, ExtractedElement } from '../types';
-import { convertPdfToImages, readFileAsBase64, cropImage } from '../services/pdfUtils';
+import { prepareConverterFigures } from '../services/converterFigures';
+import type { FigureMode, BoundingBox } from '../types';
+import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
 import { generateDocx, formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 import { convertElementsToMockTestItems } from '../services/mocktestService';
@@ -38,6 +41,7 @@ import {
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 export interface PdfConverterProps {
+  uid: string;
   initialImages?: string[];
   onClearInitialImages?: () => void;
 }
@@ -62,21 +66,18 @@ const ToggleChip: React.FC<{ on: boolean; onClick: () => void; label: string; ti
   </button>
 );
 
-const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearInitialImages }) => {
+const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClearInitialImages }) => {
+  const [{ autoDownload, numberingStyle, isBilingual, includeImages, figureMode, optionArrangement, mcqMode, showMcqNumbers, showAnswers, refineMode, autoProofread, aiEngine, provider }, updateSetting, syncError] = useConverterSettings(uid);
+  useEffect(() => { if (provider !== getStoredAiProvider()) setStoredAiProvider(provider); }, [provider]);
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [pages, setPages] = useState<ScannedPage[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [fileName, setFileName] = useState<string>("document");
   const [rangeInput, setRangeInput] = useState<string>("");
-  const [autoDownload, setAutoDownload] = useState<boolean>(true);
-  const [numberingStyle, setNumberingStyle] = useState<NumberingStyle>(NumberingStyle.HASH);
   const [userGeminiAuth, setUserGeminiAuth] = useState<{ isAuthenticated: boolean; authType: string }>({ isAuthenticated: false, authType: 'none' });
   const [showGeminiConnect, setShowGeminiConnect] = useState(false);
   const [showGeminiSettings, setShowGeminiSettings] = useState(false);
-  const [isBilingual, setIsBilingual] = useState(false);
-  const [includeImages, setIncludeImages] = useState<boolean>(false);
-  const [optionArrangement, setOptionArrangement] = useState<OptionArrangement>(OptionArrangement.VERTICAL);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [user] = useCurrentUser();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -96,11 +97,6 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     };
   }, [showMoreMenu]);
   const [isMcqSidebarOpen, setIsMcqSidebarOpen] = useState(false);
-  const [mcqMode, setMcqMode] = useState(false);
-  const [showMcqNumbers, setShowMcqNumbers] = useState(true);
-  const [showAnswers, setShowAnswers] = useState(true);
-  const [refineMode, setRefineMode] = useState(false);
-  const [autoProofread, setAutoProofread] = useState(false);
   const [selectedError, setSelectedError] = useState<string | null>(null);
   const [wordsConsumed, setWordsConsumed] = useState(0);
   const [pointsConsumed, setPointsConsumed] = useState(0);
@@ -108,7 +104,6 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   const [uploadProgress, setUploadProgress] = useState<UploadProgressData | null>(null);
 
   // Study AI Chrome Extension Bridge state
-  const [aiEngine, setAiEngine] = useState<'extension' | 'api'>('extension');
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
   const [bridgeProgressMsg, setBridgeProgressMsg] = useState<string | null>(null);
   const [pdfChatUrl, setPdfChatUrl] = useState<string | null>(null);
@@ -133,21 +128,20 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     return text.trim().split(/\s+/).filter(Boolean).length;
   };
 
-  // Crop figures and tables out of the page image. The direct API path already did this; the
-  // bridge path skipped it, so "Keep images" silently did nothing on the extension engine.
-  const attachCroppedFigures = async (imageUrl: string, elements: ExtractedElement[]): Promise<ExtractedElement[]> => {
-    if (!includeImages) return elements;
-    return Promise.all(elements.map(async (el) => {
-      if ((el.type === 'image' || el.type === 'table') && el.bbox) {
-        try {
-          return { ...el, imageB64: await cropImage(imageUrl, el.bbox) };
-        } catch {
-          return el;
-        }
-      }
-      return el;
+  const prepareFigures = (imageUrl: string, elements: ExtractedElement[]) =>
+    includeImages ? prepareConverterFigures(imageUrl, elements, figureMode) : Promise.resolve(elements);
+
+  const pendingFigures = includeImages ? pages.filter(p => p.isSelected && p.status === 'done')
+    .reduce((count, page) => count + (page.elements?.filter(el => el.figureReview).length || 0), 0) : 0;
+  const needsReview = pendingFigures > 0;
+
+  function applyFigure(pageId: string, figure: ExtractedElement, imageB64: string, bbox?: BoundingBox) {
+    setPages(prev => prev.map(page => page.id !== pageId ? page : {
+      ...page, elements: page.elements?.map(el => el !== figure ? el : {
+        id: el.id, type: 'image', content: el.content, bbox, imageB64
+      })
     }));
-  };
+  }
 
   useEffect(() => {
     checkAuth();
@@ -207,10 +201,11 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
   // Auto-save to history effect & local IndexedDB
   useEffect(() => {
-    if (appState === AppState.COMPLETED) {
+    if (appState === AppState.COMPLETED && !needsReview) {
       const completedElements = pages
-        .filter(p => p.status === 'done' && p.elements)
-        .flatMap(p => p.elements || []);
+        .filter(p => p.isSelected && p.status === 'done' && p.elements)
+        .flatMap(p => p.elements || [])
+        .filter(el => includeImages || el.type !== 'image');
       
       if (completedElements.length > 0) {
         const currentUid = user?.uid || 'guest';
@@ -250,7 +245,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         return () => clearTimeout(timer);
       }
     }
-  }, [appState]);
+  }, [appState, needsReview]);
 
   useEffect(() => {
     const handleGlobalPaste = (e: ClipboardEvent) => {
@@ -284,28 +279,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     return () => window.removeEventListener('paste', handleGlobalPaste);
   }, [appState]);
 
-    // Triggers selection and processing for all failed pages
-    const retryAllErrors = async () => {
-        const errorPages = pages.filter(p => p.status === 'error');
-        if (errorPages.length === 0) return;
-        
-        setErrorMsg(null);
-        setAppState(AppState.ANALYZING);
-
-        // Update pages and then trigger extraction
-        setPages(prev => {
-            const updated = prev.map(p => 
-                p.status === 'error' 
-                    ? { ...p, isSelected: true, status: 'processing' as const, errorMessage: undefined, elements: undefined, extractedText: undefined } 
-                    : p
-            );
-            
-            return updated;
-        });
-
-        // Small delay to ensure state batching finishes
-        setTimeout(() => startExtraction(), 0);
-    };
+  const retryAllErrors = () => {
+    if (appState === AppState.ANALYZING) return;
+    const failed = pages.filter(p => p.status === 'error');
+    if (!failed.length) return;
+    setPages(prev => prev.map(p => p.status === 'error' ? { ...p, isSelected: true } : p));
+    void startExtraction(failed);
+  };
 
   const handleFilesSelected = async (fileList: FileList | null, append: boolean = false) => {
     if (!fileList || fileList.length === 0) return;
@@ -466,7 +446,23 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       })));
   };
 
-  const startExtraction = async () => {
+  const runVersion = useRef(0);
+  const cancelRun = () => {
+    runVersion.current++;
+    for (const controller of pageAborters.current.values()) controller.abort();
+    pageAborters.current.clear();
+  };
+  useEffect(() => cancelRun, []);
+  const stopExtraction = () => {
+    cancelRun();
+    setPages(prev => prev.map(p => p.status === 'processing' ? { ...p, status: 'pending', errorMessage: undefined } : p));
+    setBridgeProgressMsg(null);
+    setAppState(AppState.IDLE);
+  };
+
+  const startExtraction = async (pagesToProcess = pages.filter(p => p.isSelected && p.status !== 'done')) => {
+    const version = ++runVersion.current;
+    const stopped = () => version !== runVersion.current;
     setAppState(AppState.ANALYZING);
     setErrorMsg(null);
     setBridgeProgressMsg(null);
@@ -477,6 +473,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     if (useBridge) {
       setBridgeProgressMsg('Checking TextExtract Pro Bridge connection…');
       const status = await pingStudyAiExtension(3000);
+      if (stopped()) return;
       if (!status.connected || status.protocolVersion !== 2) {
         useBridge = false;
         setBridgeProgressMsg(`Bridge not connected (${status.error || 'extension did not respond'}) — using Direct Claude API for this run.`);
@@ -485,13 +482,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
     // 1. Visually mark ALL selected pages as 'processing' immediately.
     setPages(prev => prev.map(p => 
-      (!useBridge && p.isSelected && p.status !== 'done')
+      (!useBridge && pagesToProcess.some(page => page.id === p.id))
         ? { ...p, status: 'processing', elements: undefined, extractedText: undefined } 
         : p
     ));
     
     // Identify pages to process
-    const pagesToProcess = pages.filter(p => p.isSelected && p.status !== 'done');
+
     let criticalErrorOccurred = false;
 
     if (useBridge) {
@@ -500,6 +497,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       let activeChatUrl: string | undefined;
 
       for (let i = 0; i < pagesToProcess.length; i++) {
+        if (stopped()) return;
         if (criticalErrorOccurred) break;
         const page = pagesToProcess[i];
 
@@ -531,7 +529,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             includeImages,
             optionArrangement,
             showMcqNumbers,
-            autoProofread
+            autoProofread, figureMode
           );
           // Register a controller so this one page can be stopped without ending the whole run.
           pageAborters.current.get(page.id)?.abort();
@@ -555,9 +553,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
               mimeType: 'image/png',
               prompt,
               expectedMarker: pageMarker,
-              responseFormat: mcqMode ? 'json' : 'text',
+              responseFormat: mcqMode || includeImages ? 'json' : 'text',
               signal: pageAborter.signal,
-              provider: getStoredAiProvider() || bridgeStatus.provider || 'claude',
+              provider: provider,
               // Rotate to a fresh chat every few pages: a long chat makes upload and the composer
               // unreliable. Continuation context travels in the prompt, not the chat history.
               continueChat: !startNewChat,
@@ -566,6 +564,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
               totalPages: pages.length,
               silent: true,
               onProgress: (step, detail, chatUrl) => {
+                if (stopped()) return;
                 if (chatUrl) { activeChatUrl = chatUrl; setPdfChatUrl(chatUrl); }
                 const msg = detail || `${step.toUpperCase()}...`;
                 setBridgeProgressMsg(`Page ${i + 1}/${pagesToProcess.length}${attemptTag}: ${msg}`);
@@ -579,6 +578,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             retries: 2,
             signal: pageAborter.signal,
             onRetry: ({ attempt, maxAttempts, error }) => {
+              if (stopped()) return;
               freshChatOnRetry = true;
               activeChatUrl = undefined;
               const msg = `Attempt ${attempt}/${maxAttempts} failed: ${error.message} — retrying in a fresh chat…`;
@@ -588,6 +588,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             },
           });
 
+          if (stopped()) return;
           if (bridgeRes.chatUrl) {
             activeChatUrl = bridgeRes.chatUrl;
             setPdfChatUrl(bridgeRes.chatUrl);
@@ -595,8 +596,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           }
 
           const { rawText } = bridgeRes;
-          const elements = await attachCroppedFigures(page.imageUrl, bridgeRes.elements);
+          const elements = await prepareFigures(page.imageUrl, bridgeRes.elements);
 
+          if (stopped()) return;
           // Calculate words and points
           const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
           extractedPageTexts[page.id] = elements.at(-1)?.content || '';
@@ -622,6 +624,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             }));
           }
 
+          if (stopped()) return;
           // Mark success
           setPages(prev => prev.map(p => p.id === page.id ? { 
             ...p, 
@@ -636,6 +639,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             await new Promise(r => setTimeout(r, 1200));
           }
         } catch (e: any) {
+          if (stopped()) return;
           console.error(`Error processing page ${page.pageNumber} via TextExtract Bridge:`, e);
           const errorStr = e?.message || String(e);
           setPages(prev => prev.map(p => p.id === page.id ? { ...p, status: 'error', errorMessage: errorStr } : p));
@@ -644,6 +648,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         }
       }
 
+      if (stopped()) return;
       setBridgeProgressMsg(null);
       setAppState(AppState.COMPLETED);
       return;
@@ -653,6 +658,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     const BATCH_SIZE = Math.min(10, pagesToProcess.length);
 
     for (let i = 0; i < pagesToProcess.length; i += BATCH_SIZE) {
+        if (stopped()) return;
         if (criticalErrorOccurred) break;
 
         const batch = pagesToProcess.slice(i, i + BATCH_SIZE);
@@ -662,6 +668,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
             // Stagger requests by 600ms to avoid burst limits
             await new Promise(resolve => setTimeout(resolve, index * 600));
+            if (stopped()) return;
 
             pageAborters.current.get(page.id)?.abort();
             const pageAborter = new AbortController();
@@ -678,11 +685,11 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                   showAnswers,
                   showMcqNumbers,
                   autoProofread,
-                  optionArrangement
+                  optionArrangement, 0, pageAborter.signal, figureMode
                 );
-                // Stop cannot cancel an in-flight API call, so discard its result instead.
                 if (pageAborter.signal.aborted) return;
 
+                if (stopped()) return;
                 // Calculate words and points
                 const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
                 const pageWords = countWords(pageText);
@@ -690,18 +697,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                 setPointsConsumed(prev => prev + 1);
 
                 // Process images & tables
-                const processedElements = await Promise.all(elements.map(async (el) => {
-                    if (includeImages && (el.type === 'image' || el.type === 'table') && el.bbox) {
-                        try {
-                            const croppedB64 = await cropImage(page.imageUrl, el.bbox);
-                            return { ...el, imageB64: croppedB64 };
-                        } catch (cropErr) {
-                            return el;
-                        }
-                    }
-                    return el;
-                }));
+                const processedElements = await prepareFigures(page.imageUrl, elements);
 
+                if (stopped()) return;
                 // Mark success
                 setPages(prev => prev.map(p => p.id === page.id ? { 
                     ...p, 
@@ -710,6 +708,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                     extractedText: processedElements.map(e => e.type === 'text' ? (e.content || '') : `[Image: ${e.content || ''}]`).join('\n\n')
                 } : p));
             } catch (e: any) {
+                if (stopped()) return;
+                if (pageAborter.signal.aborted) return;
                 console.error(`Error processing page ${page.pageNumber}:`, e);
                 const errorStr = e?.message || String(e);
                 const errorLower = errorStr.toLowerCase();
@@ -736,6 +736,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
             }
         }));
 
+        if (stopped()) return;
         // Dynamic delay between batches to respect API limits (15 RPM per key)
         if (i + BATCH_SIZE < pagesToProcess.length && !criticalErrorOccurred) {
             // If we have multiple keys, we can be much faster. 
@@ -745,9 +746,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         }
     }
     
-    if (!criticalErrorOccurred) {
-        setAppState(AppState.COMPLETED);
-    }
+    if (stopped()) return;
+    setAppState(criticalErrorOccurred ? AppState.IDLE : AppState.COMPLETED);
   };
 
   // One controller per page so a single page can be stopped without touching the others.
@@ -800,7 +800,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           includeImages,
           optionArrangement,
           showMcqNumbers,
-          autoProofread
+          autoProofread, figureMode
         );
         const pageMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${generateId()}---`;
         setPages(prev => prev.map(p => p.id === id ? { ...p, expectedMarker: pageMarker } : p));
@@ -811,8 +811,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           mimeType: 'image/png',
           prompt,
           expectedMarker: pageMarker,
-          responseFormat: mcqMode ? 'json' : 'text',
-          provider: getStoredAiProvider() || bridgeStatus.provider || 'claude',
+          responseFormat: mcqMode || includeImages ? 'json' : 'text',
+          provider: provider,
           continueChat: false,
           pageNumber: page.pageNumber,
           totalPages: pages.length,
@@ -822,7 +822,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
           }
         });
 
-        const elements = await attachCroppedFigures(page.imageUrl, bridgeElements);
+        const elements = await prepareFigures(page.imageUrl, bridgeElements);
+        if (aborter.signal.aborted) return;
         const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
         const pageWords = countWords(pageText);
         setWordsConsumed(prev => prev + pageWords);
@@ -860,9 +861,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         showAnswers,
         showMcqNumbers,
         autoProofread,
-        optionArrangement
+        optionArrangement, 0, aborter.signal, figureMode
       );
-      // The API call itself cannot be cancelled mid-flight; discard its result instead.
       if (aborter.signal.aborted) return;
       
       // Calculate words and points
@@ -871,18 +871,9 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       setWordsConsumed(prev => prev + pageWords);
       setPointsConsumed(prev => prev + 1);
 
-      const processedElements = await Promise.all(elements.map(async (el) => {
-          if (includeImages && (el.type === 'image' || el.type === 'table') && el.bbox) {
-              try {
-                  const croppedB64 = await cropImage(page.imageUrl, el.bbox);
-                  return { ...el, imageB64: croppedB64 };
-              } catch (cropErr) {
-                  return el;
-              }
-          }
-          return el;
-      }));
+      const processedElements = await prepareFigures(page.imageUrl, elements);
 
+      if (aborter.signal.aborted) return;
       setPages(prev => prev.map(p => p.id === id ? { 
           ...p, 
           status: 'done', 
@@ -914,7 +905,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
     setPages(prev => prev.map(p => p.id === id ? { ...p, errorMessage: 'Reading complete response from AI tab...' } : p));
 
     try {
-      const provider = getStoredAiProvider() || bridgeStatus.provider || 'claude';
+
       const rawText = await captureFromStudyAiBridge({
         provider,
         fullChat: false,
@@ -927,7 +918,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
         throw new Error('No response text detected on AI tab. Please verify the AI finished writing.');
       }
 
-      const elements = await attachCroppedFigures(page.imageUrl, parseExtensionOutputToElements(rawText));
+      const elements = await prepareFigures(page.imageUrl, parseExtensionOutputToElements(rawText));
       const pageText = elements.map(e => e.type === 'text' ? (e.content || '') : '').join(' ');
       const pageWords = countWords(pageText);
       setWordsConsumed(prev => prev + pageWords);
@@ -1013,6 +1004,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
   };
 
   const downloadDocx = async () => {
+    if (needsReview) return;
     // Collect all elements from all selected and completed pages
     const allElements = pages
       .filter(p => p.isSelected && p.status === 'done')
@@ -1435,7 +1427,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                             type="button"
                                             aria-pressed={aiEngine === 'extension'}
                                             onClick={() => {
-                                                setAiEngine('extension');
+                                                updateSetting('aiEngine', 'extension');
                                                 if (!bridgeStatus.connected) {
                                                     setShowGeminiConnect(true);
                                                 }
@@ -1456,7 +1448,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                         <button
                                             type="button"
                                             aria-pressed={aiEngine === 'api'}
-                                            onClick={() => setAiEngine('api')}
+                                            onClick={() => updateSetting('aiEngine', 'api')}
                                             className="seg-item"
                                             title="Direct Claude API (Uses Anthropic API Key)"
                                         >
@@ -1467,10 +1459,10 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
 
                                     {aiEngine === 'extension' && (
                                         <select
-                                            value={getStoredAiProvider()}
+                                            value={provider}
                                             onChange={(e) => {
                                                 const newModel = e.target.value as AiProvider;
-                                                setStoredAiProvider(newModel);
+                                                updateSetting('provider', newModel);
                                                 setBridgeStatus(prev => ({ ...prev, provider: newModel }));
                                             }}
                                             className="select w-36"
@@ -1516,6 +1508,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                     </button>
                                     <button
                                         onClick={downloadDocx}
+                                        disabled={needsReview}
                                         className={`btn ${appState !== AppState.ANALYZING && selectedPendingCount === 0 && !hasErrorPages ? 'btn-primary' : 'btn-secondary'}`}
                                     >
                                         <FileDown />
@@ -1527,7 +1520,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             {appState !== AppState.ANALYZING ? (
                                 (selectedPendingCount > 0 || hasErrorPages || !hasCompletedPages) && (
                                     <button
-                                        onClick={startExtraction}
+                                        onClick={() => startExtraction()}
                                         disabled={selectedPendingCount === 0 && !hasErrorPages}
                                         className="btn btn-primary"
                                     >
@@ -1538,27 +1531,12 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                                     </button>
                                 )
                             ) : (
-                                <>
-                                    {pages.filter(p => p.isSelected && p.status === 'error').length > 0 && (
-                                        <button
-                                            onClick={() => {
-                                                setPages(prev => prev.map(p => p.isSelected && p.status === 'error' ? { ...p, status: 'pending', elements: undefined, extractedText: undefined } : p));
-                                                startExtraction();
-                                            }}
-                                            className="btn btn-danger"
-                                        >
-                                            Retry failed
-                                        </button>
-                                    )}
-                                    <span className="badge badge-accent h-[34px] px-3 rounded-lg">
-                                        <RefreshCw className="animate-spin" />
-                                        Converting…
-                                    </span>
-                                </>
+                                <button type="button" onClick={stopExtraction} className="btn btn-danger">Stop conversion</button>
                             )}
                         </div>
                    </div>
 
+                   {syncError && <p role="status" className="px-3 text-xs text-amber-400">{syncError}</p>}
                    {/* Output options */}
                    <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 border-t border-line bg-white/[0.015]">
                         <span className="text-xs font-semibold text-ink-3 mr-1">Output</span>
@@ -1566,7 +1544,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             <button
                                 type="button"
                                 aria-pressed={!mcqMode}
-                                onClick={() => setMcqMode(false)}
+                                onClick={() => updateSetting('mcqMode', false)}
                                 className="seg-item"
                                 title="Full Text mode: extracts 100% of all text from each page"
                             >
@@ -1575,23 +1553,28 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                             <button
                                 type="button"
                                 aria-pressed={mcqMode}
-                                onClick={() => setMcqMode(true)}
+                                onClick={() => updateSetting('mcqMode', true)}
                                 className="seg-item"
                                 title="MCQ mode: questions, options and answers only"
                             >
                                 MCQ only
                             </button>
                         </div>
-                        <ToggleChip on={isBilingual} onClick={() => setIsBilingual(!isBilingual)} label="Bilingual" />
-                        <ToggleChip on={refineMode} onClick={() => setRefineMode(!refineMode)} label="Refine" title="Remove exam tags, shift dates, page numbers and watermarks" />
-                        <ToggleChip on={autoProofread} onClick={() => setAutoProofread(!autoProofread)} label="Auto proofread" />
-                        <ToggleChip on={includeImages} onClick={() => setIncludeImages(!includeImages)} label="Keep images" />
-                        <ToggleChip on={showMcqNumbers} onClick={() => setShowMcqNumbers(!showMcqNumbers)} label="Numbers" title="Show question numbers" />
-                        <ToggleChip on={showAnswers} onClick={() => setShowAnswers(!showAnswers)} label="Answers" title="Show answers" />
-                        <ToggleChip on={autoDownload} onClick={() => setAutoDownload(!autoDownload)} label="Auto-download" title="Download the DOCX automatically when conversion finishes" />
+                        <ToggleChip on={isBilingual} onClick={() => updateSetting('isBilingual', !isBilingual)} label="Bilingual" />
+                        <ToggleChip on={refineMode} onClick={() => updateSetting('refineMode', !refineMode)} label="Refine" title="Remove exam tags, shift dates, page numbers and watermarks" />
+                        <ToggleChip on={autoProofread} onClick={() => updateSetting('autoProofread', !autoProofread)} label="Auto proofread" />
+                        <ToggleChip on={includeImages} onClick={() => updateSetting('includeImages', !includeImages)} label="Keep images" />
+                        {includeImages && <select className="select" aria-label="Figure mode" value={figureMode}
+                            onChange={e => updateSetting('figureMode', e.target.value as FigureMode)}>
+                            <option value="crop">Crop from page</option>
+                            <option value="svg">Recreate as SVG</option>
+                        </select>}
+                        <ToggleChip on={showMcqNumbers} onClick={() => updateSetting('showMcqNumbers', !showMcqNumbers)} label="Numbers" title="Show question numbers" />
+                        <ToggleChip on={showAnswers} onClick={() => updateSetting('showAnswers', !showAnswers)} label="Answers" title="Show answers" />
+                        <ToggleChip on={autoDownload} onClick={() => updateSetting('autoDownload', !autoDownload)} label="Auto-download" title="Download the DOCX automatically when conversion finishes" />
                         <select
                             value={numberingStyle}
-                            onChange={(e) => setNumberingStyle(e.target.value as NumberingStyle)}
+                            onChange={(e) => updateSetting('numberingStyle', e.target.value as NumberingStyle)}
                             className="select select-sm w-auto"
                             aria-label="Question numbering pattern"
                             title="Question numbering pattern"
@@ -1603,7 +1586,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                         </select>
                         <select
                             value={optionArrangement}
-                            onChange={(e) => setOptionArrangement(e.target.value as OptionArrangement)}
+                            onChange={(e) => updateSetting('optionArrangement', e.target.value as OptionArrangement)}
                             className="select select-sm w-auto"
                             aria-label="Option layout"
                             title="Choose option arrangement for layout and DOCX export"
@@ -1665,9 +1648,13 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
                     </motion.div>
                 )}
 
+                {needsReview && <p role="status" className="text-sm text-amber-300">
+                    Review {pendingFigures} {pendingFigures === 1 ? 'figure' : 'figures'} below to finish your DOCX.
+                </p>}
                 {/* Grid of Pages */}
                 <ProcessingList
                     pages={pages}
+                    onApplyFigure={applyFigure}
                     onUpdateText={updatePageText}
                     onRetry={retryPage}
                     onRecapture={handleRecapturePage}
@@ -1776,6 +1763,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ initialImages, onClearIniti
       </div>
 
       <GeminiConnectModal
+        onProviderChange={value => updateSetting('provider', value)}
         isOpen={showGeminiConnect}
         onClose={() => {
           setShowGeminiConnect(false);

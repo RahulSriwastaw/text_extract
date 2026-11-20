@@ -1,4 +1,5 @@
 import { NumberingStyle, ExtractedElement, OptionArrangement } from "../types";
+import type { FigureMode } from '../types';
 import { performOCR } from './ocrService';
 import { getAiSettings } from './aiDbService';
 import { extractLayoutWithUserGemini } from './userGeminiService';
@@ -15,7 +16,9 @@ export const extractLayoutFromImage = async (
   showMcqNumbers: boolean = true,
   autoProofread: boolean = false,
   optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
-  retryCount: number = 0
+  retryCount: number = 0,
+  signal?: AbortSignal,
+  figureMode: FigureMode = 'crop'
 ): Promise<ExtractedElement[]> => {
   // Skipping client-side OCR for speed when processing in parallel.
   const ocrText = '';
@@ -33,12 +36,14 @@ export const extractLayoutFromImage = async (
 
   const response = await fetch('/api/extract', {
     method: 'POST',
+    signal,
     headers,
     body: JSON.stringify({
       base64Image,
       ocrText,
       numberingStyle,
       includeImages,
+      figureMode,
       isBilingual,
       mcqMode,
       refineMode,
@@ -55,7 +60,7 @@ export const extractLayoutFromImage = async (
       const waitTime = Math.min(errorData.waitTime || (1000 + retryCount * 1000), 4000);
       console.warn(`[Client] API error (${response.status}). Fast-retrying with rotated key in ${waitTime}ms (Attempt ${retryCount + 1}/3)...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
-      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, showMcqNumbers, autoProofread, optionArrangement, retryCount + 1);
+      return extractLayoutFromImage(base64Image, numberingStyle, includeImages, isBilingual, mcqMode, refineMode, showAnswers, showMcqNumbers, autoProofread, optionArrangement, retryCount + 1, signal, figureMode);
     }
     
     if (response.status === 429) {

@@ -6,6 +6,8 @@
  */
 
 import { ExtractedElement, NumberingStyle, OptionArrangement } from '../types';
+import type { FigureMode } from '../types';
+import { SVG_FIGURE_INSTRUCTION } from './figurePrompt';
 import { HTML_LATEX_FORMAT_RULES, safeParseAiJsonObject } from './textCleanService';
 
 export const PAGE_SOURCE = 'tf-study-ai';
@@ -364,7 +366,8 @@ export function buildBridgePrompt(
   includeImages = false,
   optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
   showMcqNumbers = true,
-  autoProofread = false
+  autoProofread = false,
+  figureMode: FigureMode = 'crop'
 ): string {
   // 1. Question Numbering Feature Connection
   let numInstruction = '';
@@ -415,7 +418,8 @@ export function buildBridgePrompt(
   { "type": "image", "content": "Concise descriptive title of what the diagram shows", "bbox": [ymin, xmin, ymax, xmax] }
 - For every table or structured data grid, output: { "type": "table", "content": "Markdown table (| Col 1 | Col 2 |)", "bbox": [ymin, xmin, ymax, xmax] }
 - bbox uses NORMALIZED coordinates from 0 to 1000 relative to the page image, in the order [ymin, xmin, ymax, xmax].
-- Keep elements in natural reading order: a figure element goes exactly where it appears between the text elements.`
+- Keep elements in natural reading order: a figure element goes exactly where it appears between the text elements.
+${figureMode === 'svg' ? SVG_FIGURE_INSTRUCTION : ''}`
     : 'FIGURES: Do NOT output any image elements. Extract only text and markdown tables.';
 
   // 9. Continuation Context from Previous Page
@@ -1085,11 +1089,12 @@ export function parseExtensionOutputToElements(raw: string): ExtractedElement[] 
   if (allItems.length > 0) {
     return allItems.map((item: any, idx: number) => {
       // If item has content directly
-      if (item.content) {
+      if (item.content || item.type === 'image') {
         return {
           id: `el_ext_${Date.now()}_${idx}`,
           type: item.type || 'text',
-          content: item.content,
+          content: item.content || '',
+          ...(item.type === 'image' && typeof item.svg === 'string' ? { svg: item.svg } : {}),
           bbox: normalizeBbox(item.bbox),
           continues_previous: item.continues_previous === true,
         };

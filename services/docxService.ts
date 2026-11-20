@@ -1280,6 +1280,7 @@ export const generateDocx = async (
 
   for (const element of elements) {
     if (element.type === 'image' && element.imageB64) {
+      flushOptions();
       flushTable();
       
       // Convert base64 to Uint8Array for docx
@@ -1302,29 +1303,18 @@ export const generateDocx = async (
         bytes[i] = binaryData.charCodeAt(i);
       }
 
-      // Calculate dimensions based on bbox aspect ratio if available
-      let imgWidth = 350; // Default width in points (approx 3.5 inches)
-      let imgHeight = 250; // Default height
-
-      if (element.bbox) {
-        const bboxWidth = element.bbox.xmax - element.bbox.xmin;
-        const bboxHeight = element.bbox.ymax - element.bbox.ymin;
-        if (bboxWidth > 0 && bboxHeight > 0) {
-          const aspectRatio = bboxWidth / bboxHeight;
-          
-          // Limit max width to 450 (4.5 inches)
-          // If it's a very wide image, use max width
-          // If it's a tall image, limit height
-          if (aspectRatio > 1.5) {
-            imgWidth = 400;
-            imgHeight = 400 / aspectRatio;
-          } else if (aspectRatio < 0.5) {
-            imgHeight = 350;
-            imgWidth = 350 * aspectRatio;
-          } else {
-            imgWidth = 300;
-            imgHeight = 300 / aspectRatio;
-          }
+      // Canvas crops and SVG previews are PNGs. Use their actual pixel aspect ratio:
+      // normalized page coordinates can stretch a diagram on a portrait page.
+      let imgWidth = 350;
+      let imgHeight = 250;
+      if (bytes.length >= 24 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+        const header = new DataView(bytes.buffer);
+        const width = header.getUint32(16);
+        const height = header.getUint32(20);
+        if (width && height) {
+          const scale = Math.min(400 / width, 350 / height, 1);
+          imgWidth = Math.max(1, Math.round(width * scale));
+          imgHeight = Math.max(1, Math.round(height * scale));
         }
       }
 

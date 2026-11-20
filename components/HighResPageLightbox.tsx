@@ -25,9 +25,7 @@ import {
   buildOptionFigureTag,
   FigureTargetField,
   StagedCropItem,
-  getStoredImgbbApiKey,
-  setStoredImgbbApiKey,
-  DEFAULT_IMGBB_API_KEY
+
 } from '../services/figureStorageService';
 import { MockTestMcqItem } from '../types';
 
@@ -79,14 +77,8 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
   const [toolMode, setToolMode] = useState<'crop' | 'pan'>(initialCropMode ? 'crop' : 'pan');
   const [stagedCrops, setStagedCrops] = useState<StagedCropItem[]>([]);
   const [selectedTargetQuestionId, setSelectedTargetQuestionId] = useState<string>(initialTargetQuestionId || '');
-  const [useCloudForFigures, setUseCloudForFigures] = useState<boolean>(true); // default to ImgBB Cloud
   const [isUploadingFigure, setIsUploadingFigure] = useState<boolean>(false);
   const [figureSuccessToast, setFigureSuccessToast] = useState<string | null>(null);
-
-  // ImgBB API Key Management
-  const [showKeyInput, setShowKeyInput] = useState<boolean>(false);
-  const [customKeyInput, setCustomKeyInput] = useState<string>(getStoredImgbbApiKey());
-  const [keySavedNotice, setKeySavedNotice] = useState<boolean>(false);
 
   // Smooth Direct DOM References (Bypasses React Re-renders during Mouse Moves for 60-120fps performance!)
   const panRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -394,34 +386,38 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
     })));
   };
 
-  // Upload Figures with ImgBB Primary & Server Fallback
+  // Reuse completed uploads if another crop in the same batch fails.
+  const completedUploads = useRef(new Map<string, Awaited<ReturnType<typeof uploadFigureImage>>>());
+
   const handleSaveAndAttachAllFigures = async () => {
     if (stagedCrops.length === 0 || !selectedTargetQuestionId) return;
     setIsUploadingFigure(true);
     try {
       const targetQuestion = extractedMcqs.find(q => q.id === selectedTargetQuestionId);
       const qNum = targetQuestion ? targetQuestion.question_r : '';
-      const currentApiKey = getStoredImgbbApiKey();
 
       // Parallel uploads
       const uploadPromises = stagedCrops.map(async (crop) => {
-        const res = await uploadFigureImage({
+        const res = completedUploads.current.get(crop.id) || await uploadFigureImage({
           imageData: crop.dataUrl,
           questionNumber: qNum,
           targetField: crop.targetField,
           setName,
-          useCloud: useCloudForFigures,
-          imgbbApiKey: currentApiKey
         });
+        completedUploads.current.set(crop.id, res);
         return {
           cropId: crop.id,
           targetField: crop.targetField,
           url: res.url,
-          storageProvider: res.storageProvider || (res.isCloud ? 'imgbb' : 'local')
+          storageProvider: res.storageProvider
         };
       });
 
-      const uploadedResults = await Promise.all(uploadPromises);
+      const results = await Promise.allSettled(uploadPromises);
+      const uploadedResults = results.map(result => {
+        if (result.status === 'rejected') throw result.reason;
+        return result.value;
+      });
 
       if (targetQuestion) {
         const updated = { ...targetQuestion };
@@ -480,15 +476,6 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
     } finally {
       setIsUploadingFigure(false);
     }
-  };
-
-  const handleSaveCustomKey = () => {
-    setStoredImgbbApiKey(customKeyInput);
-    setKeySavedNotice(true);
-    setTimeout(() => {
-      setKeySavedNotice(false);
-      setShowKeyInput(false);
-    }, 1500);
   };
 
   return (
@@ -892,49 +879,7 @@ export const HighResPageLightbox: React.FC<HighResPageLightboxProps> = ({
               ))}
             </div>
 
-            {/* Storage Option Badge & ImgBB Key Settings */}
-            <div className="flex flex-col gap-1.5 bg-black/40 p-2.5 rounded-xl border border-white/10 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Storage Backend:</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold text-xs flex items-center gap-1">
-                    <Cloud className="w-3.5 h-3.5" /> ImgBB Cloud (Primary)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowKeyInput(v => !v)}
-                    className="p-1 rounded bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white"
-                    title="ImgBB API Key Settings"
-                  >
-                    <Key className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Collapsible ImgBB Key Customization */}
-              {showKeyInput && (
-                <div className="mt-1 pt-1.5 border-t border-white/10 flex flex-col gap-1">
-                  <span className="text-[11px] text-slate-400">ImgBB API Key (https://api.imgbb.com/):</span>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={customKeyInput}
-                      onChange={e => setCustomKeyInput(e.target.value)}
-                      placeholder="892c1e1f1ac46345ab6252ee885858cd"
-                      className="flex-1 bg-black/60 border border-white/20 rounded px-2 py-1 text-[11px] text-white font-mono outline-none focus:border-accent"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSaveCustomKey}
-                      className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1"
-                    >
-                      {keySavedNotice ? <Check className="w-3 h-3 text-white" /> : 'Save'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
+            <span className="text-xs text-slate-400">Google Drive · Anyone with the link can view</span>
             {/* Actions */}
             <div className="flex items-center gap-2 pt-1 border-t border-white/10">
               <button

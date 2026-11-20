@@ -1,3 +1,4 @@
+import { MCQ_PAGE_COVERAGE } from './figurePrompt';
 import { directModelFields, type DirectModel } from './claudeModels';
 import { readMcqFigures } from './mcqFigures';
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
@@ -7,42 +8,8 @@ import { pingStudyAiExtension, solveQuestionWithStudyAiBridge, repairQuestionWit
 
 export type { MockTestMcqItem };
 
-export const MOCKTEST_CSV_HEADERS = [
-  'question_r',
-  'question_hi',
-  'option1_hi',
-  'option2_hi',
-  'option3_hi',
-  'option4_hi',
-  'option5_hi',
-  'solution_hi',
-  'question_en',
-  'option1_en',
-  'option2_en',
-  'option3_en',
-  'option4_en',
-  'option5_en',
-  'solution_en',
-  'answer',
-  'set_name',
-  'difficulty_level',
-  'test_date',
-  'test_time',
-  'subject',
-  'subject_level',
-  'figure_notes',
-  'correction_notes',
-  'source_pdf',
-  'source_pages',
-  'source_question_reference',
-  'latex_check',
-  'html_check',
-  'answer_check',
-  'solution_check',
-  'hash_figure',
-  'manually_review',
-  'duplicate_statistics'
-] as const;
+import { MOCKTEST_CSV_HEADERS } from './mcqColumns';
+export { MOCKTEST_CSV_HEADERS };
 
 export const STANDARD_SUBJECTS = [
   'Current Affairs',
@@ -602,7 +569,8 @@ export function mergePendingCarryOver(
     // 3. Candidate stem matches the pending stem, OR
     // 4. Question reference numbers match exactly.
     const candidateSourcePages = String(candidate.source_pages || '');
-    const mentionsBothPages = candidateSourcePages.includes(String(pendingContext.sourcePageNumber));
+    const mentionsBothPages = [pendingContext.sourcePageNumber, currentPageNumber].every(page =>
+      candidateSourcePages.match(/\d+/g)?.includes(String(page)));
     
     const candidateHasOpt1or2 = Boolean(
       (candidate.option1_hi && candidate.option1_hi.trim() && candidate.option1_hi.toLowerCase() !== 'blank') ||
@@ -627,8 +595,7 @@ export function mergePendingCarryOver(
     const pClean = stripGenericStem(pendingStem);
     const cClean = stripGenericStem(candidateStem);
     const stemsMatch = pClean.length > 25 && cClean.length > 25 && (
-      cClean.toLowerCase().includes(pClean.slice(0, 45).toLowerCase()) ||
-      pClean.toLowerCase().includes(cClean.slice(0, 45).toLowerCase())
+      cClean.toLowerCase() === pClean.toLowerCase()
     );
 
     const refMatch = Boolean(
@@ -1889,6 +1856,7 @@ CARRY-OVER CONTINUATION INSTRUCTIONS:
   }
 
   return `Extract ALL MCQs, MSQs, and NAT questions from this exam image into a strict JSON array.${carryOverSection}
+${MCQ_PAGE_COVERAGE}
 
 FORMAT & TYPOGRAPHY RULES:
 1-2. HTML + LATEX FORMAT (question stems, options and solutions):
@@ -2193,9 +2161,9 @@ export function extractRawJsonObjectsFromText(rawText: string): any[] {
 
   const addObj = (obj: any) => {
     if (!isMcqObj(obj)) return;
-    const stem = String(obj.question_hi || obj.question_en || obj.question || obj.content || '').slice(0, 70).trim();
-    const ref = String(obj.source_question_reference || obj.question_r || '');
-    const sig = `${ref}__${stem}`;
+    // The same directions and chart may prefix every question in a set.
+    // Only discard identical records repeated in the model output.
+    const sig = JSON.stringify(obj);
     if (!seenSignatures.has(sig)) {
       seenSignatures.add(sig);
       collectedObjects.push(obj);
@@ -2677,6 +2645,7 @@ export function buildMockTestBridgePrompt(
 
   return `You are a professional Exam Paper Digitizer.
 Extract all multiple-choice questions (MCQs) from this exam page into a strict JSON array.${carryOverSection}
+${MCQ_PAGE_COVERAGE}
 
 RULES:
 1-2. HTML + LATEX FORMAT (questions, options and solutions):

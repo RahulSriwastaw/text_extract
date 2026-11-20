@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { uploadDriveFigure } from './driveFigures';
 
 export interface CropPercentageBox {
   x: number; // 0 to 100
@@ -102,9 +102,6 @@ export async function cropImageRegion(
   });
 }
 
-export const DEFAULT_IMGBB_API_KEY = '892c1e1f1ac46345ab6252ee885858cd';
-export const IMGBB_UPLOAD_ENDPOINT = 'https://api.imgbb.com/1/upload';
-
 export interface StagedCropItem {
   id: string;
   box: CropPercentageBox;
@@ -112,152 +109,11 @@ export interface StagedCropItem {
   targetField: FigureTargetField;
 }
 
-export function getStoredImgbbApiKey(): string {
-  try {
-    const customKey = localStorage.getItem('imgbb_custom_api_key');
-    if (customKey && customKey.trim().length > 10) {
-      return customKey.trim();
-    }
-  } catch (_) {}
-
-  try {
-    const envKey = (import.meta as any)?.env?.VITE_IMGBB_API_KEY || (typeof process !== 'undefined' && process?.env?.IMGBB_API_KEY);
-    if (envKey && String(envKey).trim().length > 10) {
-      return String(envKey).trim();
-    }
-  } catch (_) {}
-
-  return DEFAULT_IMGBB_API_KEY;
-}
-
-export function setStoredImgbbApiKey(key: string) {
-  try {
-    if (!key || key.trim() === '' || key.trim() === DEFAULT_IMGBB_API_KEY) {
-      localStorage.removeItem('imgbb_custom_api_key');
-    } else {
-      localStorage.setItem('imgbb_custom_api_key', key.trim());
-    }
-  } catch (_) {}
-}
-
-export interface UploadFigureParams {
-  imageData: string; // Base64 data URL
-  questionNumber?: number | string;
-  targetField?: FigureTargetField | string;
-  setName?: string;
-  useCloud?: boolean;
-  useFirebaseCloud?: boolean; // Legacy alias for useCloud
-  imgbbApiKey?: string;
-}
-
-export interface UploadFigureResult {
-  url: string;
-  absoluteUrl?: string;
-  filename: string;
-  isCloud?: boolean;
-  storageProvider?: 'imgbb' | 'supabase' | 'local';
-}
-
-/**
- * Uploads an image directly to ImgBB (https://api.imgbb.com/1/upload).
- */
-export async function uploadToImgBB(
-  imageData: string,
-  apiKey: string = getStoredImgbbApiKey(),
-  filename?: string
-): Promise<UploadFigureResult> {
-  let cleanBase64 = imageData;
-  const match = imageData.match(/^data:image\/[a-zA-Z0-9+]+;base64,(.+)$/);
-  if (match) {
-    cleanBase64 = match[1];
-  }
-
-  const formData = new FormData();
-  formData.append('image', cleanBase64);
-  if (filename) {
-    formData.append('name', filename);
-  }
-
-  const urlWithKey = `${IMGBB_UPLOAD_ENDPOINT}?key=${encodeURIComponent(apiKey.trim())}`;
-  const response = await fetch(urlWithKey, {
-    method: 'POST',
-    body: formData
-  });
-
-  const json = await response.json().catch(() => null);
-
-  if (!response.ok || !json?.success || !json?.data?.url) {
-    const errorMsg = json?.error?.message || `ImgBB upload failed with status ${response.status}`;
-    throw new Error(errorMsg);
-  }
-
-  const directUrl = json.data.url;
-  const returnedFilename = json.data.image?.filename || (filename ? `${filename}.png` : 'figure.png');
-
-  return {
-    url: directUrl,
-    absoluteUrl: directUrl,
-    filename: returnedFilename,
-    isCloud: true,
-    storageProvider: 'imgbb'
-  };
-}
-
-/**
- * Uploads a cropped figure to ImgBB Cloud Storage (Primary)
- * or local Express storage (/api/upload-figure) fallback.
- */
-export async function uploadFigureImage(
-  params: UploadFigureParams
-): Promise<UploadFigureResult> {
-  const { imageData, questionNumber, targetField, setName, imgbbApiKey } = params;
-  const keyToUse = imgbbApiKey || getStoredImgbbApiKey();
-  const safeQNum = questionNumber !== undefined && questionNumber !== null ? `q${questionNumber}` : 'q';
-  const safeTarget = targetField ? `_${targetField}` : '';
-  const filename = `${safeQNum}${safeTarget}_${Date.now()}`;
-
-  // 1. Primary: Try ImgBB Cloud Storage
-  try {
-    const res = await uploadToImgBB(imageData, keyToUse, filename);
-    console.log('[figureStorageService] Successfully uploaded figure to ImgBB:', res.url);
-    return res;
-  } catch (imgbbErr: any) {
-    console.warn('[figureStorageService] ImgBB cloud upload notice:', imgbbErr?.message || imgbbErr, '- utilizing server storage fallback');
-  }
-
-  // 2. Resilient Fallback: Upload to local Express storage endpoint (/api/upload-figure)
-  try {
-    const response = await fetch('/api/upload-figure', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        imageData,
-        questionNumber,
-        targetField,
-        setName,
-        imgbbApiKey: keyToUse
-      })
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Upload failed (${response.status}): ${errText}`);
-    }
-
-    const result = await response.json();
-    return {
-      url: result.url,
-      absoluteUrl: result.absoluteUrl,
-      filename: result.filename,
-      isCloud: !!result.isCloud,
-      storageProvider: result.storageProvider || 'local'
-    };
-  } catch (localErr: any) {
-    console.error('[figureStorageService] Storage upload failed:', localErr);
-    throw new Error(`Failed to upload figure: ${localErr?.message || localErr}`);
-  }
+export function uploadFigureImage(params: {
+  imageData: string; questionNumber?: number | string; targetField?: string; setName?: string; svg?: string;
+}) {
+  const name = [params.setName, 'Q' + (params.questionNumber || ''), params.targetField, crypto.randomUUID()].filter(Boolean).join('_');
+  return uploadDriveFigure(params.imageData, name, params.svg);
 }
 
 /**

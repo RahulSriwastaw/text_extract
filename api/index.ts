@@ -1,10 +1,13 @@
+import { registerDriveOAuth } from './driveOAuth.js';
+import { saveQuestions } from './questionSheet.js';
+import { uploadDriveFigure } from './driveFigures.js';
 import { resolveClaudeModel } from './claudeModelSelection.js';
 import type { ClaudeModel } from '../services/claudeModels.js';
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
 import type { FigureMode } from '../types.js';
-import { mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
+import { MCQ_PAGE_COVERAGE, mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -339,17 +342,19 @@ app.get('/api/models/:provider', async (req, res) => {
 // Admin Auth Middleware
 const checkAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const authHeader = req.headers.authorization;
-  const adminUser = process.env.ADMIN_USERNAME || 'admin';
-  const adminPass = process.env.ADMIN_PASSWORD || 'password123';
+  const adminUser = process.env.ADMIN_USERNAME;
+  const adminPass = process.env.ADMIN_PASSWORD;
 
-  if (!authHeader) {
+  if (!adminUser || !adminPass) return res.status(503).json({ error: 'Set ADMIN_USERNAME and ADMIN_PASSWORD in .env.' });
+  if (!authHeader?.startsWith('Basic ')) {
     return res.status(401).json({ error: "Authorization required" });
   }
 
   const encoded = authHeader.split(' ')[1];
-  const decoded = Buffer.from(encoded, 'base64').toString().split(':');
-  const user = decoded[0];
-  const pass = decoded[1];
+  const decoded = Buffer.from(encoded, 'base64').toString();
+  const split = decoded.indexOf(':');
+  const user = decoded.slice(0, split);
+  const pass = decoded.slice(split + 1);
 
   if (user === adminUser && pass === adminPass) {
     next();
@@ -360,15 +365,17 @@ const checkAdminAuth = (req: express.Request, res: express.Response, next: expre
 
 app.post('/api/admin/login', (req, res) => {
   const { username, password } = req.body;
-  const adminUser = process.env.ADMIN_USERNAME || 'admin';
-  const adminPass = process.env.ADMIN_PASSWORD || 'password123';
+  const adminUser = process.env.ADMIN_USERNAME;
+  const adminPass = process.env.ADMIN_PASSWORD;
 
-  if (username === adminUser && password === adminPass) {
+  if (adminUser && adminPass && username === adminUser && password === adminPass) {
     res.json({ success: true });
   } else {
     res.status(401).json({ error: "Invalid username or password" });
   }
 });
+
+registerDriveOAuth(app, checkAdminAuth);
 
 app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
   const allKeys = getAllKeys();
@@ -2375,6 +2382,7 @@ Output ONLY a valid JSON array of objects:
 ]`;
     }
 
+    if (!generateSimilar) promptText += "\n" + MCQ_PAGE_COVERAGE;
     if (cleanBase64 && !generateSimilar && ['svg', 'crop'].includes(req.body.figureMode)) {
       promptText += mcqFigureInstruction(req.body.figureMode);
     }
@@ -3038,54 +3046,46 @@ app.post('/api/latex/repair', async (req, res) => {
 // -------------------------------------------------------------
 // Endpoint: Upload & Store Cropped Question/Option Figure Images
 // -------------------------------------------------------------
-app.post('/api/upload-figure', async (req, res) => {
+async function requireStorageUser(req: express.Request, res: express.Response, next: express.NextFunction) {
   try {
-    const { imageData, questionNumber, targetField, setName } = req.body;
-    if (!imageData) {
-      return res.status(400).json({ error: 'Missing imageData' });
-    }
-
-    const uploadsDir = path.join(process.cwd(), 'uploads', 'figures');
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
-    // Extract mime type and clean base64 data
-    const matches = imageData.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
-    let ext = 'png';
-    let rawBase64 = imageData;
-    if (matches) {
-      const mime = matches[1].toLowerCase();
-      ext = mime === 'jpeg' ? 'jpg' : mime;
-      rawBase64 = matches[2];
-    }
-
-    const buffer = Buffer.from(rawBase64, 'base64');
-    const safeQNum = questionNumber !== undefined && questionNumber !== null ? `q${questionNumber}` : 'q';
-    const safeTarget = targetField ? `_${targetField}` : '';
-    const timestamp = Date.now();
-    const filename = `${safeQNum}${safeTarget}_${timestamp}.${ext}`;
-    const filePath = path.join(uploadsDir, filename);
-
-    fs.writeFileSync(filePath, buffer);
-
-    const relativeUrl = `/uploads/figures/${filename}`;
-    const host = req.get('host') || 'localhost:3001';
-    const protocol = req.protocol || 'http';
-    const absoluteUrl = `${protocol}://${host}${relativeUrl}`;
-
-    return res.json({
-      success: true,
-      url: relativeUrl,
-      absoluteUrl,
-      filename,
-      size: buffer.length
+    const token = req.get('authorization')?.match(/^Bearer (\S+)$/)?.[1];
+    if (!token) return res.status(401).json({ error: 'Sign in to upload a figure.' });
+    const apiKey = process.env.VITE_FIREBASE_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'Server Firebase configuration is missing.' });
+    const lookup = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(apiKey), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken: token }),
     });
-  } catch (error: any) {
-    console.error('[API /api/upload-figure] Error:', error);
-    return res.status(500).json({ error: error?.message || 'Failed to save figure image' });
+    const uid = lookup.ok && (await lookup.json()).users?.[0]?.localId;
+    if (!uid)
+      return res.status(401).json({ error: 'Session could not be verified. Sign in again.' });
+    res.locals.uid = uid;
+    next();
+  } catch {
+    res.status(503).json({ error: 'Could not verify the signed-in account.' });
+  }
+}
+
+app.post('/api/question-sheet', requireStorageUser, async (req, res) => {
+  try {
+    const result = await saveQuestions(res.locals.uid, req.body.questions, req.body.setName);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Google Sheets save failed.' });
+  }
+});
+
+app.post('/api/upload-figure', requireStorageUser, async (req, res) => {
+  try {
+    const { imageData, svg, filename } = req.body;
+    if (typeof imageData !== 'string' || imageData.length > 16_000_000 ||
+        !/^data:image\/(?:png;base64,iVBORw0KGgo|jpeg;base64,\/9j\/)[a-zA-Z0-9+/]*={0,2}$/.test(imageData) ||
+        (svg != null && (typeof svg !== 'string' || svg.length > 100000 || !/^\s*<svg\b/.test(svg))))
+      return res.status(400).json({ error: 'Invalid figure or file too large.' });
+    const name = typeof filename === 'string' ? filename.slice(0, 180) : 'figure-' + crypto.randomUUID();
+    return res.json(await uploadDriveFigure(imageData, name, svg));
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : 'Drive upload failed.' });
   }
 });
 
 export default app;
-

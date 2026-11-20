@@ -1,3 +1,4 @@
+import { AdminDrive } from './AdminDrive';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -55,7 +56,7 @@ const AdminPanel = () => {
   const [loginError, setLoginError] = useState('');
 
   const getAuthHeader = () => {
-    const creds = localStorage.getItem('admin_creds');
+    const creds = sessionStorage.getItem('admin_creds');
     if (!creds) return {};
     return { 'Authorization': `Basic ${creds}` };
   };
@@ -67,7 +68,7 @@ const AdminPanel = () => {
       });
       if (res.status === 401 || res.status === 403) {
         setIsAuthenticated(false);
-        localStorage.removeItem('admin_creds');
+        sessionStorage.removeItem('admin_creds');
         return;
       }
       const data = await res.json();
@@ -95,7 +96,7 @@ const AdminPanel = () => {
       
       if (res.ok) {
         const creds = btoa(`${loginData.username}:${loginData.password}`);
-        localStorage.setItem('admin_creds', creds);
+        sessionStorage.setItem('admin_creds', creds);
         setIsAuthenticated(true);
         fetchStats();
       } else {
@@ -109,14 +110,14 @@ const AdminPanel = () => {
   };
 
   useEffect(() => {
-    if (localStorage.getItem('admin_creds')) {
+    if (sessionStorage.getItem('admin_creds')) {
       fetchStats();
     } else {
       setLoading(false);
     }
     
     const interval = setInterval(() => {
-      if (localStorage.getItem('admin_creds')) {
+      if (sessionStorage.getItem('admin_creds')) {
         fetchStats();
       }
     }, 10000);
@@ -283,7 +284,7 @@ const AdminPanel = () => {
           <div className="flex items-center gap-4">
             <button 
               onClick={() => {
-                localStorage.removeItem('admin_creds');
+                sessionStorage.removeItem('admin_creds');
                 window.location.href = '/';
               }}
               className="px-4 py-2 bg-rose-600/10 text-rose-400 hover:bg-rose-600 hover:text-white rounded-xl border border-rose-500/20 transition-all text-[12px] font-bold uppercase tracking-wider"
@@ -310,6 +311,7 @@ const AdminPanel = () => {
 
         {/* Dashboard Content */}
         <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+          <AdminDrive headers={getAuthHeader} />
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {[

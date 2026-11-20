@@ -1,3 +1,4 @@
+import { auth } from '../services/firebase';
 import { ClaudeModelSelect } from './ClaudeModelSelect';
 import { McqFigureReview } from './McqFigureReview';
 import { QuestionFigureActions } from './QuestionFigureActions';
@@ -238,6 +239,25 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
   const [isSavedToHistory, setIsSavedToHistory] = useState(false);
   const currentSessionSetIdRef = useRef<string>('');
 
+  const [sheetSaving, setSheetSaving] = useState(false);
+  const [sheetMessage, setSheetMessage] = useState('');
+  async function saveToSheet() {
+    setSheetSaving(true);
+    setSheetMessage('');
+    try {
+      const account = auth?.currentUser;
+      if (!account) throw new Error('Sign in to save questions to the shared sheet.');
+      const response = await fetch('/api/question-sheet', { method: 'POST', headers: {
+        'Content-Type': 'application/json', Authorization: 'Bearer ' + await account.getIdToken()
+      }, body: JSON.stringify({ questions: extractedMcqs, setName: outputFileName || setName }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not save questions.');
+      setSheetMessage(result.saved + ' questions saved. Workbook capacity: ' + result.percent.toFixed(2) + '%.' +
+        (result.warning ? ' Warning: at least 95% of the cell limit is allocated.' : ''));
+    } catch (error) { setSheetMessage(error instanceof Error ? error.message : 'Sheets save failed.'); }
+    finally { setSheetSaving(false); }
+  }
+
   const handleSaveSetToHistory = async () => {
     if (extractedMcqs.length === 0) return;
     const currentUid = user?.uid || 'guest';
@@ -447,6 +467,17 @@ Rules:
   // UI Enhancement: Collapsible Paper Settings & Grouped AI Tools
   const [showPaperSettings, setShowPaperSettings] = useState(false);
   const [showAiToolsMenu, setShowAiToolsMenu] = useState(false);
+  const commandBarRef = useRef<HTMLDivElement>(null);
+  const hasPages = pages.length > 0;
+  useEffect(() => {
+    const bar = commandBarRef.current;
+    if (!bar) return;
+    const update = () => bar.parentElement?.style.setProperty('--mcq-bar-height', bar.offsetHeight + 'px');
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, [hasPages]);
   const aiToolsRef = useRef<HTMLDivElement>(null);
   // Which dropdown is open: 'add' | 'export' | 'runs' | 'more' | `q:${itemId}` | `latex:${itemId}`
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -2649,6 +2680,10 @@ Rules:
               />
             </div>
 
+            <button className="btn btn-secondary" disabled={sheetSaving || !extractedMcqs.length} onClick={saveToSheet}>
+              {sheetSaving ? 'Saving…' : 'Save to Sheets'}
+            </button>
+            {sheetMessage && <span role="status" className="text-xs">{sheetMessage}</span>}
             {/* Save set to account history */}
             <button
               type="button"
@@ -3170,7 +3205,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
       {pages.length > 0 && (
         <div className="space-y-4">
           {/* Workspace command bar & page filmstrip (sticky under the navbar) */}
-          <div className="card sticky top-14 z-30 shadow-[0_8px_24px_rgb(0_0_0/0.35)]">
+          <div ref={commandBarRef} className="card sticky top-14 z-30 shadow-[0_8px_24px_rgb(0_0_0/0.35)]">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3">
               {/* Run control */}
               <div className="toolbar">
@@ -3504,12 +3539,12 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                   <div
                     key={page.id}
                     id={`page-card-${page.pageNumber}`}
-                    className={`card overflow-hidden flex flex-col lg:flex-row min-h-[380px] scroll-mt-40 transition-colors ${
+                    className={`card overflow-clip flex flex-col lg:flex-row min-h-[380px] scroll-mt-40 transition-colors ${
                       page.isSelected ? 'border-accent/35' : ''
                     }`}
                   >
                     {/* LEFT SIDE: page image and page actions */}
-                    <div className="w-full lg:w-[320px] xl:w-[360px] bg-canvas/60 border-b lg:border-b-0 lg:border-r border-line p-4 flex flex-col gap-3 shrink-0">
+                    <div className="w-full lg:w-[320px] xl:w-[360px] bg-canvas/60 border-b lg:border-b-0 lg:border-r border-line p-4 flex flex-col gap-3 shrink-0 lg:sticky lg:self-start lg:top-[calc(3.5rem+var(--mcq-bar-height,0px)+0.5rem)]">
                       {/* Page header */}
                       <div className="flex items-center justify-between gap-2">
                         <label className="flex items-center gap-2 cursor-pointer select-none" title="Include this page in batch runs">
@@ -3561,7 +3596,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                       {page.imageUrl ? (
                         <button
                           type="button"
-                          className="relative group rounded-[10px] overflow-hidden border border-line bg-white/[0.03] aspect-[3/4] max-h-[400px] w-full flex items-center justify-center"
+                          className="relative group rounded-[10px] overflow-hidden border border-line bg-white/[0.03] aspect-[3/4] max-h-[400px] lg:max-h-[clamp(120px,calc(100dvh-var(--mcq-bar-height,0px)-12rem),400px)] w-full flex items-center justify-center"
                           onClick={() => { setZoomPageIndex(idx); setIsFigureCropMode(false); }}
                           title="Open full-size page"
                         >
@@ -4302,7 +4337,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                 )}
 
                                 <QuestionFigureActions image={page.imageUrl} engine={aiEngine} provider={selectedProvider} model={claudeModel}
-                                  attach={png => updateItemDraft(item.id, resolveMcqFigure(item, { id: 'manual-question', target: 'question', type: 'image', content: 'Question figure' }, png))} />
+                                  attach={async (png, svg) => {
+                                    const file = await uploadFigureImage({ imageData: png, svg, questionNumber: item.question_r, targetField: 'question', setName });
+                                    updateItemDraft(item.id, resolveMcqFigure(item, { id: 'manual-question', target: 'question', type: 'image', content: 'Question figure' }, file.url));
+                                  }} />
                                 {item.figures?.map(figure => <McqFigureReview key={figure.id} figure={figure}
                                   image={figure.sourcePage ? pages.find(p => p.pageNumber === figure.sourcePage)?.imageUrl : page.imageUrl}
                                   mode={figure.svg || figureMode === 'svg' ? 'svg' : 'crop'}

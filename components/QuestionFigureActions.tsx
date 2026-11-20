@@ -7,12 +7,20 @@ import type { DirectModel } from '../services/claudeModels';
 import { SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt';
 
 export function QuestionFigureActions({ image, engine, provider, model, attach }: {
-  image?: string; engine: string; provider: AiProvider; model: DirectModel; attach: (image: string) => void;
+  image?: string; engine: string; provider: AiProvider; model: DirectModel; attach: (image: string, svg?: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState<'crop' | 'svg'>();
   const [original, setOriginal] = useState('');
   const [preview, setPreview] = useState('');
   const [status, setStatus] = useState('');
+  const [sourceSvg, setSourceSvg] = useState('');
+  const [uploading, setUploading] = useState(false);
+  async function save(image: string, svg?: string) {
+    setUploading(true);
+    try { await attach(image, svg); clear(); }
+    catch (error) { setStatus(error instanceof Error ? error.message : 'Drive upload failed. Retry.'); }
+    finally { setUploading(false); }
+  }
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
   function clear() {
@@ -20,12 +28,13 @@ export function QuestionFigureActions({ image, engine, provider, model, attach }
     setMode(undefined);
     setOriginal('');
     setPreview('');
+    setSourceSvg('');
     setStatus('');
   }
   async function apply(region: string) {
     const recreate = mode === 'svg';
     clear();
-    if (!recreate) { attach(region); return; }
+    if (!recreate) { setOriginal(region); return; }
     const controller = new AbortController();
     request.current = controller;
     setOriginal(region);
@@ -45,6 +54,7 @@ export function QuestionFigureActions({ image, engine, provider, model, attach }
       const png = svg && await renderFigureSvg(svg);
       if (controller.signal.aborted) return;
       if (!png) throw new Error();
+      setSourceSvg(svg!);
       setPreview(png);
       setStatus('');
     } catch {
@@ -52,14 +62,14 @@ export function QuestionFigureActions({ image, engine, provider, model, attach }
     }
   }
   return <div className="flex flex-wrap items-center gap-2">
-    <button className="btn btn-secondary btn-sm" disabled={!image} onClick={() => { clear(); setMode('crop'); }}>Crop image</button>
-    <button className="btn btn-secondary btn-sm" disabled={!image} onClick={() => { clear(); setMode('svg'); }}>Create SVG</button>
+    <button className="btn btn-secondary btn-sm" disabled={!image || uploading} onClick={() => { clear(); setMode('crop'); }}>Crop image</button>
+    <button className="btn btn-secondary btn-sm" disabled={!image || uploading} onClick={() => { clear(); setMode('svg'); }}>Create SVG</button>
     {!image && <span>Original page image unavailable</span>}
     {mode && image && <CropDialog pageImage={image} apply={apply} close={clear} actionLabel={mode === 'svg' ? 'Create SVG from selection' : 'Attach crop'} />}
     {status && <span role="status">{status}</span>}
     {preview && <><img className="max-h-40 bg-white" src={preview} alt="Recreated question figure" />
-      <button className="btn btn-primary btn-sm" onClick={() => { attach(preview); clear(); }}>Use SVG</button></>}
-    {original && <><button className="btn btn-secondary btn-sm" onClick={() => { attach(original); clear(); }}>Use original crop</button>
-      <button className="btn btn-ghost btn-sm" onClick={clear}>Cancel</button></>}
+      <button className="btn btn-primary btn-sm" disabled={uploading} onClick={() => save(preview, sourceSvg)}>Use SVG</button></>}
+    {original && <><button className="btn btn-secondary btn-sm" disabled={uploading} onClick={() => save(original)}>Upload crop to Drive</button>
+      <button className="btn btn-ghost btn-sm" disabled={uploading} onClick={clear}>Cancel</button></>}
   </div>;
 }

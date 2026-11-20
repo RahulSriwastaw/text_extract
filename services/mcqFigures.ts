@@ -24,6 +24,7 @@ export function readMcqFigures(raw: unknown): McqFigure[] {
 export function resolveMcqFigure(item: MockTestMcqItem, figure: McqFigure, image?: string): Partial<MockTestMcqItem> {
   const changes: Partial<MockTestMcqItem> = { figures: item.figures?.filter(f => f.id !== figure.id) };
   if (image) {
+    changes.hash_figure = [item.hash_figure, image].filter(Boolean).join(', ');
     const tag = figure.target.startsWith('option')
       ? buildOptionFigureTag(image, String.fromCharCode(64 + Number(figure.target.slice(-1))))
       : buildQuestionFigureTag(image, figure.target);

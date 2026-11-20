@@ -47,7 +47,7 @@ function ExistingApp() {
 
   useEffect(() => {
     // Check for admin path or param
-    const isPathAdmin = window.location.pathname === '/admin-secure-v3-panel-x92';
+    const isPathAdmin = ['/admin', '/admin-secure-v3-panel-x92'].includes(window.location.pathname);
     const params = new URLSearchParams(window.location.search);
 
     if (isPathAdmin || params.get('admin') === 'true') {

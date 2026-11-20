@@ -25,8 +25,8 @@ test('MCQ figures keep the source page, target and bilingual field content throu
   assert.equal(item.figures?.length, 0);
   assert.match(item.option2_en, /Second/);
   assert.match(item.option2_hi, /दूसरा/);
-  for (const field of [item.option2_hi, item.option2_en]) assert.ok(field.includes(png));
-  assert.equal(serializeMockTestToCsv([item]).split(png).length - 1, 2);
+  for (const field of [item.option2_hi, item.option2_en, item.hash_figure!]) assert.ok(field.includes(png));
+  assert.equal(serializeMockTestToCsv([item]).split(png).length - 1, 3);
   assert.equal(mcqFigureInstruction('off'), '');
   assert.match(mcqFigureInstruction('svg'), /static SVG/);
   let blob: Blob | undefined;

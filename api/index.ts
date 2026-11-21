@@ -2,12 +2,13 @@ import { registerDriveOAuth } from './driveOAuth.js';
 import { saveQuestions } from './questionSheet.js';
 import { uploadDriveFigure } from './driveFigures.js';
 import { resolveClaudeModel } from './claudeModelSelection.js';
+import { pageChatPrompt } from '../services/pageChat.js';
 import type { ClaudeModel } from '../services/claudeModels.js';
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
 import type { FigureMode } from '../types.js';
-import { MCQ_PAGE_COVERAGE, mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
+import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT, mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -2358,8 +2359,7 @@ ${HTML_LATEX_FORMAT_RULES}
 5. Answer: Correct option single letter ("A", "B", "C", or "D").
 6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
    - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g. "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
-     YOU MUST PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION BELONGING TO THAT SET in both question_hi and question_en, separated by "\\n---\\n" (e.g. "[Full Passage Text]\\n---\\n[Question Text]").
-   - NEVER output the passage only once or only with the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so each question can be understood and answered independently.
+     Use the shared context fields below for the directions and data. Each question has its own stem and options.
 
 Output ONLY a valid JSON array of objects:
 [
@@ -2385,7 +2385,7 @@ Output ONLY a valid JSON array of objects:
 ]`;
     }
 
-    if (!generateSimilar) promptText += "\n" + MCQ_PAGE_COVERAGE;
+    if (!generateSimilar) promptText += "\n" + MCQ_PAGE_COVERAGE + "\n" + MCQ_SHARED_CONTEXT;
     if (cleanBase64 && !generateSimilar && ['svg', 'crop'].includes(req.body.figureMode)) {
       promptText += mcqFigureInstruction(req.body.figureMode);
     }
@@ -2446,6 +2446,12 @@ Output ONLY a valid JSON array of objects:
 
     for (let i = 0; i < rawItems.length; i++) {
       const it = rawItems[i];
+      if (Object.hasOwn(it, 'passage_id')) {
+        distributedItems.push(it);
+        currentPassageHi = currentPassageEn = currentPassageRange = '';
+        activeUntilQNum = 0;
+        continue;
+      }
       const qHi = String(it.question_hi || it.question || '');
       const qEn = String(it.question_en || '');
       const hasOpts = Boolean(it.option1_hi || it.option2_hi || it.option1_en || it.option2_en);
@@ -2699,6 +2705,24 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
   } catch (error: any) {
     console.warn("MockTest proofread failed:", error?.message || error);
     res.status(500).json({ error: error.message || "Proofread failed" });
+  }
+});
+
+app.post('/api/mocktest-page-chat', async (req, res) => {
+  const { pageNumber, rows, source, history, request, image, claudeModel, geminiModel } = req.body || {};
+  if (!Number.isInteger(pageNumber) || pageNumber < 1 || !Array.isArray(rows) || !Array.isArray(history) ||
+    typeof request !== 'string' || !request.trim() || typeof source !== 'string' || (image && typeof image !== 'string')) {
+    return res.status(400).json({ error: 'A page and a chat message are required.' });
+  }
+  try {
+    const prompt = pageChatPrompt(pageNumber, rows, source, history, request);
+    const contents = [...(image ? [{ inlineData: readInlineImage(image) }] : []), { text: prompt }];
+    const raw = await runAIAction(client => callGeminiWithFallback(client, getPrimaryModel(), getFallbackModel(),
+      contents, { claudeModel, geminiModel, temperature: 0.15, responseMimeType: 'application/json' }, 'mocktest-page-chat'),
+      getUserKey(req), undefined, geminiModel ? 'gemini' : claudeModel ? 'claude' : undefined);
+    res.json(safeParseAiJsonObject(raw));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Page chat failed.' });
   }
 });
 

@@ -1,3 +1,4 @@
+import type { McqFigure } from '../types';
 import { auth } from '../services/firebase';
 import { ClaudeModelSelect } from './ClaudeModelSelect';
 import { McqFigureReview } from './McqFigureReview';
@@ -39,6 +40,8 @@ export interface StagedCropItem {
 }
 import { HighResPageLightbox } from './HighResPageLightbox';
 import { MocktestAiChatModal } from './MocktestAiChatModal';
+import { MocktestPageChat } from './MocktestPageChat';
+import type { PageMessage } from '../services/pageChat';
 import { MocktestAddQuestionModal } from './MocktestAddQuestionModal';
 import { MocktestPasteCsvModal } from './MocktestPasteCsvModal';
 import { LatexRepairModal } from './LatexRepairModal';
@@ -118,6 +121,7 @@ interface PageQueueItem {
   expectedMarker?: string;
   /** Chat this page was extracted in. Recapture needs it once a run rotates to a fresh chat. */
   chatUrl?: string;
+  pageChat?: PageMessage[];
 }
 
 export function splitTextIntoDocumentPages(text: string, maxQuestionsPerPage = 10): string[] {
@@ -228,6 +232,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
 
   // Extracted MCQs state
   const [extractedMcqs, setExtractedMcqs] = useState<MockTestMcqItem[]>([]);
+  const extractedById = React.useMemo(() => new Map(extractedMcqs.map(q => [q.id, q])), [extractedMcqs]);
   const [activeTab, setActiveTab] = useState<'split' | 'grid' | 'csv'>('split');
   const [solvingId, setSolvingId] = useState<string | null>(null);
   const [isSolvingAll, setIsSolvingAll] = useState(false);
@@ -454,6 +459,7 @@ Rules:
   };
 
   const [activeChatQuestion, setActiveChatQuestion] = useState<MockTestMcqItem | null>(null);
+  const [chatPageId, setChatPageId] = useState<string | null>(null);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
   const [addQuestionTargetPage, setAddQuestionTargetPage] = useState<number>(1);
   const [showPasteCsvModal, setShowPasteCsvModal] = useState<boolean>(false);
@@ -543,6 +549,7 @@ Rules:
     const handleLoadHistory = (e: any) => {
       const item: MocktestHistoryItem = e.detail;
       if (!item || !item.questions || item.questions.length === 0) return;
+      setChatPageId(null);
 
       if (item.id) {
         currentSessionSetIdRef.current = item.id;
@@ -568,6 +575,7 @@ Rules:
             mcqCount: pageQuestions.length,
             isSelected: true,
             items: pageQuestions,
+            pageChat: Array.isArray(p.pageChat) ? p.pageChat : [],
             rawTextContent: p.rawTextContent || '',
             sourceType: p.sourceType || (p.rawTextContent ? 'text' : 'image'),
             fileName: p.fileName || item.setName || `Page ${p.pageNumber}`
@@ -1014,7 +1022,8 @@ Rules:
     totalPages: number,
     isLastPage: boolean,
     mode?: 'exact' | 'similar',
-    engine: 'bridge' | 'api' = aiEngine
+    engine: 'bridge' | 'api' = aiEngine,
+    forceFreshChat = false
   ): Promise<{ completeItems: MockTestMcqItem[]; nextPendingContext: PendingMcqContext | null }> => {
     const activeMode = mode || extractionMode;
     const isSimilar = activeMode === 'similar';
@@ -1058,7 +1067,7 @@ Rules:
 
         // A chat that keeps growing makes uploads and the composer unreliable, so start a fresh
         // one every few pages. Split-question context still carries over: it travels in the prompt.
-        const rotateToNewChat = shouldStartNewChat(pageIndex, chatRotation);
+        const rotateToNewChat = forceFreshChat || shouldStartNewChat(pageIndex, chatRotation);
         if (rotateToNewChat && pageIndex > 0) {
           setDocumentChatUrl(null);
           setLiveStatusText(`[Page ${page.pageNumber}] Starting a fresh AI chat (every ${chatRotation} pages)...`);
@@ -1067,8 +1076,8 @@ Rules:
         // new marker, instead of ending the whole run on the first hiccup.
         let freshChatOnRetry = false;
 
-        const bridgeRes = await withBridgeRetry(async attempt => {
-          const startNewChat = rotateToNewChat || freshChatOnRetry;
+        const requestPage = async (attempt: number, checkCoverage = false) => {
+          const startNewChat = checkCoverage || rotateToNewChat || freshChatOnRetry;
           const initialMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${crypto.randomUUID()}---`;
           page.expectedMarker = initialMarker;
           setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: initialMarker } : p));
@@ -1079,7 +1088,9 @@ Rules:
             fileName: pageFileName,
             mimeType: page.imageUrl ? imgMime : 'text/plain',
             skipPdf: !page.imageUrl,
-            prompt,
+            prompt: checkCoverage
+              ? prompt + '\nCoverage check: inspect the entire page, especially below the first question. Return every visible numbered question including the first, with its own stem and options.'
+              : prompt,
             provider: selectedProvider || getStoredAiProvider() || 'gemini',
             continueChat: !startNewChat,
             chatUrl: startNewChat ? undefined : (documentChatUrlRef.current || undefined),
@@ -1097,7 +1108,8 @@ Rules:
               setPages(prev => prev.map(p => p.id === page.id ? { ...p, errorMessage: msg } : p));
             }
           });
-        }, {
+        };
+        let bridgeRes = await withBridgeRetry(requestPage, {
           retries: 2,
           signal: abortController.signal,
           onRetry: ({ attempt, maxAttempts, error }) => {
@@ -1110,25 +1122,37 @@ Rules:
           },
         });
 
+        const startIndex = extractedMcqs.length + 1;
+        const parsePage = (response: typeof bridgeRes) => {
+          const items = parseAiOutputToMockTestItems(response.rawText, setName, startIndex);
+          return items.length || !response.elements?.length ? items : convertElementsToMockTestItems(response.elements, setName);
+        };
+        rawExtractedItems = parsePage(bridgeRes);
+
+        const first = rawExtractedItems[0];
+        if (!isSimilar && page.imageUrl && rawExtractedItems.length === 1 && (first.passageGroupId || first.passage_hi || first.passage_en)) {
+          setLiveStatusText(`[Page ${page.pageNumber}] Checking for more questions below the shared data…`);
+          try {
+            const checked = await requestPage(1, true);
+            const recovered = parsePage(checked);
+            if (recovered.length > 1) {
+              bridgeRes = checked;
+              rawExtractedItems = recovered;
+            }
+          } catch (error) {
+            if (abortController.signal.aborted) throw error;
+            console.warn(`Coverage check failed for page ${page.pageNumber}:`, error);
+          }
+        }
+
         if (bridgeRes.chatUrl) {
           setDocumentChatUrl(bridgeRes.chatUrl);
-          // Remember the page's own chat so Recapture still works after a rotation.
           page.chatUrl = bridgeRes.chatUrl;
           setPages(prev => prev.map(p => p.id === page.id ? { ...p, chatUrl: bridgeRes.chatUrl } : p));
         }
         if (bridgeRes.expectedMarker) {
           page.expectedMarker = bridgeRes.expectedMarker;
           setPages(prev => prev.map(p => p.id === page.id ? { ...p, expectedMarker: bridgeRes.expectedMarker } : p));
-        }
-        const { rawText, elements } = bridgeRes;
-
-        // 1. Parse AI rawText as JSON
-        const startIndex = extractedMcqs.length + 1;
-        rawExtractedItems = parseAiOutputToMockTestItems(rawText, setName, startIndex);
-
-        // 2. Fallback: if JSON parse produced nothing, convert elements only if real items exist
-        if (rawExtractedItems.length === 0 && elements && elements.length > 0) {
-          rawExtractedItems = convertElementsToMockTestItems(elements, setName);
         }
 
         // 3. Strict Check: If no MCQs found, do NOT insert dummy mock questions!
@@ -1655,7 +1679,7 @@ Rules:
         }
       }
 
-      await processPageItemSequential(page, retryPendingContext, idx, pages.length, idx === pages.length - 1, targetMode);
+      await processPageItemSequential(page, retryPendingContext, idx, pages.length, idx === pages.length - 1, targetMode, aiEngine, true);
       setLiveStatusText(
         targetMode === 'similar'
           ? `✓ Page ${page.pageNumber}: Similar practice MCQs generated successfully!`
@@ -2330,6 +2354,23 @@ Rules:
       items: (p.items || []).map(it => it.id === id ? { ...it, ...updates } : it)
     })));
   };
+
+  function attachFigureToQuestions(attach: (question: MockTestMcqItem) => MockTestMcqItem) {
+    setExtractedMcqs(prev => prev.map(attach));
+    setPages(prev => prev.map(page => page.items ? { ...page, items: page.items.map(attach) } : page));
+  }
+
+  function applyReviewedFigure(item: MockTestMcqItem, figure: McqFigure, url?: string) {
+    if (!url || !figure.sharedId) {
+      updateItemDraft(item.id, resolveMcqFigure(item, figure, url));
+      return;
+    }
+    const attachSharedFigure = (question: MockTestMcqItem) => {
+      const match = question.figures?.find(candidate => candidate.sharedId === figure.sharedId);
+      return match ? { ...question, ...resolveMcqFigure(question, match, url) } : question;
+    };
+    attachFigureToQuestions(attachSharedFigure);
+  }
 
   const prevEditingItemIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -3445,7 +3486,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
 
             {/* Page filmstrip with problem indicators */}
             {(() => {
+              const processingPages = pages.filter(p => p.status === 'processing');
+              const processingLabel = processingPages.map(p => `P${p.pageNumber}`).join(', ');
               const pagesWithIssues = pages.filter(p => {
+                if (p.status === 'processing') return false;
                 if (p.status === 'error' || Boolean(p.errorMessage)) return true;
                 const pageQuestions = (p.items && p.items.length > 0)
                   ? p.items
@@ -3454,72 +3498,89 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
               });
 
               return (
-                <div className="px-3 py-2 border-t border-line flex items-center gap-2 overflow-x-auto">
+                <div className="px-3 py-2 border-t border-line flex items-center gap-2">
                   <span className="text-xs font-semibold text-ink-3 shrink-0">Pages</span>
-                  {pagesWithIssues.length > 0 && (
+                  {processingPages.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => scrollToPageCard(pagesWithIssues[0].pageNumber)}
-                      className="badge badge-warning h-6 cursor-pointer hover:bg-amber-500/20 shrink-0"
-                      title="Jump to the first page with missing or incomplete fields"
+                      onClick={() => scrollToPageCard(processingPages[0].pageNumber)}
+                      title={`Processing ${processingLabel}. Jump to page ${processingPages[0].pageNumber}.`}
+                      className="h-6 px-2 flex items-center gap-1.5 rounded-md bg-orange-500 text-zinc-950 text-xs font-bold shrink-0 max-w-[45%] hover:bg-orange-400"
                     >
-                      <AlertTriangle />
-                      <span>{pagesWithIssues.length} need fixes</span>
+                      <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin shrink-0" />
+                      <span className="truncate">{processingLabel} running</span>
                     </button>
                   )}
+                  <div className="flex items-center gap-2 min-w-0 overflow-x-auto">
+                    {pagesWithIssues.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => scrollToPageCard(pagesWithIssues[0].pageNumber)}
+                        className="badge badge-warning h-6 cursor-pointer hover:bg-amber-500/20 shrink-0"
+                        title="Jump to the first page with missing or incomplete fields"
+                      >
+                        <AlertTriangle />
+                        <span>{pagesWithIssues.length} need fixes</span>
+                      </button>
+                    )}
 
-                  <div className="flex items-center gap-1 shrink-0">
-                    {pages.map((p) => {
-                      const pageQuestions = (p.items && p.items.length > 0)
-                        ? p.items
-                        : extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id);
-                      const count = pageQuestions.length;
-                      const isError = p.status === 'error' || Boolean(p.errorMessage);
-                      const problemCount = pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues).length;
-                      const hasIncomplete = p.status === 'ready' && problemCount > 0;
+                    <div className="flex items-center gap-1 shrink-0">
+                      {pages.map((p) => {
+                        const isProcessing = p.status === 'processing';
+                        const pageQuestions = (p.items && p.items.length > 0)
+                          ? p.items
+                          : extractedMcqs.filter(m => m.pageNumber === p.pageNumber || m.pageId === p.id);
+                        const count = pageQuestions.length;
+                        const isError = !isProcessing && (p.status === 'error' || Boolean(p.errorMessage));
+                        const problemCount = pageQuestions.filter(it => detectItemFieldIssues(it).hasIssues).length;
+                        const hasIncomplete = p.status === 'ready' && problemCount > 0;
 
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => scrollToPageCard(p.pageNumber)}
-                          title={
-                            isError
-                              ? `Page ${p.pageNumber}: Error processing page! Click to jump & inspect.`
-                              : hasIncomplete
-                              ? `Page ${p.pageNumber}: ${problemCount} of ${count} question(s) have incomplete/missing fields. Click to jump.`
-                              : p.status === 'ready'
-                              ? `Page ${p.pageNumber}: All ${count} questions complete.`
-                              : `Page ${p.pageNumber}`
-                          }
-                          className={`h-6 px-2 rounded-md text-xs font-semibold shrink-0 border transition-colors flex items-center gap-1 ${
-                            p.status === 'processing'
-                              ? 'bg-accent/10 border-accent/40 text-accent-light'
-                              : isError
-                              ? 'bg-rose-500/10 border-rose-500/40 text-rose-300 hover:bg-rose-500/20'
-                              : hasIncomplete
-                              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/20'
-                              : p.status === 'ready'
-                              ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20'
-                              : 'bg-transparent border-line-strong text-ink-3 hover:text-ink hover:bg-white/[0.04]'
-                          }`}
-                        >
-                          {p.status === 'processing' ? (
-                            <Loader2 className="w-3 h-3 animate-spin shrink-0" />
-                          ) : isError ? (
-                            <AlertCircle className="w-3 h-3 shrink-0" />
-                          ) : hasIncomplete ? (
-                            <AlertTriangle className="w-3 h-3 shrink-0" />
-                          ) : null}
-                          <span>P{p.pageNumber}</span>
-                          {count > 0 && (
-                            <span className="opacity-75 font-medium">
-                              · {count}{hasIncomplete && ` (${problemCount})`}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => scrollToPageCard(p.pageNumber)}
+                            aria-label={isProcessing ? `Page ${p.pageNumber}, processing` : undefined}
+                            title={
+                              isProcessing
+                                ? `Page ${p.pageNumber}: Processing. Click to jump.`
+                                : isError
+                                ? `Page ${p.pageNumber}: Error processing page! Click to jump & inspect.`
+                                : hasIncomplete
+                                ? `Page ${p.pageNumber}: ${problemCount} of ${count} question(s) have incomplete/missing fields. Click to jump.`
+                                : p.status === 'ready'
+                                ? `Page ${p.pageNumber}: All ${count} questions complete.`
+                                : `Page ${p.pageNumber}`
+                            }
+                            className={`h-6 px-2 rounded-md text-xs font-semibold shrink-0 border transition-colors flex items-center gap-1 ${
+                              isProcessing
+                                ? 'bg-orange-500 border-orange-400 text-zinc-950 hover:bg-orange-400'
+                                : isError
+                                ? 'bg-rose-500/10 border-rose-500/40 text-rose-300 hover:bg-rose-500/20'
+                                : hasIncomplete
+                                ? 'bg-amber-500/10 border-amber-500/40 text-amber-300 hover:bg-amber-500/20'
+                                : p.status === 'ready'
+                                ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300 hover:bg-emerald-500/20'
+                                : 'bg-transparent border-line-strong text-ink-3 hover:text-ink hover:bg-white/[0.04]'
+                            }`}
+                          >
+                            {isProcessing ? (
+                              <Loader2 aria-hidden="true" className="w-3 h-3 animate-spin shrink-0" />
+                            ) : isError ? (
+                              <AlertCircle className="w-3 h-3 shrink-0" />
+                            ) : hasIncomplete ? (
+                              <AlertTriangle className="w-3 h-3 shrink-0" />
+                            ) : null}
+                            <span>P{p.pageNumber}</span>
+                            {count > 0 && (
+                              <span className="opacity-75 font-medium">
+                                · {count}{hasIncomplete && ` (${problemCount})`}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );
@@ -3533,14 +3594,14 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                 // Find all MCQs belonging to this page
                 const pageQuestions = (page.items && page.items.length > 0)
                   ? page.items
-                  : extractedMcqs.filter(m => m.pageId === page.id || m.pageNumber === page.pageNumber);
+                  : extractedMcqs.filter(m => m.pageId ? m.pageId === page.id : m.pageNumber === page.pageNumber);
 
                 return (
                   <div
                     key={page.id}
                     id={`page-card-${page.pageNumber}`}
                     className={`card overflow-clip flex flex-col lg:flex-row min-h-[380px] scroll-mt-40 transition-colors ${
-                      page.isSelected ? 'border-accent/35' : ''
+                      page.status === 'processing' ? 'border-orange-500' : page.isSelected ? 'border-accent/35' : ''
                     }`}
                   >
                     {/* LEFT SIDE: page image and page actions */}
@@ -3554,7 +3615,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                             onChange={() => togglePageSelection(page.id)}
                             className="w-4 h-4 cursor-pointer"
                           />
-                          <span className="text-sm font-semibold text-ink">Page {page.pageNumber}</span>
+                          <span className={`text-sm font-semibold ${page.status === 'processing' ? 'text-orange-400' : 'text-ink'}`}>Page {page.pageNumber}</span>
                         </label>
 
                         <div className="flex items-center gap-1.5 flex-wrap justify-end">
@@ -3689,6 +3750,35 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                           <ClipboardPaste />
                           <span>Paste</span>
                         </button>
+
+                        <button type="button" className="btn btn-secondary btn-sm"
+                          onClick={() => setChatPageId(page.id)} title={`Chat about page ${page.pageNumber}`}>
+                          <MessageSquare /> Page chat
+                        </button>
+                        {chatPageId === page.id && <MocktestPageChat key={page.id} page={page}
+                          items={pageQuestions.map(q => {
+                            const latest = extractedById.get(q.id);
+                            return latest ? { ...q, ...latest, question_r: q.question_r } : q;
+                          })}
+                          history={page.pageChat || []} engine={aiEngine} provider={selectedProvider}
+                          model={claudeModel} difficulty={difficulty} setName={outputFileName || setName}
+                          busy={page.status === 'processing' || (aiEngine === 'bridge' && (isProcessingAll || pages.some(p => p.status === 'processing')))}
+                          close={() => setChatPageId(null)}
+                          append={message => setPages(prev => prev.map(p => p.id === page.id
+                            ? { ...p, pageChat: [...(p.pageChat || []), message] } : p))}
+                          apply={items => {
+                            const previousIds = new Set(pageQuestions.map(q => q.id));
+                            setPages(prev => prev.map(p => p.id === page.id
+                              ? { ...p, items, mcqCount: items.length, status: 'ready', errorMessage: undefined } : p));
+                            setExtractedMcqs(prev => {
+                              let offset = prev.findIndex(q => previousIds.has(q.id));
+                              const others = prev.filter(q => !previousIds.has(q.id));
+                              if (offset < 0) offset = others.findIndex(q => (q.pageNumber || 0) > page.pageNumber);
+                              others.splice(offset < 0 ? others.length : offset, 0, ...items);
+                              return others.map((q, i) => ({ ...q, question_r: i + 1 }));
+                            });
+                          }}
+                        />}
 
                         <span className="flex-1" />
 
@@ -4337,14 +4427,19 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                 )}
 
                                 <QuestionFigureActions image={page.imageUrl} engine={aiEngine} provider={selectedProvider} model={claudeModel}
-                                  attach={async (png, svg) => {
+                                  hasPassageGroup={!!item.passageGroupId}
+                                  attach={async (png, svg, shared) => {
                                     const file = await uploadFigureImage({ imageData: png, svg, questionNumber: item.question_r, targetField: 'question', setName });
-                                    updateItemDraft(item.id, resolveMcqFigure(item, { id: 'manual-question', target: 'question', type: 'image', content: 'Question figure' }, file.url));
+                                    const figure = { id: 'manual-question', target: 'question', type: 'image', content: 'Question figure' } as const;
+                                    attachFigureToQuestions(question => {
+                                      const matches = shared && item.passageGroupId ? question.passageGroupId === item.passageGroupId : question.id === item.id;
+                                      return matches ? { ...question, ...resolveMcqFigure(question, figure, file.url) } : question;
+                                    });
                                   }} />
                                 {item.figures?.map(figure => <McqFigureReview key={figure.id} figure={figure}
                                   image={figure.sourcePage ? pages.find(p => p.pageNumber === figure.sourcePage)?.imageUrl : page.imageUrl}
                                   mode={figure.svg || figureMode === 'svg' ? 'svg' : 'crop'}
-                                  resolve={png => updateItemDraft(item.id, resolveMcqFigure(item, figure, png))} />)}
+                                  resolve={url => applyReviewedFigure(item, figure, url)} />)}
                                 {/* Extra metadata (edit mode) */}
                                 {isEditing && (
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 panel p-3">

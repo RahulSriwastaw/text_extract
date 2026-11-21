@@ -1,4 +1,4 @@
-import { MCQ_PAGE_COVERAGE } from './figurePrompt';
+import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT } from './figurePrompt';
 import { directModelFields, type DirectModel } from './claudeModels';
 import { readMcqFigures } from './mcqFigures';
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
@@ -2356,11 +2356,50 @@ export function parseAiOutputToMockTestItems(
       let currentPassageRange = '';
       let activeUntilQNum = 0;
       const normalizedList: any[] = [];
+      const groups = new Map<string, { id: string; hi: string; en: string; figures: ReturnType<typeof readMcqFigures> }>();
+      const groupKey = (obj: any) => typeof obj.passage_id === 'string' ? obj.passage_id.trim() : '';
+      for (const obj of parsed) {
+        const key = groupKey(obj);
+        if (!key) continue;
+        const group = groups.get(key) || { id: crypto.randomUUID(), hi: '', en: '', figures: [] };
+        group.hi ||= String(obj.passage_hi || '');
+        group.en ||= String(obj.passage_en || '');
+        for (const figure of readMcqFigures(obj.figures)) {
+          if (!figure.shared || group.figures.some(existing => existing.sourcePage === figure.sourcePage &&
+            JSON.stringify(existing.bbox) === JSON.stringify(figure.bbox) && existing.content === figure.content)) continue;
+          group.figures.push({ ...figure, sharedId: crypto.randomUUID() });
+        }
+        groups.set(key, group);
+      }
+      const seen = new Set<string>();
+
 
       for (let idx = 0; idx < parsed.length; idx++) {
         const rawObj = parsed[idx];
         const rawQHi = String(rawObj.question_hi || rawObj.question || rawObj.question_text || rawObj.q || '');
         const rawQEn = String(rawObj.question_en || '');
+
+        const signature = JSON.stringify([
+          rawObj.source_pages || '', rawObj.source_question_reference || rawObj.question_r || '',
+          rawQHi.trim(), rawQEn.trim(), rawObj.options || null,
+          ...['hi', 'en'].flatMap(lang => [1, 2, 3, 4, 5].map(n => rawObj[`option${n}_${lang}`] || '')),
+          rawObj.option_a || rawObj.optionA, rawObj.option_b || rawObj.optionB,
+          rawObj.option_c || rawObj.optionC, rawObj.option_d || rawObj.optionD,
+        ]);
+        if (seen.has(signature)) continue;
+        seen.add(signature);
+
+        const group = groups.get(groupKey(rawObj));
+        if (Object.hasOwn(rawObj, 'passage_id')) {
+          const figures = [...readMcqFigures(rawObj.figures).filter(figure => !group || !figure.shared), ...(group?.figures || [])]
+            .map((figure, index) => ({ ...figure, id: 'figure-' + index }));
+          normalizedList.push({ ...rawObj, question_hi: rawQHi, question_en: rawQEn,
+            passage_hi: group?.hi || rawObj.passage_hi || '', passage_en: group?.en || rawObj.passage_en || '',
+            passageGroupId: group?.id, preparedFigures: figures });
+          currentPassageHi = currentPassageEn = currentPassageRange = '';
+          activeUntilQNum = 0;
+          continue;
+        }
         const hasOpts = Boolean(
           rawObj.option1_hi || rawObj.option2_hi || rawObj.option1_en || rawObj.option2_en ||
           rawObj.option_a || rawObj.option_b || (Array.isArray(rawObj.options) && rawObj.options.length > 0)
@@ -2442,7 +2481,7 @@ export function parseAiOutputToMockTestItems(
         });
       }
 
-      return distributePassagesAcrossItems(normalizedList.map((obj, i) => {
+      const items = normalizedList.map((obj, i) => {
         const qNum = parseInt(obj.question_r, 10) || (startIndex + i);
         let rawAns = String(obj.answer || obj.ans || obj.correct || obj.correct_option || 'A').trim();
         rawAns = rawAns.replace(/^(?:Answer|Ans|उत्तर)\s*[:\-]?\s*/i, '').trim().toUpperCase();
@@ -2593,7 +2632,8 @@ export function parseAiOutputToMockTestItems(
             test_time: obj.test_time || '',
             subject: cleanSubject,
             subject_level: obj.subject_level || '',
-            figures: readMcqFigures(obj.figures),
+            passageGroupId: obj.passageGroupId,
+            figures: obj.preparedFigures || readMcqFigures(obj.figures),
             figure_notes: obj.figure_notes || '',
             correction_notes: obj.correction_notes || '',
             source_pdf: obj.source_pdf || '',
@@ -2608,7 +2648,16 @@ export function parseAiOutputToMockTestItems(
             passage_hi: obj.passage_hi || '',
             passage_en: obj.passage_en || ''
           });
-        }));
+        });
+      return parsed.some(obj => Object.hasOwn(obj, 'passage_id')) ? items.map((item, index) => {
+        if (!Object.hasOwn(normalizedList[index], 'passage_id')) return item;
+        const attach = (passage: string | undefined, question: string) => {
+          const html = ensureHtmlParagraph(passage || '');
+          return html && !question.startsWith(html) ? html + question : question;
+        };
+        return { ...item, question_hi: attach(item.passage_hi, item.question_hi),
+          question_en: attach(item.passage_en, item.question_en) };
+      }) : distributePassagesAcrossItems(items);
       } catch (e) {
         console.warn('JSON parse failed in parseAiOutputToMockTestItems, falling back to heuristic parsing:', e);
       }
@@ -2656,15 +2705,15 @@ ${HTML_LATEX_FORMAT_RULES}
    - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
 4. Comprehensive Solutions: Provide an in-depth, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. Correct Answer: Single letter "A", "B", "C", or "D".
-6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
-   - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g., "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
-     YOU MUST PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION BELONGING TO THAT SET in both question_hi and question_en, separated by "\\n---\\n" (e.g., "[Full Passage Text]\\n---\\n[Question Text]").
-   - NEVER attach the passage only once or only with the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so students can read the passage with every question.
+${MCQ_SHARED_CONTEXT}
 
 Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:
 [
   {
     "question_r": 1,
+    "passage_id": "",
+    "passage_hi": "",
+    "passage_en": "",
     "question_hi": "...",
     "question_en": "...",
     "option1_hi": "...",

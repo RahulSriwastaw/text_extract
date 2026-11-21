@@ -5,13 +5,13 @@ const env = (import.meta as any).env || {};
 const supabaseUrl: string =
   env.VITE_SUPABASE_URL ||
   env.NEXT_PUBLIC_SUPABASE_URL ||
-  'https://xrvmrkjkukgyegztypwn.supabase.co';
+  'https://xwkbrjihkidgdoblyyms.supabase.co';
 
 const supabaseAnonKey: string =
   env.VITE_SUPABASE_ANON_KEY ||
   env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   env.SUPABASE_PUBLISHABLE_KEY ||
-  'sb_publishable_aMtkqhQW01OL2dY00lxGkg_inNMn_EI';
+  'sb_publishable_Bn_7U_Z1QBsmkr57eKSGjQ_FtIdAY5B';
 
 export const isSupabaseConfigured: boolean = !!(supabaseUrl && supabaseAnonKey);
 

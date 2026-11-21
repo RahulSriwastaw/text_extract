@@ -6,18 +6,19 @@ import { extractLayoutFromImage } from '../services/geminiService';
 import type { DirectModel } from '../services/claudeModels';
 import { SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt';
 
-export function QuestionFigureActions({ image, engine, provider, model, attach }: {
-  image?: string; engine: string; provider: AiProvider; model: DirectModel; attach: (image: string, svg?: string) => Promise<void>;
+export function QuestionFigureActions({ image, engine, provider, model, hasPassageGroup, attach }: {
+  image?: string; engine: string; provider: AiProvider; model: DirectModel; hasPassageGroup?: boolean; attach: (image: string, svg?: string, shared?: boolean) => Promise<void>;
 }) {
   const [mode, setMode] = useState<'crop' | 'svg'>();
   const [original, setOriginal] = useState('');
   const [preview, setPreview] = useState('');
   const [status, setStatus] = useState('');
   const [sourceSvg, setSourceSvg] = useState('');
+  const [shared, setShared] = useState(false);
   const [uploading, setUploading] = useState(false);
   async function save(image: string, svg?: string) {
     setUploading(true);
-    try { await attach(image, svg); clear(); }
+    try { await attach(image, svg, hasPassageGroup && shared); clear(); }
     catch (error) { setStatus(error instanceof Error ? error.message : 'Drive upload failed. Retry.'); }
     finally { setUploading(false); }
   }
@@ -29,6 +30,7 @@ export function QuestionFigureActions({ image, engine, provider, model, attach }
     setOriginal('');
     setPreview('');
     setSourceSvg('');
+    setShared(false);
     setStatus('');
   }
   async function apply(region: string) {
@@ -66,6 +68,10 @@ export function QuestionFigureActions({ image, engine, provider, model, attach }
     <button className="btn btn-secondary btn-sm" disabled={!image || uploading} onClick={() => { clear(); setMode('svg'); }}>Create SVG</button>
     {!image && <span>Original page image unavailable</span>}
     {mode && image && <CropDialog pageImage={image} apply={apply} close={clear} actionLabel={mode === 'svg' ? 'Create SVG from selection' : 'Attach crop'} />}
+    {original && hasPassageGroup && <label className="inline-flex items-center gap-1.5 text-xs">
+      <input type="checkbox" checked={shared} disabled={uploading} onChange={e => setShared(e.target.checked)} />
+      Attach to all questions in this group
+    </label>}
     {status && <span role="status">{status}</span>}
     {preview && <><img className="max-h-40 bg-white" src={preview} alt="Recreated question figure" />
       <button className="btn btn-primary btn-sm" disabled={uploading} onClick={() => save(preview, sourceSvg)}>Use SVG</button></>}

@@ -127,6 +127,7 @@ export interface MockTestMcqItem {
   hash_figure?: string;
   manually_review?: string;
   duplicate_statistics?: string;
+  passageGroupId?: string;
   passage_hi?: string;
   passage_en?: string;
   pageNumber?: number;
@@ -136,6 +137,8 @@ export interface MockTestMcqItem {
 export interface McqFigure extends ExtractedElement {
   target: 'question' | 'solution' | 'option1' | 'option2' | 'option3' | 'option4' | 'option5';
   sourcePage?: number;
+  shared?: boolean;
+  sharedId?: string;
 }
 
 export type LatexRepairScope = 'entire_mcq' | 'question' | 'options' | 'solution';

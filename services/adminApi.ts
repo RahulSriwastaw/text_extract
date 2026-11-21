@@ -2,8 +2,44 @@
  * services/adminApi.ts — Typed admin API client.
  *
  * All calls go through apiFetch which adds the Firebase ID token.
+ * Admin password is stored in sessionStorage and sent as X-Admin-Password header.
  */
 import { apiFetch, apiFetchJson } from './apiClient';
+
+// ---------------------------------------------------------------------------
+// Admin password session management
+// ---------------------------------------------------------------------------
+const ADMIN_PASS_KEY = 'admin_password';
+
+export function setAdminPassword(password: string) {
+  sessionStorage.setItem(ADMIN_PASS_KEY, password);
+}
+
+export function getAdminPassword(): string {
+  return sessionStorage.getItem(ADMIN_PASS_KEY) || '';
+}
+
+export function clearAdminPassword() {
+  sessionStorage.removeItem(ADMIN_PASS_KEY);
+}
+
+/** Wraps apiFetch to include admin password header */
+function adminFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const pass = getAdminPassword();
+  if (pass) headers.set('X-Admin-Password', pass);
+  return apiFetch(path, { ...init, headers });
+}
+
+/** Wraps apiFetchJson to include admin password header */
+async function adminFetchJson<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await adminFetch(path, init);
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,10 +157,10 @@ export interface AuditEntry {
 // ---------------------------------------------------------------------------
 // API calls
 // ---------------------------------------------------------------------------
-export const adminMe = () => apiFetchJson<AdminMe>('/api/admin/me');
+export const adminMe = () => adminFetchJson<AdminMe>('/api/admin/me');
 
 export const fetchOverview = (range = 30) =>
-  apiFetchJson<OverviewData>(`/api/admin/overview?range=${range}`);
+  adminFetchJson<OverviewData>(`/api/admin/overview?range=${range}`);
 
 export const fetchUsers = (params: { search?: string; status?: string; sort?: string; page?: number; pageSize?: number } = {}) => {
   const q = new URLSearchParams();
@@ -133,14 +169,14 @@ export const fetchUsers = (params: { search?: string; status?: string; sort?: st
   if (params.sort) q.set('sort', params.sort);
   if (params.page) q.set('page', String(params.page));
   if (params.pageSize) q.set('pageSize', String(params.pageSize));
-  return apiFetchJson<{ users: UserRow[]; total: number; page: number; pageSize: number }>(`/api/admin/users?${q}`);
+  return adminFetchJson<{ users: UserRow[]; total: number; page: number; pageSize: number }>(`/api/admin/users?${q}`);
 };
 
 export const fetchUserDetail = (uid: string) =>
-  apiFetchJson<UserDetail>(`/api/admin/users/${encodeURIComponent(uid)}`);
+  adminFetchJson<UserDetail>(`/api/admin/users/${encodeURIComponent(uid)}`);
 
 export const patchUser = (uid: string, body: { status?: string; daily_limit?: number | null; blocked_reason?: string; note?: string }) =>
-  apiFetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
+  adminFetch(`/api/admin/users/${encodeURIComponent(uid)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -154,9 +190,9 @@ export const fetchReports = (params: { from?: string; to?: string; groupBy?: str
   if (params.format) q.set('format', params.format);
   const url = `/api/admin/reports?${q}`;
   if (params.format === 'csv') {
-    return apiFetch(url).then(r => r.text());
+    return adminFetch(url).then(r => r.text());
   }
-  return apiFetchJson<{ rows: any[]; from: string; to: string; groupBy: string }>(url);
+  return adminFetchJson<{ rows: any[]; from: string; to: string; groupBy: string }>(url);
 };
 
 export const fetchActivity = (params: { uid?: string; feature?: string; status?: string; cursor?: number; limit?: number } = {}) => {
@@ -166,40 +202,40 @@ export const fetchActivity = (params: { uid?: string; feature?: string; status?:
   if (params.status) q.set('status', params.status);
   if (params.cursor) q.set('cursor', String(params.cursor));
   if (params.limit) q.set('limit', String(params.limit));
-  return apiFetchJson<{ events: UsageEvent[]; nextCursor: number | null }>(`/api/admin/activity?${q}`);
+  return adminFetchJson<{ events: UsageEvent[]; nextCursor: number | null }>(`/api/admin/activity?${q}`);
 };
 
 export const fetchAudit = (cursor?: number) => {
   const q = cursor ? `?cursor=${cursor}` : '';
-  return apiFetchJson<{ entries: AuditEntry[]; nextCursor: number | null }>(`/api/admin/audit${q}`);
+  return adminFetchJson<{ entries: AuditEntry[]; nextCursor: number | null }>(`/api/admin/audit${q}`);
 };
 
 export const fetchKeyStats = () =>
-  apiFetchJson<{ keys: KeyStat[]; deadKeys: KeyStat[] }>('/api/admin/stats');
+  adminFetchJson<{ keys: KeyStat[]; deadKeys: KeyStat[] }>('/api/admin/stats');
 
 export const deactivateKey = (keyId: string) =>
-  apiFetch('/api/admin/dead-key', {
+  adminFetch('/api/admin/dead-key', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keyId }),
   }).then(r => r.json());
 
 export const resetKeyHealth = (keyId?: string) =>
-  apiFetch('/api/admin/reset-key-health', {
+  adminFetch('/api/admin/reset-key-health', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ keyId }),
   }).then(r => r.json());
 
 export const fetchSettings = () =>
-  apiFetchJson<Record<string, any>>('/api/admin/settings');
+  adminFetchJson<Record<string, any>>('/api/admin/settings');
 
 export const updateSettings = (body: { default_daily_limit?: number | null; retention_days?: number }) =>
-  apiFetch('/api/admin/settings', {
+  adminFetch('/api/admin/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then(r => r.json());
 
 export const triggerPurge = () =>
-  apiFetch('/api/admin/purge', { method: 'POST' }).then(r => r.json());
+  adminFetch('/api/admin/purge', { method: 'POST' }).then(r => r.json());

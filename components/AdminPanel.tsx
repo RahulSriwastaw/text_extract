@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { useCurrentUser, signInWithGoogle } from '../services/authService';
 import * as api from '../services/adminApi';
+import { setAdminPassword, getAdminPassword, clearAdminPassword } from '../services/adminApi';
 
 type Tab = 'Overview' | 'Users' | 'Reports' | 'Activity' | 'API Keys' | 'Settings' | 'Audit';
 
@@ -42,14 +43,46 @@ const AdminPanel = () => {
     new URLSearchParams(location.search).has('drive') ? 'Settings' : 'Overview'
   );
   const [error, setError] = useState('');
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
-  // Check admin access
-  useEffect(() => {
+  // Check admin access (with password)
+  const checkAdmin = useCallback(() => {
     if (!user) { setAdminOk(null); return; }
     api.adminMe()
-      .then(info => { setAdminInfo(info); setAdminOk(true); })
-      .catch(() => setAdminOk(false));
+      .then(info => { setAdminInfo(info); setAdminOk(true); setNeedsPassword(false); })
+      .catch((err) => {
+        const msg = err?.message || '';
+        if (msg.includes('admin_password_required') || msg.includes('Invalid admin password')) {
+          setNeedsPassword(true);
+          setAdminOk(null);
+        } else {
+          setAdminOk(false);
+        }
+      });
   }, [user]);
+
+  useEffect(() => { checkAdmin(); }, [checkAdmin]);
+
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError('');
+    setAdminPassword(passwordInput);
+    // Re-check with the new password
+    api.adminMe()
+      .then(info => { setAdminInfo(info); setAdminOk(true); setNeedsPassword(false); })
+      .catch((err) => {
+        const msg = err?.message || '';
+        if (msg.includes('admin_password_required') || msg.includes('Invalid admin password')) {
+          setPasswordError('Galat password. Dobara try karo.');
+          clearAdminPassword();
+        } else {
+          setAdminOk(false);
+          setNeedsPassword(false);
+        }
+      });
+  };
 
   // Not signed in
   if (!authLoading && !user) {
@@ -67,6 +100,38 @@ const AdminPanel = () => {
             Sign in with Google
           </button>
           {error && <p className="mt-4 text-red-400 text-sm">{error}</p>}
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Password entry screen
+  if (needsPassword && user) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-4">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-surface p-8 rounded-2xl border border-line shadow-2xl text-center">
+          <div className="w-16 h-16 bg-accent/10 border border-accent/25 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <ShieldCheck className="text-accent-light w-10 h-10" />
+          </div>
+          <h2 className="text-2xl font-bold mb-1">Admin Password</h2>
+          <p className="text-ink-3 text-sm mb-6">Signed in as {user.email}. Enter admin password to continue.</p>
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={e => setPasswordInput(e.target.value)}
+              placeholder="Enter admin password"
+              className="w-full bg-surface-2 border border-line rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-accent"
+              autoFocus
+              required
+            />
+            {passwordError && <p className="text-red-400 text-sm">{passwordError}</p>}
+            <button type="submit"
+              className="w-full bg-accent text-on-accent font-bold py-3 rounded-xl hover:bg-accent/90 transition-all">
+              Verify
+            </button>
+          </form>
         </motion.div>
       </div>
     );

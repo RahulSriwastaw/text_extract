@@ -355,6 +355,16 @@ export async function requireAdmin(
     return;
   }
 
+  // Admin password check (optional second factor)
+  const adminPass = process.env.ADMIN_PASSWORD;
+  if (adminPass) {
+    const provided = req.get('x-admin-password') || '';
+    if (provided !== adminPass) {
+      res.status(403).json({ error: 'Invalid admin password.', code: 'admin_password_required' });
+      return;
+    }
+  }
+
   if (!isAdminDbConfigured) {
     res.status(503).json({
       error: 'Admin database is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',

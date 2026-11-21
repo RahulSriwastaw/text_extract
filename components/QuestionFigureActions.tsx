@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CropDialog } from './ConverterFigure';
-import { renderFigureSvg } from '../services/converterFigures';
+import { renderFigureSvg, sanitizeFigureSvg } from '../services/converterFigures';
 import { extractWithStudyAiBridge, type AiProvider } from '../services/studyAiBridgeService';
-import { extractLayoutFromImage } from '../services/geminiService';
+import { recreateFigureSvg } from '../services/geminiService';
 import type { DirectModel } from '../services/claudeModels';
 import { SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt';
 
@@ -48,19 +48,21 @@ export function QuestionFigureActions({ image, engine, provider, model, hasPassa
           prompt: SVG_FIGURE_INSTRUCTION + ' Recreate this selected figure. Return only the SVG markup or NONE.',
           fileName: 'question-figure.png', mimeType: region.split(';')[0].slice(5), signal: controller.signal });
         svg = result.rawText.match(/<svg\b[\s\S]*?<\/svg>/i)?.[0];
+        // Bridge replies may wrap the SVG in a JSON string; undo JSON escapes.
+        if (svg && /\\["n/]/.test(svg)) svg = svg.replace(/\\n/g, '\n').replace(/\\t/g, ' ').replace(/\\(["/\\])/g, '$1');
       } else {
-        const elements = await extractLayoutFromImage(region, undefined, true, false, false, false, false, false, false,
-          undefined, 0, controller.signal, 'svg', model);
-        svg = elements.find(e => e.type === 'image' && e.svg)?.svg;
+        svg = await recreateFigureSvg(region, model, controller.signal);
       }
-      const png = svg && await renderFigureSvg(svg);
+      const clean = svg && sanitizeFigureSvg(svg);
+      const png = clean && await renderFigureSvg(clean);
       if (controller.signal.aborted) return;
       if (!png) throw new Error();
-      setSourceSvg(svg!);
+      setSourceSvg(clean!);
       setPreview(png);
       setStatus('');
-    } catch {
-      if (!controller.signal.aborted) setStatus('SVG nahi ban paaya. Original crop add kar sakte hain.');
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? ` (${error.message})` : '';
+      if (!controller.signal.aborted) setStatus(`SVG nahi ban paaya${detail}. Original crop add kar sakte hain.`);
     }
   }
   return <div className="flex flex-wrap items-center gap-2">

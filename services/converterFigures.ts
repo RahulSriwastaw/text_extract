@@ -17,20 +17,50 @@ const attributes = new Set(('xmlns viewBox width height x y x1 y1 x2 y2 dx dy cx
   'fill-rule font-family font-size font-weight font-style text-anchor dominant-baseline').split(' '));
 
 /** Render only self-contained diagram primitives, into the same PNG used for review and Word. */
-export async function renderFigureSvg(source: string): Promise<string | undefined> {
-  if (typeof source !== 'string' || source.length > 100_000 || /<!|<\?/.test(source)) return;
-  const xml = new DOMParser().parseFromString(source, 'image/svg+xml');
+const safeColor = /^(?:[a-z]+|#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\))$/i;
+
+/**
+ * Strip (instead of rejecting) anything outside the allowed primitives, so one harmless extra
+ * attribute such as id, class, style or version no longer discards an otherwise good AI SVG.
+ */
+export function sanitizeFigureSvg(source: string): string | undefined {
+  if (typeof source !== 'string' || source.length > 100_000) return;
+  let text = source.match(/<svg\b[\s\S]*<\/svg>/i)?.[0];
+  if (!text) return;
+  text = text.replace(/<!--[\s\S]*?-->/g, '').replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
+  if (/<!|<\?/.test(text)) return;
+  if (!/^<svg\b[^>]*\sxmlns\s*=/i.test(text)) text = text.replace(/^<svg\b/i, `<svg xmlns="${svgNS}"`);
+  const xml = new DOMParser().parseFromString(text, 'image/svg+xml');
   const root = xml.documentElement;
-  if (root.localName !== 'svg' || root.namespaceURI !== svgNS || !root.querySelector('path,line,polyline,polygon,rect,circle,ellipse,text')) return;
-  const nodes = xml.getElementsByTagName('*');
+  if (root.localName !== 'svg' || root.namespaceURI !== svgNS || xml.getElementsByTagName('parsererror').length) return;
+  const nodes = Array.from(xml.getElementsByTagName('*'));
   if (nodes.length > 1500) return;
   for (const node of nodes) {
-    if (node.namespaceURI !== svgNS || !tags.has(node.tagName)) return;
-    for (const attr of node.attributes) {
-      if (!attributes.has(attr.name)) return;
-      if (['fill', 'stroke'].includes(attr.name) && !/^(?:[a-z]+|#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\))$/i.test(attr.value)) return;
+    if (!node.parentNode) continue;
+    if (node.namespaceURI !== svgNS || !tags.has(node.localName)) { node.parentNode.removeChild(node); continue; }
+    const style = node.getAttribute('style');
+    if (style) for (const rule of style.split(';')) {
+      const [name, ...rest] = rule.split(':');
+      const key = name?.trim().toLowerCase(); const value = rest.join(':').trim();
+      if (key && value && attributes.has(key) && !node.hasAttribute(key)) node.setAttribute(key, value);
+    }
+    for (const attr of Array.from(node.attributes)) {
+      if (attr.name === 'xmlns') continue;
+      if (!attributes.has(attr.name) || (['fill', 'stroke'].includes(attr.name) && !safeColor.test(attr.value.trim()))) node.removeAttribute(attr.name);
     }
   }
+  if (!root.getAttribute('viewBox')) {
+    const w = parseFloat(root.getAttribute('width') || ''), h = parseFloat(root.getAttribute('height') || '');
+    if (w > 0 && h > 0) root.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  }
+  if (!root.querySelector('path,line,polyline,polygon,rect,circle,ellipse,text')) return;
+  return new XMLSerializer().serializeToString(root);
+}
+
+export async function renderFigureSvg(source: string): Promise<string | undefined> {
+  const clean = sanitizeFigureSvg(source);
+  if (!clean) return;
+  const root = new DOMParser().parseFromString(clean, 'image/svg+xml').documentElement;
   const box = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
   if (box.length !== 4 || !box.every(Number.isFinite) || box[2] <= 0 || box[3] <= 0) return;
   const scale = 1200 / Math.max(box[2], box[3]);

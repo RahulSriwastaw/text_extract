@@ -84,6 +84,22 @@ export const extractTextFromImage = async (base64Image: string, numberingStyle: 
     .join('\n\n');
 };
 
+/** Recreate one cropped figure as SVG with a figure-only prompt (not the full page layout prompt). */
+export async function recreateFigureSvg(image: string, model?: DirectModel, signal?: AbortSignal): Promise<string | undefined> {
+  const settings = await getAiSettings();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (settings.apiKey) {
+    headers['x-user-claude-key'] = settings.apiKey.trim();
+    headers['x-user-gemini-key'] = settings.apiKey.trim();
+  }
+  const response = await fetch('/api/figure-svg', {
+    method: 'POST', signal, headers, body: JSON.stringify({ image, ...directModelFields(model) }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
+  return typeof data.svg === 'string' ? data.svg : undefined;
+}
+
 export const proofreadMcqs = async (rawText: string, isBilingual: boolean = false, retryCount: number = 0): Promise<any[]> => {
   const settings = await getAiSettings();
 

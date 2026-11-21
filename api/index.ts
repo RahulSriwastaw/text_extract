@@ -2726,6 +2726,25 @@ app.post('/api/mocktest-page-chat', async (req, res) => {
   }
 });
 
+app.post('/api/figure-svg', async (req, res) => {
+  const { image, claudeModel, geminiModel } = req.body || {};
+  if (typeof image !== 'string' || !image) return res.status(400).json({ error: 'A figure image is required.' });
+  try {
+    const prompt = 'The attached image is a cropped figure (chart, graph or diagram) from an exam page. Recreate the whole figure as one static SVG. ' +
+      SVG_FIGURE_INSTRUCTION + '\nIgnore watermarks and logos overlapping the figure. Read every printed label and value; for pie charts draw each sector with path arcs proportional to its value and keep the labels. ' +
+      'Respond with only a JSON object {"svg": "<svg ...>...</svg>"} and use single quotes for SVG attributes. Use {"svg": null} only if the image contains no figure.';
+    const raw = await runAIAction(client => callGeminiWithFallback(client, getPrimaryModel(), getFallbackModel(),
+      [{ inlineData: readInlineImage(image) }, { text: prompt }],
+      { claudeModel, geminiModel, temperature: 0.1, responseMimeType: 'application/json' }, 'figure-svg'),
+      getUserKey(req), undefined, geminiModel ? 'gemini' : claudeModel ? 'claude' : undefined);
+    const parsed = safeParseAiJsonObject(raw);
+    const svg = (typeof parsed?.svg === 'string' ? parsed.svg : String(raw || '')).match(/<svg\b[\s\S]*?<\/svg>/i)?.[0];
+    res.json({ svg: svg || null });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'SVG creation failed.' });
+  }
+});
+
 app.post('/api/mocktest-ai-chat', async (req, res) => {
   try {
     const { item, userPrompt, history = [] } = req.body;

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * mcqDocxService.ts  —  Robust DOCX generation for MCQ items
  * LaTeX rendered as styled text (fallback) or via temml+XSLT OMML.
  * Fixed: No Paragraph spreading, proper docx v8 API usage.
@@ -187,6 +187,69 @@ function tokenize(text: string): Seg[] {
   return segs;
 }
 
+// ── Convert LaTeX to readable Unicode text for DOCX fallback ─────────────────
+const LATEX_SYM: Record<string, string> = {
+  times: '×', div: '÷', cdot: '·', pm: '±', mp: '∓', le: '≤', ge: '≥',
+  leq: '≤', geq: '≥', neq: '≠', approx: '≈', infty: '∞', circ: '°',
+  deg: '°', degree: '°', alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ',
+  epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ',
+  omega: 'ω', phi: 'φ', rho: 'ρ', tau: 'τ', psi: 'ψ', chi: 'χ',
+  Delta: 'Δ', Gamma: 'Γ', Sigma: 'Σ', Omega: 'Ω', Pi: 'Π', Theta: 'Θ',
+  rightarrow: '→', leftarrow: '←', Rightarrow: '⇒', to: '→',
+  sim: '∼', equiv: '≡', cong: '≅', propto: '∝', forall: '∀', exists: '∃',
+  'in': '∈', notin: '∉', subset: '⊂', cup: '∪', cap: '∩',
+  sum: '∑', prod: '∏', int: '∫', partial: '∂', nabla: '∇',
+  therefore: '∴', because: '∵', angle: '∠', perp: '⊥',
+  parallel: '∥', dots: '…', cdots: '⋯', prime: '′',
+};
+const SUP_MAP: Record<string, string> = {
+  '0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹',
+  '+':'⁺','-':'⁻','=':'⁼','(':'⁽',')':'⁾','n':'ⁿ','i':'ⁱ',
+};
+const SUB_MAP2: Record<string, string> = {
+  '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉',
+  '+':'₊','-':'₋','=':'₌','(':'₍',')':'₎','a':'ₐ','e':'ₑ','o':'ₒ','x':'ₓ',
+};
+
+function toSup(s: string): string { return s.split('').map(c => SUP_MAP[c] || c).join(''); }
+function toSub(s: string): string { return s.split('').map(c => SUB_MAP2[c] || c).join(''); }
+
+function latexToUnicode(latex: string): string {
+  let s = latex.trim();
+
+  // \text{...} and \mathrm{...} → content
+  s = s.replace(/\\(?:text|mathrm|mathbf|mathit|operatorname)\{([^}]*)\}/g, '$1');
+
+  // \frac{a}{b} → a/b  (simple fractions) or (a)/(b) for complex
+  s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, (_m, n, d) => {
+    if (n.length <= 3 && d.length <= 3) return `${n}/${d}`;
+    return `(${n})/(${d})`;
+  });
+
+  // \sqrt[n]{x} → ⁿ√(x),  \sqrt{x} → √(x)
+  s = s.replace(/\\sqrt\[([^\]]+)\]\{([^}]*)\}/g, (_m, n, x) => `${toSup(n)}√(${x})`);
+  s = s.replace(/\\sqrt\{([^}]*)\}/g, '√($1)');
+
+  // \overline{x} → x̅
+  s = s.replace(/\\overline\{([^}]*)\}/g, (_m, x) => x.split('').map(c => c + '\u0305').join(''));
+
+  // Superscript: ^{...} or ^x
+  s = s.replace(/\^{([^}]*)}/g, (_m, x) => toSup(x));
+  s = s.replace(/\^([0-9n])/g, (_m, x) => toSup(x));
+
+  // Subscript: _{...} or _x
+  s = s.replace(/_{([^}]*)}/g, (_m, x) => toSub(x));
+  s = s.replace(/_([0-9])/g, (_m, x) => toSub(x));
+
+  // Named LaTeX commands → Unicode symbols
+  s = s.replace(/\\([a-zA-Z]+)/g, (_m, cmd) => LATEX_SYM[cmd] || cmd);
+
+  // Clean up braces and extra spaces
+  s = s.replace(/[{}]/g, '').replace(/\s{2,}/g, ' ').trim();
+
+  return s;
+}
+
 // ── Fonts & colors ───────────────────────────────────────────────────────────
 const F_HI = 'Nirmala UI';
 const F_EN = 'Calibri';
@@ -229,9 +292,10 @@ function buildTextRuns(segments: Seg[], ctx: RunsCtx): RunResult {
       }));
     } else {
       mathSegments.push({ val: seg.val, display: seg.type === 'display' });
-      // Inline math representation as italic text
+      // Inline math representation as Unicode text
+      const readable = latexToUnicode(seg.val);
       runs.push(new TextRun({
-        text: ` ${seg.val} `,
+        text: ` ${readable} `,
         font: { name: F_MATH },
         italics: true,
         color: '2B4F96',
@@ -294,6 +358,7 @@ async function htmlToParas(
       const isDisplay = seg.type === 'display';
       // Try OMML first
       const omml = await latexToOmml(seg.val, isDisplay);
+      const readable = latexToUnicode(seg.val);
 
       if (omml && isDisplay) {
         // Flush current text runs into a paragraph
@@ -309,22 +374,22 @@ async function htmlToParas(
         // We use the docx AlternateContent trick: put OMML inside a special paragraph
         result.push(buildOmmlParagraph(omml, AlignmentType.CENTER, indent));
       } else if (omml && !isDisplay) {
-        // Inline math: represented as styled TextRun (OMML inline in docx needs special handling)
+        // Inline math: represented as styled TextRun with Unicode conversion
         currentRuns.push(new TextRun({
-          text: ` ${seg.val} `,
+          text: ` ${readable} `,
           font: { name: F_MATH },
           italics: true,
           color: '2B4F96',
           size: ctx.size || 22,
         }));
       } else {
-        // Fallback: show LaTeX source in styled monospace
+        // Fallback: show Unicode-converted math in styled font
         currentRuns.push(new TextRun({
-          text: ` ${seg.val} `,
-          font: { name: 'Courier New' },
+          text: ` ${readable} `,
+          font: { name: F_MATH },
           italics: true,
-          color: '555555',
-          size: Math.max(18, (ctx.size || 24) - 2),
+          color: ctx.color || C_BLACK,
+          size: ctx.size || 22,
         }));
       }
     }
@@ -347,7 +412,7 @@ async function htmlToParas(
 // For now, display math gets rendered as a centered styled paragraph with the formula text.
 function buildOmmlParagraph(ommlXml: string, alignment: string = AlignmentType.CENTER, indent?: number): Paragraph {
   // Extract formula text from OMML for display as styled text fallback
-  // This ensures content always shows, even if OMML rendering fails.
+  // Use OMML text extraction first, then fall back to Unicode conversion
   const textMatch = ommlXml.match(/<m:t[^>]*>(.*?)<\/m:t>/g);
   const formulaText = textMatch
     ? textMatch.map(t => t.replace(/<[^>]+>/g, '')).join(' ')

@@ -1,3 +1,4 @@
+import { syncDirectory } from './firebaseDirectory.js';
 /**
  * api/adminRoutes.ts — Admin read/write endpoints for the new admin panel.
  *
@@ -145,6 +146,7 @@ export function registerAdminRoutes(app: Express) {
       const page = Math.max(Number(req.query.page) || 1, 1);
       const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 25, 5), 100);
 
+      const directoryNotice = await syncDirectory();
       // Get all app_users with their access
       let query = adminDb.from('app_users')
         .select('uid, email, name, photo_url, first_seen_at, last_seen_at', { count: 'exact' });
@@ -168,7 +170,7 @@ export function registerAdminRoutes(app: Express) {
 
       if (error) throw error;
       if (!allUsers || allUsers.length === 0) {
-        return res.json({ users: [], total: count || 0, recent: recent || 0, page, pageSize });
+        return res.json({ users: [], total: count || 0, recent: recent || 0, directoryNotice, page, pageSize });
       }
 
       const uids = allUsers.map(u => u.uid);
@@ -217,7 +219,7 @@ export function registerAdminRoutes(app: Express) {
         ? users.filter(u => u.status === statusFilter)
         : users;
 
-      res.json({ users: filtered, total: count || 0, recent: recent || 0, page, pageSize });
+      res.json({ users: filtered, total: count || 0, recent: recent || 0, directoryNotice, page, pageSize });
     } catch (err: any) {
       console.error('[admin/users]', err);
       res.status(500).json({ error: err?.message || 'Failed to load users.' });
@@ -233,8 +235,9 @@ export function registerAdminRoutes(app: Express) {
       const uid = String(req.params.uid);
 
       // Profile
-      const { data: user } = await adminDb.from('app_users')
+      const { data: user, error: profileError } = await adminDb.from('app_users')
         .select('*').eq('uid', uid).maybeSingle();
+      if (profileError) throw profileError;
       if (!user) return res.status(404).json({ error: 'User not found.' });
 
       // Access

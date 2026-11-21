@@ -169,7 +169,7 @@ export const fetchUsers = (params: { search?: string; status?: string; sort?: st
   if (params.sort) q.set('sort', params.sort);
   if (params.page) q.set('page', String(params.page));
   if (params.pageSize) q.set('pageSize', String(params.pageSize));
-  return adminFetchJson<{ users: UserRow[]; total: number; recent: number; page: number; pageSize: number }>(`/api/admin/users?${q}`);
+  return adminFetchJson<{ users: UserRow[]; total: number; recent: number; directoryNotice?: string; page: number; pageSize: number }>(`/api/admin/users?${q}`);
 };
 
 export const fetchUserDetail = (uid: string) =>

@@ -40,7 +40,7 @@ const AdminPanel = () => {
   const [adminOk, setAdminOk] = useState<boolean | null>(null);
   const [adminInfo, setAdminInfo] = useState<api.AdminMe | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>(
-    new URLSearchParams(location.search).has('drive') ? 'Settings' : 'Overview'
+    new URLSearchParams(location.search).has('drive') ? 'Settings' : 'Users'
   );
   const [error, setError] = useState('');
   const [needsPassword, setNeedsPassword] = useState(false);
@@ -345,6 +345,7 @@ const UsersTab = () => {
 
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [directoryNotice, setDirectoryNotice] = useState('');
   const [recent, setRecent] = useState(0);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -354,7 +355,7 @@ const UsersTab = () => {
     const refresh = async () => {
       try {
         const result = await api.fetchUsers({ search, page, pageSize: 50 });
-        if (active) { setUsers(result.users); setTotal(result.total); setRecent(result.recent); setError(''); }
+        if (active) { setUsers(result.users); setTotal(result.total); setRecent(result.recent); setDirectoryNotice(result.directoryNotice || ''); setError(''); }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Could not load users.');
       } finally { if (active) setLoading(false); }
@@ -369,6 +370,7 @@ const UsersTab = () => {
 
   return (
     <>
+      {directoryNotice && <p role="status" className="text-amber-400 mb-3">{directoryNotice}</p>}
       {error ? <p role="alert" className="text-red-400 mb-3">{error}</p> : !loading && <div className="flex gap-3 items-center mb-3 text-sm">
         <strong>{total} {search ? 'matching' : 'registered'} users</strong><span>{recent} active in last 5 minutes (all users)</span>
         {total > 50 && <><button disabled={page <= 1} onClick={()=>setPage(p=>p-1)}>Previous</button>
@@ -390,7 +392,7 @@ const UsersTab = () => {
         <table className="w-full text-sm">
           <thead><tr className="bg-canvas text-xs text-ink-3 uppercase">
             <th className="px-4 py-3 text-left">User</th>
-            <th className="px-4 py-3 text-left">Status</th>
+            <th className="px-4 py-3 text-left">Account access</th>
             <th className="px-4 py-3 text-right">Today</th>
             <th className="px-4 py-3 text-right">30d</th>
             <th className="px-4 py-3 text-left">Last Seen</th>
@@ -419,9 +421,9 @@ const UsersTab = () => {
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-xs">{u.usageToday}</td>
                 <td className="px-4 py-3 text-right font-mono text-xs">{u.usage30d}</td>
-                <td className="px-4 py-3 text-xs text-ink-3">{u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : '-'}</td>
+                <td className="px-4 py-3 text-xs text-ink-3">{Date.parse(u.last_seen_at) >= Date.now() - 300000 && <strong className="block text-green-400">Recently active</strong>}{u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : '-'}</td>
                 <td className="px-4 py-3 text-right text-xs">{u.daily_limit ?? 'default'}</td>
-                <td className="px-4 py-3"><ChevronRight size={14} className="text-ink-3" /></td>
+                <td className="px-4 py-3"><button className="btn btn-secondary btn-sm" aria-label={`View profile for ${u.name || u.email || u.uid}`} onClick={e=>{e.stopPropagation();setSelectedUid(u.uid);}}>View profile</button></td>
               </tr>
             ))}
             {users.length === 0 && !error && !loading && (
@@ -445,14 +447,22 @@ const UserDetailView = ({ uid, onBack }: { uid: string; onBack: () => void }) =>
   const [reasonInput, setReasonInput] = useState('');
   const [noteInput, setNoteInput] = useState('');
 
+  const [profileError, setProfileError] = useState('');
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setProfileError('');
     api.fetchUserDetail(uid).then(d => {
+      if (!active) return;
       setData(d);
       setLimitInput(d.access.daily_limit == null ? '' : String(d.access.daily_limit));
       setReasonInput(d.access.blocked_reason || '');
       setNoteInput(d.access.note || '');
-    }).catch(console.error).finally(() => setLoading(false));
-  }, [uid]);
+    }).catch(e => { if (active) setProfileError(e.message || 'Could not load profile.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [uid, retry]);
 
   const patchUser = async (body: any) => {
     setSaving(true);
@@ -465,7 +475,9 @@ const UserDetailView = ({ uid, onBack }: { uid: string; onBack: () => void }) =>
   };
 
   if (loading) return <div className="flex justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-ink-3" /></div>;
-  if (!data) return <p className="text-ink-3">User not found.</p>;
+  if (profileError || !data) return <div><p role="alert">{profileError || 'User not found.'}</p>
+    <button className="btn btn-secondary" onClick={onBack}>Back to users</button>
+    <button className="btn btn-secondary" onClick={()=>setRetry(v=>v+1)}>Retry</button></div>;
 
   const u = data.user;
   const a = data.access;
@@ -557,6 +569,11 @@ const UserDetailView = ({ uid, onBack }: { uid: string; onBack: () => void }) =>
             </div>
           </div>
 
+          <div className="bg-surface p-5 rounded-2xl border border-line">
+            <h4 className="text-sm font-bold mb-3">Tools used in the last 30 days</h4>
+            {data.featureSplit.length ? <ul className="space-y-1 text-sm">{data.featureSplit.map(f=><li className="flex justify-between" key={f.feature}><span>{f.feature}</span><span>{f.requests} requests</span></li>)}</ul>
+              : <p className="text-sm text-ink-3">No recorded tool usage in this period.</p>}
+          </div>
           <div className="bg-surface p-5 rounded-2xl border border-line">
             <h4 className="text-sm font-bold mb-3">Recent Activity</h4>
             <div className="max-h-80 overflow-y-auto">

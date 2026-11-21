@@ -160,11 +160,17 @@ export const cropImage = async (base64: string, bbox: { ymin: number, xmin: numb
       canvas.width = Math.max(1, Math.round(width));
       canvas.height = Math.max(1, Math.round(height));
 
-      // Use the integer values for drawing
-      ctx.drawImage(img, x, y, width, height, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/png'));
+      // Use the integer values for drawing. A throw here (e.g. tainted canvas) must reject,
+      // otherwise the promise never settles and the crop dialog stays stuck.
+      try {
+        ctx.drawImage(img, x, y, width, height, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('Could not crop image'));
+      }
     };
     img.onerror = () => reject(new Error("Failed to load image for cropping"));
+    if (!/^(data|blob):/i.test(base64)) img.crossOrigin = 'anonymous';
     img.src = base64;
   });
 };

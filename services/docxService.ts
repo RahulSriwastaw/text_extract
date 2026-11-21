@@ -89,8 +89,15 @@ const cleanBilingualDuplicates = (text: string): string => {
   });
 
   // 3. Ensure bilingual options stay on ONE single line with ' / ' (e.g. '(b) सम / Even')
+  // NEVER treat question stems, instructions, or sentences with '?' or question words as option translations!
   cleaned = cleaned.replace(/^(\s*\([a-eA-E]\)\s+[^\n/]+?)\r?\n\s*([a-zA-Z][^\n]+)$/gm, (match, optHindi, optEng) => {
-    return optHindi.trim() + ' / ' + optEng.trim();
+    const trimmedEng = optEng.trim();
+    if (trimmedEng.includes('?') ||
+        /^(What|Which|Where|When|Who|Whom|Whose|Why|How|If|In\b|The\b|Find\b|Calculate\b|Evaluate\b|Simplify\b|Choose\b|Select\b|Speed\b|Consider\b|According\b|Directions?\b|Question\b|Note\b|Instruction\b|\*)/i.test(trimmedEng) ||
+        trimmedEng.length > 80) {
+      return match;
+    }
+    return optHindi.trim() + ' / ' + trimmedEng;
   });
 
   // 4. Option level duplicates: e.g. '(a) 123 / 123' -> '(a) 123', '(b) 45.5% / 45.5%' -> '(b) 45.5%'
@@ -756,10 +763,10 @@ export function fixDanglingMathOnLine(line: string): string {
            .replace(/°/g, '^\\circ ')
            .replace(/·/g, ' \\cdot ');
 
-    // Normalize bare trig & math function names without backslash
-    mb = mb.replace(/(?<!\\)\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\s*([a-zA-Z0-9\(\[\{])/g, '\\$1 $2');
-    mb = mb.replace(/(?<!\\)\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\b(?![a-zA-Z])/g, '\\$1');
-    mb = mb.replace(/(?<![a-zA-Z\\])(sin|cos|tan|sec|csc|cot|cosec)([A-Z])/g, '\\$1 $2');
+    // Normalize bare trig & math function names without backslash (never touch /sec, cm/sec, m/sec, etc.)
+    mb = mb.replace(/(?<![\\\/a-zA-Z])\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\s*([a-zA-Z0-9\(\[\{])/g, '\\$1 $2');
+    mb = mb.replace(/(?<![\\\/a-zA-Z])\b(sin|cos|tan|sec|csc|cot|cosec|log|ln|lim)\b(?![a-zA-Z])/g, '\\$1');
+    mb = mb.replace(/(?<![a-zA-Z\\\/])(sin|cos|tan|sec|csc|cot|cosec)([A-Z])/g, '\\$1 $2');
 
     mb = mb.replace(/\s+/g, ' ').trim();
     return `$$${mb}$$`;
@@ -770,6 +777,7 @@ export function fixDanglingMathOnLine(line: string): string {
 
 function cleanMixedMathText(text: string): string {
     if (!text) return text;
+    text = text.replace(/\b(cm|m|km)\s*\/\s*\\?sec\b/gi, '$1/s').replace(/\/\s*\\?sec\b/gi, '/s');
     text = formatChemicalReactions(text);
     text = text.replace(/(\d)\s*[\u00D7\*]\s*(\d)/g, '$1 \\times $2');
 
@@ -915,6 +923,13 @@ function wrapAllLatexExpressions(text: string): string {
                             } else {
                                 break;
                             }
+                        } else if (char === ' ' && endIdx + 1 < segment.length) {
+                            const rest = segment.substring(endIdx).trimStart();
+                            if (/^(?:\\[a-zA-Z]+|[<>=+\-*\/\d\w\(])/.test(rest)) {
+                                endIdx += segment.substring(endIdx).indexOf(rest);
+                                continue;
+                            }
+                            break;
                         } else {
                             break;
                         }
@@ -941,9 +956,17 @@ function wrapAllLatexExpressions(text: string): string {
     });
 
     let wrapped = resultLines.join('\n');
-    // Wrap standalone scientific notation or powers like 10^8 not already in $...$
-    wrapped = wrapped.replace(/(?<!\$|\w)(\d+(?:\.\d+)?\s*\\times\s*\d+(?:\.\d+)?\^[0-9\-]+(?:\s*(?:cm|m|mm|km|kg|g|s|h|sec|min|km\/h|m\/s))?)(?!\$)/g, '$$$1$$');
-    wrapped = wrapped.replace(/(?<!\$|\w)(\d+\^[0-9\-]+)(?!\$)/g, '$$$1$$');
+    // Wrap standalone scientific notation or powers like 10^8 ONLY in non-math segments!
+    const mathSegments = wrapped.split(/(\$\$[\s\S]*?\$\$)/g);
+    wrapped = mathSegments.map(segment => {
+        if (segment.startsWith('$$') && segment.endsWith('$$')) {
+            return segment; // DO NOT corrupt existing math blocks!
+        }
+        let nonMath = segment;
+        nonMath = nonMath.replace(/(?<!\$|\w)(\d+(?:\.\d+)?\s*\\times\s*\d+(?:\.\d+)?\^[0-9\-]+(?:\s*(?:cm\/s|m\/s|km\/h|cm|m|mm|km|kg|g|s|h|sec|min))?)(?!\$)/g, '$$$1$$');
+        nonMath = nonMath.replace(/(?<!\$|\w)(\d+\^[0-9\-]+)(?!\$)/g, '$$$1$$');
+        return nonMath;
+    }).join('');
     return wrapped;
 }
 
@@ -1016,6 +1039,12 @@ function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?:
                     cleanText = subPart.slice(2, -2); // Remove **
                 }
 
+                let isItalic = false;
+                if (cleanText.startsWith('*') && cleanText.endsWith('*') && cleanText.length >= 2 && !cleanText.startsWith('**')) {
+                    isItalic = true;
+                    cleanText = cleanText.slice(1, -1); // Remove *
+                }
+
                 const subLines = cleanText.split('\n');
                 return subLines.map((lineText, lIdx) => {
                     const runProps: any = {
@@ -1023,6 +1052,7 @@ function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?:
                         font: "Arial",
                         size: 22,
                         bold: isBold,
+                        italics: isItalic,
                         noProof: true
                     };
                     if (lIdx > 0) {
@@ -1315,8 +1345,10 @@ export const generateDocx = async (
         const isAnswerLine = /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText);
         const isTableRow = (line.startsWith('|') && line.endsWith('|')) || (line.startsWith('|') && line.split('|').length > 2);
         const isBlockquote = line.startsWith('>');
+        const isEnglishQuestion = /^(What|Which|Where|When|Who|Whom|Whose|Why|How|If|In\b|The\b|Find\b|Calculate\b|Evaluate\b|Simplify\b|Choose\b|Select\b|Speed\b|Consider\b|According\b|Directions?)\b/i.test(cleanLineText) || /\?\s*$/.test(cleanLineText);
+        const isInstructionOrNote = /^(\*|Note|Instructions?|General\s*Instructions?)/i.test(cleanLineText);
 
-        const isNewBlock = isHeader || isMetadata || isInstruction || isSeparator || isFullEquation || isMainQuestion || isSubQuestion || isOption || isAnswerLine || isTableRow || isBlockquote;
+        const isNewBlock = isHeader || isMetadata || isInstruction || isSeparator || isFullEquation || isMainQuestion || isSubQuestion || isOption || isAnswerLine || isTableRow || isBlockquote || isEnglishQuestion || isInstructionOrNote;
 
         if (isNewBlock) {
             if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
@@ -1327,8 +1359,13 @@ export const generateDocx = async (
             const isPrevOption = /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanBuf);
             
             if (isPrevOption) {
-                // If previous line was an option, ALWAYS join with ' / ' on the same line!
-                currentLineBuffer += " / " + line;
+                // If previous line was an option, NEVER join question stems, instructions or lines with '?'
+                if (isEnglishQuestion || isInstructionOrNote || line.includes('?')) {
+                    if (currentLineBuffer) lines.push(currentLineBuffer.replace(/ \[\[MATH_BR\]\] /g, '\n'));
+                    currentLineBuffer = line;
+                } else {
+                    currentLineBuffer += " / " + line;
+                }
             } else if (isPrevQuestion) {
                 const prevHasHindi = /[\u0900-\u097F]/.test(cleanBuf);
                 const currHasHindi = /[\u0900-\u097F]/.test(line);

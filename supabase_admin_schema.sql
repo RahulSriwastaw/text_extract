@@ -175,14 +175,21 @@ $$;
 
 -- =============================================================
 -- Seed app_users from existing public.users (one-time migration)
+-- Skipped safely if public.users does not exist yet.
 -- =============================================================
-INSERT INTO public.app_users (uid, email, name, photo_url, first_seen_at, last_seen_at)
-SELECT
-  id,
-  COALESCE(email, ''),
-  COALESCE(display_name, ''),
-  COALESCE(photo_url, ''),
-  COALESCE(created_at, now()),
-  COALESCE(updated_at, now())
-FROM public.users
-ON CONFLICT (uid) DO NOTHING;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users') THEN
+    INSERT INTO public.app_users (uid, email, name, photo_url, first_seen_at, last_seen_at)
+    SELECT
+      id,
+      COALESCE(email, ''),
+      COALESCE(display_name, ''),
+      COALESCE(photo_url, ''),
+      COALESCE(created_at, now()),
+      COALESCE(updated_at, now())
+    FROM public.users
+    ON CONFLICT (uid) DO NOTHING;
+  END IF;
+END
+$$;

@@ -28,6 +28,8 @@ export function AdminDrive({ headers }: { headers: () => Record<string,string> }
     setBusy(true);
     try {
       const r=await fetch('/api/admin/drive/connect',{method:'POST',headers:headers()});
+      if (!r.headers.get('content-type')?.includes('application/json'))
+        throw new Error('Google connection backend failed (HTTP ' + r.status + '). Check server logs and redeploy the latest fix.');
       const data=await r.json();
       if(!r.ok) throw Error(data.error);
       location.assign(data.url);

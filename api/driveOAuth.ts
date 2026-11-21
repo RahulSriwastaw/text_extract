@@ -1,20 +1,19 @@
 import type { Express, RequestHandler } from 'express';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
+import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
+import { checkOAuthStorage, saveRefreshToken, readRefreshToken } from './oauthStorage.js';
 
 export function registerDriveOAuth(app: Express, admin: RequestHandler) {
-  // Persist pending handshakes across development-server restarts.
-  const attemptsDir = path.resolve('.drive-oauth.local');
   const cookieName = (state: string) => 'drive_oauth_' + state;
-
-  app.get('/api/admin/drive', admin, (_req,res) => res.json({
-    configured: !!(process.env.GOOGLE_DRIVE_CLIENT_ID && process.env.GOOGLE_DRIVE_CLIENT_SECRET),
-    connected: !!process.env.GOOGLE_DRIVE_REFRESH_TOKEN,
-    redirectUri: process.env.GOOGLE_DRIVE_REDIRECT_URI || '',
-    folder: process.env.GOOGLE_DRIVE_FOLDER_URL || '',
-    sheet: process.env.GOOGLE_QUESTIONS_SPREADSHEET_URL || '',
-  }));
+  const sign = (value: string) => createHmac('sha256',process.env.GOOGLE_DRIVE_CLIENT_SECRET!).update(value).digest('hex');
+  app.get('/api/admin/drive', admin, async (_req,res) => {
+    try { res.json({
+      configured: !!(process.env.GOOGLE_DRIVE_CLIENT_ID && process.env.GOOGLE_DRIVE_CLIENT_SECRET),
+      connected: !!(await readRefreshToken()),
+      redirectUri: process.env.GOOGLE_DRIVE_REDIRECT_URI || '',
+      folder: process.env.GOOGLE_DRIVE_FOLDER_URL || '',
+      sheet: process.env.GOOGLE_QUESTIONS_SPREADSHEET_URL || '',
+    }); } catch (e) { res.status(503).json({error:e instanceof Error ? e.message : 'Storage unavailable'}); }
+  });
   app.post('/api/admin/drive/connect', admin, (req,res) => {
     const client = process.env.GOOGLE_DRIVE_CLIENT_ID;
     const secret = process.env.GOOGLE_DRIVE_CLIENT_SECRET;
@@ -24,14 +23,10 @@ export function registerDriveOAuth(app: Express, admin: RequestHandler) {
     if (req.get('origin') !== target.origin) return res.status(400).json({
       error: 'Open the admin panel at ' + target.origin + '/admin and connect there so the Google callback uses the same browser host.'
     });
-    fs.mkdirSync(attemptsDir, { recursive: true, mode: 0o700 });
-    for (const name of fs.readdirSync(attemptsDir)) {
-      const file = path.join(attemptsDir,name);
-      if (/^[a-f0-9]{64}\.json$/.test(name) && fs.statSync(file).mtimeMs < Date.now()-600000) fs.unlinkSync(file);
-    }
-    const state = randomBytes(32).toString('hex'), cookie = randomBytes(32).toString('hex');
-    fs.writeFileSync(path.join(attemptsDir,state+'.json'),JSON.stringify({cookie,expires:Date.now()+600000,redirect}),{mode:0o600,flag:'wx'});
-    res.cookie(cookieName(state),cookie,{httpOnly:true,sameSite:'lax',secure:redirect.startsWith('https:'),maxAge:600000,path:'/api/admin/drive'});
+    try { checkOAuthStorage(); } catch(e) { return res.status(503).json({error:e instanceof Error ? e.message : 'Storage missing'}); }
+    const state = randomBytes(32).toString('hex');
+    const payload = Buffer.from(JSON.stringify({state,expires:Date.now()+600000,redirect})).toString('base64url');
+    res.cookie(cookieName(state),payload+'.'+sign(payload),{httpOnly:true,sameSite:'lax',secure:redirect.startsWith('https:'),maxAge:600000,path:'/api/admin/drive'});
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({client_id:client,redirect_uri:redirect,response_type:'code',access_type:'offline',prompt:'consent',
       scope:'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets',state}).toString();
@@ -39,16 +34,18 @@ export function registerDriveOAuth(app: Express, admin: RequestHandler) {
   });
   app.get('/api/admin/drive/callback', async(req,res) => {
     const state = typeof req.query.state === 'string' ? req.query.state : '';
-    let attempt: { cookie: string; expires: number; redirect: string } | undefined;
-    const file = /^[a-f0-9]{64}$/.test(state) ? path.join(attemptsDir,state+'.json') : undefined;
-    try { if (file) attempt = JSON.parse(fs.readFileSync(file,'utf8')); } catch {}
+    if (!/^[a-f0-9]{64}$/.test(state) || !process.env.GOOGLE_DRIVE_CLIENT_SECRET) return res.status(400).send('Invalid authorization state. Connect again.');
     const prefix = cookieName(state) + '=';
-
     const cookie = req.headers.cookie?.split(';').map(v=>v.trim()).find(v=>v.startsWith(prefix))?.slice(prefix.length) || '';
-    if (!attempt || attempt.expires < Date.now() || cookie.length !== attempt.cookie.length ||
-      !timingSafeEqual(Buffer.from(cookie),Buffer.from(attempt.cookie))) return res.status(400).send('Authorization expired or invalid. Open admin panel and connect again.');
-    // Consume synchronously before exchanging the code to reject callback replay.
-    try { fs.unlinkSync(file!); } catch { return res.status(400).send('Authorization already used. Connect again from admin.'); }
+    const [payload,signature] = cookie.split('.');
+    const expected = payload ? sign(payload) : '';
+    if (!signature || signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature),Buffer.from(expected)))
+      return res.status(400).send('Authorization expired or invalid. Connect again from admin.');
+    let attempt: {state:string;expires:number;redirect:string};
+    try { attempt = JSON.parse(Buffer.from(payload,'base64url').toString()); }
+    catch { return res.status(400).send('Invalid authorization cookie.'); }
+    if (attempt.state !== state || attempt.expires < Date.now() || attempt.redirect !== process.env.GOOGLE_DRIVE_REDIRECT_URI)
+      return res.status(400).send('Authorization expired. Connect again.');
     res.clearCookie(cookieName(state),{path:'/api/admin/drive'});
     const finish = (status: string) => res.redirect('/admin?drive='+status);
     if (req.query.error || typeof req.query.code !== 'string') return finish('cancelled');
@@ -59,15 +56,7 @@ export function registerDriveOAuth(app: Express, admin: RequestHandler) {
       })});
       const result = await response.json();
       if (!response.ok || typeof result.refresh_token !== 'string' || !/^[\w./~+-]+$/.test(result.refresh_token)) return finish('failed');
-      const file = path.resolve('.env');
-      const original = fs.readFileSync(file,'utf8');
-      const line = 'GOOGLE_DRIVE_REFRESH_TOKEN='+result.refresh_token;
-      const updated = /^GOOGLE_DRIVE_REFRESH_TOKEN=.*$/m.test(original)
-        ? original.replace(/^GOOGLE_DRIVE_REFRESH_TOKEN=.*$/m,line) : original+'\n'+line+'\n';
-      const temporary = file+'.oauth-'+randomBytes(8).toString('hex');
-      try { fs.writeFileSync(temporary,updated,{mode:0o600}); fs.renameSync(temporary,file); }
-      finally { if(fs.existsSync(temporary))fs.unlinkSync(temporary); }
-      process.env.GOOGLE_DRIVE_REFRESH_TOKEN=result.refresh_token;
+      await saveRefreshToken(result.refresh_token);
       finish('connected');
     } catch { finish('failed'); }
   });

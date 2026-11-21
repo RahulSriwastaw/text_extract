@@ -1,3 +1,4 @@
+import { readRefreshToken } from './oauthStorage.js';
 import { storageTarget } from './storageTarget.js';
 import sanitizeHtml from 'sanitize-html';
 
@@ -6,17 +7,18 @@ let tokenOwner = '';
 let refreshing: Promise<string> | undefined;
 
 export async function driveToken() {
-  const owner = [process.env.GOOGLE_DRIVE_CLIENT_ID, process.env.GOOGLE_DRIVE_REFRESH_TOKEN].join(':');
+  const refreshToken = await readRefreshToken();
+  const owner = [process.env.GOOGLE_DRIVE_CLIENT_ID, refreshToken].join(':');
   if (owner !== tokenOwner) { cached = undefined; tokenOwner = owner; }
   if (cached && cached.expires > Date.now()) return cached.token;
   if (refreshing) return refreshing;
-  const { GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, GOOGLE_DRIVE_REFRESH_TOKEN } = process.env;
-  if (!GOOGLE_DRIVE_CLIENT_ID || !GOOGLE_DRIVE_CLIENT_SECRET || !GOOGLE_DRIVE_REFRESH_TOKEN)
+  const { GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET } = process.env;
+  if (!GOOGLE_DRIVE_CLIENT_ID || !GOOGLE_DRIVE_CLIENT_SECRET || !refreshToken)
     throw new Error('Server storage setup incomplete: configure Google Drive OAuth credentials.');
   refreshing = (async () => {
     const response = await fetch('https://oauth2.googleapis.com/token', { method: 'POST',
       body: new URLSearchParams({ grant_type: 'refresh_token', client_id: GOOGLE_DRIVE_CLIENT_ID,
-        client_secret: GOOGLE_DRIVE_CLIENT_SECRET, refresh_token: GOOGLE_DRIVE_REFRESH_TOKEN }) });
+        client_secret: GOOGLE_DRIVE_CLIENT_SECRET, refresh_token: refreshToken }) });
     if (!response.ok) throw new Error('Drive authorization failed. Check the server OAuth credentials.');
     const data = await response.json();
     if (!data.access_token) throw new Error('Google did not issue a Drive access token.');

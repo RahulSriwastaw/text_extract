@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderHtmlLatex } from '../components/LatexRenderer';
 import { cleanMocktestText } from '../services/textCleanService';
-import { normalizeLatexLocally } from '../api/latexRepair';
+import { normalizeLatexLocally } from '../backend/latexRepair';
 
 test('discount and interest solutions keep equation boundaries through cleanup, repair and display', () => {
   for (const [label, next] of [['कुल छूट', 'नया मूल्य'], ['Total discount', 'New price']]) {

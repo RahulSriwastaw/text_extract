@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
-import { registerQuestionBank } from "../api/questionBank.js";
-import { saveQuestions } from "../api/questionSheet.js";
+import { registerQuestionBank } from "../backend/questionBank.js";
+import { saveQuestions } from "../backend/questionSheet.js";
 import { MOCKTEST_CSV_HEADERS } from "../services/mcqColumns.js";
 
 test("personal storage routes require sign-in even when general access is anonymous", async () => {

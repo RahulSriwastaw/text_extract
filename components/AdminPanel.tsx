@@ -343,21 +343,41 @@ const UsersTab = () => {
   const [loading, setLoading] = useState(true);
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
 
-  const load = useCallback(() => {
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [recent, setRecent] = useState(0);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
+  const load = () => setRevision(v => v + 1);
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const result = await api.fetchUsers({ search, page, pageSize: 50 });
+        if (active) { setUsers(result.users); setTotal(result.total); setRecent(result.recent); setError(''); }
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : 'Could not load users.');
+      } finally { if (active) setLoading(false); }
+    };
     setLoading(true);
-    api.fetchUsers({ search, pageSize: 100 }).then(d => setUsers(d.users)).catch(console.error).finally(() => setLoading(false));
-  }, [search]);
-
-  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
+    const start = setTimeout(refresh, 250);
+    const timer = setInterval(refresh, 60000);
+    return () => { active = false; clearTimeout(start); clearInterval(timer); };
+  }, [search, page, revision]);
 
   if (selectedUid) return <UserDetailView uid={selectedUid} onBack={() => { setSelectedUid(null); load(); }} />;
 
   return (
     <>
+      {error ? <p role="alert" className="text-red-400 mb-3">{error}</p> : !loading && <div className="flex gap-3 items-center mb-3 text-sm">
+        <strong>{total} {search ? 'matching' : 'registered'} users</strong><span>{recent} active in last 5 minutes (all users)</span>
+        {total > 50 && <><button disabled={page <= 1} onClick={()=>setPage(p=>p-1)}>Previous</button>
+        <span>Page {page} of {Math.ceil(total/50)}</span><button disabled={page*50 >= total} onClick={()=>setPage(p=>p+1)}>Next</button></>}
+      </div>}
       <div className="flex gap-3 mb-4">
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-3" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
+          <input value={search} onChange={e => { setPage(1); setSearch(e.target.value); }}
             placeholder="Search users by name or email..."
             className="w-full bg-surface border border-line rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:border-accent" />
         </div>
@@ -399,12 +419,12 @@ const UsersTab = () => {
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-xs">{u.usageToday}</td>
                 <td className="px-4 py-3 text-right font-mono text-xs">{u.usage30d}</td>
-                <td className="px-4 py-3 text-xs text-ink-3">{u.last_seen_at ? new Date(u.last_seen_at).toLocaleDateString() : '-'}</td>
+                <td className="px-4 py-3 text-xs text-ink-3">{u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : '-'}</td>
                 <td className="px-4 py-3 text-right text-xs">{u.daily_limit ?? 'default'}</td>
                 <td className="px-4 py-3"><ChevronRight size={14} className="text-ink-3" /></td>
               </tr>
             ))}
-            {users.length === 0 && !loading && (
+            {users.length === 0 && !error && !loading && (
               <tr><td colSpan={7} className="px-4 py-10 text-center text-ink-3">No users found</td></tr>
             )}
           </tbody>

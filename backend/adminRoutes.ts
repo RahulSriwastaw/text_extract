@@ -147,7 +147,7 @@ export function registerAdminRoutes(app: Express) {
 
       // Get all app_users with their access
       let query = adminDb.from('app_users')
-        .select('uid, email, name, photo_url, first_seen_at, last_seen_at');
+        .select('uid, email, name, photo_url, first_seen_at, last_seen_at', { count: 'exact' });
 
       if (search) {
         query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%`);
@@ -161,11 +161,14 @@ export function registerAdminRoutes(app: Express) {
         query = query.order('last_seen_at', { ascending: false });
       }
 
-      const { data: allUsers, count } = await query
+      const { count: recent, error: recentError } = await adminDb.from('app_users').select('uid', {count:'exact',head:true}).gte('last_seen_at',new Date(Date.now()-300000).toISOString());
+      if (recentError) throw recentError;
+      const { data: allUsers, count, error } = await query
         .range((page - 1) * pageSize, page * pageSize - 1);
 
+      if (error) throw error;
       if (!allUsers || allUsers.length === 0) {
-        return res.json({ users: [], total: count || 0, page, pageSize });
+        return res.json({ users: [], total: count || 0, recent: recent || 0, page, pageSize });
       }
 
       const uids = allUsers.map(u => u.uid);
@@ -214,7 +217,7 @@ export function registerAdminRoutes(app: Express) {
         ? users.filter(u => u.status === statusFilter)
         : users;
 
-      res.json({ users: filtered, total: count || 0, page, pageSize });
+      res.json({ users: filtered, total: count || 0, recent: recent || 0, page, pageSize });
     } catch (err: any) {
       console.error('[admin/users]', err);
       res.status(500).json({ error: err?.message || 'Failed to load users.' });

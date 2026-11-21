@@ -97,11 +97,11 @@ interface CachedAccess {
 const accessCache = new Map<string, CachedAccess>();
 const CACHE_TTL_MS = 60_000; // 60 s
 
-// Upsert throttle: at most once per 10 min per user per instance
+// Upsert throttle: at most once per minute per user per instance
 const lastUpsert = new Map<string, number>();
-const UPSERT_INTERVAL_MS = 10 * 60_000;
+const UPSERT_INTERVAL_MS = 60_000;
 
-async function upsertAppUser(user: VerifiedUser): Promise<void> {
+export async function upsertAppUser(user: VerifiedUser): Promise<void> {
   if (!adminDb) return;
   const now = Date.now();
   const last = lastUpsert.get(user.uid) || 0;
@@ -109,7 +109,7 @@ async function upsertAppUser(user: VerifiedUser): Promise<void> {
   lastUpsert.set(user.uid, now);
 
   try {
-    await adminDb.from('app_users').upsert(
+    const { error } = await adminDb.from('app_users').upsert(
       {
         uid: user.uid,
         email: user.email,
@@ -119,7 +119,9 @@ async function upsertAppUser(user: VerifiedUser): Promise<void> {
       },
       { onConflict: 'uid' }
     );
+    if (error) throw error;
   } catch (err) {
+    lastUpsert.delete(user.uid);
     console.warn('[auth] app_users upsert failed:', err);
   }
 }

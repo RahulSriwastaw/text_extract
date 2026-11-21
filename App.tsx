@@ -70,14 +70,22 @@ function ExistingApp() {
   // Fetch user status (blocked / limit) from /api/me
   useEffect(() => {
     if (!user) { setUserStatus(null); return; }
-    apiFetchJson('/api/me')
-      .then((data: any) => setUserStatus({
+    let active = true;
+    const refresh = () => {
+      if (document.hidden) return;
+      apiFetchJson('/api/me')
+      .then((data: any) => active && setUserStatus({
         status: data.status || 'active',
         daily_limit: data.daily_limit,
         used: data.used || 0,
         blocked_reason: data.blocked_reason,
       }))
-      .catch(() => setUserStatus(null));
+      .catch(() => active && setUserStatus(null));
+    };
+    refresh();
+    const timer = setInterval(refresh, 120000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { active = false; clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
   }, [user]);
 
   if (isAdmin) {

@@ -22,7 +22,9 @@ export function ClaudeModelSelect({ value, onChange }: { value: DirectModel; onC
       if (!response.ok) throw new Error();
       const data = await response.json();
       if (!controller.signal.aborted) {
-        setModels(data.models);
+        // Hide expensive models (opus, fable) from the dropdown
+        const filtered = (data.models as Model[]).filter(m => !/opus|fable/i.test(m.id));
+        setModels(filtered);
         setStatus('');
       }
     })().catch(() => { if (!controller.signal.aborted) setStatus('Model list unavailable. Check API settings.'); });

@@ -2,6 +2,7 @@ import katex from 'katex';
 import { LatexRepairRequest, LatexRepairResponse, MockTestMcqItem } from '../types';
 import { getAiSettings } from './aiDbService';
 import { pingStudyAiExtension, repairLatexWithStudyAiBridge } from './studyAiBridgeService';
+import { apiFetch } from './apiClient';
 
 // In-memory undo history map for item backups (stores previous versions of items before repair)
 const itemBackups = new Map<string, MockTestMcqItem[]>();
@@ -173,7 +174,7 @@ export async function repairLatexViaApi(request: LatexRepairRequest): Promise<La
   const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s safety timeout
 
   try {
-    const res = await fetch('/api/latex/repair', {
+    const res = await apiFetch('/api/latex/repair', {
       method: 'POST',
       headers,
       body: JSON.stringify(request),

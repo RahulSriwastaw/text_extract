@@ -1,11 +1,9 @@
-import { auth } from './firebase';
+import { apiFetch } from './apiClient';
 
 export async function uploadDriveFigure(imageData: string, filename: string, svg?: string) {
-  const user = auth?.currentUser;
-  if (!user) throw new Error('Sign in to TextExtract to upload a figure.');
-  const response = await fetch('/api/upload-figure', {
+  const response = await apiFetch('/api/upload-figure', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await user.getIdToken() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ imageData, filename, svg }),
   });
   const result = await response.json();

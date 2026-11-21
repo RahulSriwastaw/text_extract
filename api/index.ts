@@ -1,4 +1,5 @@
 import { registerDriveOAuth } from './driveOAuth.js';
+import { registerAdminRoutes } from './adminRoutes.js';
 import { saveQuestions } from './questionSheet.js';
 import { uploadDriveFigure } from './driveFigures.js';
 import { resolveClaudeModel } from './claudeModelSelection.js';
@@ -11,6 +12,7 @@ import type { FigureMode } from '../types.js';
 import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT, mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
 import {
   stripExamTagsAndJunk,
   cleanMocktestText,
@@ -26,6 +28,10 @@ import {
   repairEntireMcqItem,
   validateAndExtractLatex
 } from './latexRepair.js';
+import { pushAICall, setEngine, getUsageContext, usageMiddleware, setPages, recordClientEvent } from './usage.js';
+import { requireUser, requireAdmin, verifyUser, getDefaultDailyLimit, isAdminEmail, invalidateAccessCache } from './auth.js';
+import type { VerifiedUser } from './auth.js';
+import { adminDb, isAdminDbConfigured } from './db.js';
 
 try {
   process.loadEnvFile();
@@ -50,6 +56,18 @@ export const getFallbackModel = (): string => {
   if (claudeFallback) return claudeFallback;
   return 'claude-haiku-5-5';
 };
+
+/** Mask a full API key to a safe id: prefix + short hash. Never expose full keys. */
+export function maskKey(key: string): string {
+  const prefix = key.substring(0, 8);
+  const hash = createHash('sha256').update(key).digest('hex').substring(0, 8);
+  return `${prefix}...${hash}`;
+}
+
+/** Find the full key by its masked id. */
+function unmaskKey(maskedId: string, allKeys: string[]): string | undefined {
+  return allKeys.find(k => maskKey(k) === maskedId);
+}
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -129,10 +147,7 @@ app.post('/api/test-key', async (req, res) => {
   }
 });
 
-app.get('/api/debug-key', (req, res) => {
-  const k = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || process.env.GEMINI_API_KEY || '';
-  res.json({ key: k.slice(0, 8) + '...', length: k.length, provider: (process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY) ? 'claude' : 'gemini' });
-});
+// /api/debug-key removed — exposed full API keys (security fix)
 
 let globalKeyRotationIndex = 0;
 
@@ -340,48 +355,20 @@ app.get('/api/models/:provider', async (req, res) => {
   return res.status(503).json({ error: 'Model list unavailable. Check the provider API key.' });
 });
 
-// Admin Auth Middleware
-const checkAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const authHeader = req.headers.authorization;
-  const adminUser = process.env.ADMIN_USERNAME;
-  const adminPass = process.env.ADMIN_PASSWORD;
+// ---------------------------------------------------------------------------
+// Admin Auth — now uses Firebase Google login + ADMIN_EMAILS allowlist
+// (checkAdminAuth and /api/admin/login removed — replaced by requireAdmin from api/auth.ts)
+// ---------------------------------------------------------------------------
 
-  if (!adminUser || !adminPass) return res.status(503).json({ error: 'Set ADMIN_USERNAME and ADMIN_PASSWORD in .env.' });
-  if (!authHeader?.startsWith('Basic ')) {
-    return res.status(401).json({ error: "Authorization required" });
-  }
+registerDriveOAuth(app, requireAdmin);
 
-  const encoded = authHeader.split(' ')[1];
-  const decoded = Buffer.from(encoded, 'base64').toString();
-  const split = decoded.indexOf(':');
-  const user = decoded.slice(0, split);
-  const pass = decoded.slice(split + 1);
-
-  if (user === adminUser && pass === adminPass) {
-    next();
-  } else {
-    res.status(403).json({ error: "Invalid credentials" });
-  }
-};
-
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body;
-  const adminUser = process.env.ADMIN_USERNAME;
-  const adminPass = process.env.ADMIN_PASSWORD;
-
-  if (!adminUser || !adminPass) return res.status(503).json({
-    error: 'Admin login is not configured. Set ADMIN_USERNAME and ADMIN_PASSWORD in the server environment.'
-  });
-  if (username === adminUser && password === adminPass) {
-    res.json({ success: true });
-  } else {
-    res.status(401).json({ error: "Invalid username or password" });
-  }
+// GET /api/admin/me — confirms admin access
+app.get('/api/admin/me', requireAdmin, (req, res) => {
+  const admin: VerifiedUser = (res.locals as any).admin;
+  res.json({ uid: admin.uid, email: admin.email, name: admin.name, picture: admin.picture });
 });
 
-registerDriveOAuth(app, checkAdminAuth);
-
-app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
+app.get('/api/admin/stats', requireAdmin, (req, res) => {
   const allKeys = getAllKeys();
   const now = Date.now();
   const stats = allKeys.map(k => {
@@ -396,7 +383,7 @@ app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
     const dailyCooldownUntil = dailyExhaustedKeys.get(k) || 0;
     return {
       keyPrefix: k.substring(0, 8) + '...',
-      key: k,
+      keyId: maskKey(k),
       ...health,
       inFlight: activeInFlightRequests.get(k) || 0,
       isDead: deadKeys.has(k),
@@ -406,12 +393,11 @@ app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
     };
   });
   
-  // Also include dead keys
   const deadStats = Array.from(deadKeys).map(k => {
     const health = keyHealth.get(k) || { lastErrorTime: 0, lastSuccessTime: 0, consecutiveErrors: 0, totalErrors: 0, totalSuccesses: 0, cooldownUntil: 0 };
     return {
       keyPrefix: k.substring(0, 8) + '...',
-      key: k,
+      keyId: maskKey(k),
       ...health,
       inFlight: activeInFlightRequests.get(k) || 0,
       isDead: true,
@@ -424,23 +410,31 @@ app.get('/api/admin/stats', checkAdminAuth, (req, res) => {
   res.json({ keys: stats, deadKeys: deadStats });
 });
 
-app.post('/api/admin/dead-key', checkAdminAuth, (req, res) => {
-  const { key } = req.body;
-  if (key) {
-    deadKeys.add(key);
+app.post('/api/admin/dead-key', requireAdmin, (req, res) => {
+  const { keyId } = req.body;
+  const allKeys = getAllKeys();
+  const realKey = unmaskKey(keyId, allKeys);
+  if (realKey) {
+    deadKeys.add(realKey);
     res.json({ success: true });
   } else {
-    res.status(400).json({ error: "Key required" });
+    res.status(400).json({ error: "Key not found" });
   }
 });
 
-app.post('/api/admin/reset-key-health', checkAdminAuth, (req, res) => {
-  const { key } = req.body;
-  if (key) {
-    deadKeys.delete(key);
-    dailyExhaustedKeys.delete(key);
-    keyHealth.delete(key);
-    activeInFlightRequests.delete(key);
+app.post('/api/admin/reset-key-health', requireAdmin, (req, res) => {
+  const { keyId } = req.body;
+  if (keyId) {
+    const allKeys = getAllKeys();
+    const realKey = unmaskKey(keyId, allKeys);
+    if (realKey) {
+      deadKeys.delete(realKey);
+      dailyExhaustedKeys.delete(realKey);
+      keyHealth.delete(realKey);
+      activeInFlightRequests.delete(realKey);
+    } else {
+      return res.status(400).json({ error: "Key not found" });
+    }
   } else {
     deadKeys.clear();
     dailyExhaustedKeys.clear();
@@ -449,6 +443,9 @@ app.post('/api/admin/reset-key-health', checkAdminAuth, (req, res) => {
   }
   res.json({ success: true, message: "Key health and rotation states reset successfully." });
 });
+
+// Register all new admin read/write endpoints
+registerAdminRoutes(app);
 
 /**
  * Intelligent Concurrency-Aware API Key Selector with Instant Failover.
@@ -640,10 +637,14 @@ export async function runAIAction(
   userKeyInput?: string,
   maxRetries?: number, requested?: KeyPoolInfo['provider']
 ) {
-  const allKeys = getActiveKeyPool(userKeyInput, requested).keys;
+  const pool = getActiveKeyPool(userKeyInput, requested);
+  const allKeys = pool.keys;
   const effectiveRetries = maxRetries ?? Math.max(12, allKeys.length * 2);
   const triedKeys = new Set<string>();
   let lastError: any = null;
+
+  // Build a set of server-only keys (without user keys) for engine detection
+  const serverOnlyKeys = new Set(getActiveKeyPool('', requested).keys);
 
   for (let attempt = 0; attempt <= effectiveRetries; attempt++) {
     // If all keys have been tried in this request sequence, clear to allow subsequent attempt
@@ -676,6 +677,8 @@ export async function runAIAction(
     try {
       const result = await action(client);
       reportKeySuccess(key);
+      // Track whether the successful key was a server key or user's own key
+      setEngine(serverOnlyKeys.has(key) ? 'server' : 'own_key');
       return result;
     } catch (error: any) {
       lastError = error;
@@ -829,6 +832,15 @@ export async function callClaudeMessagesApi(
   }
 
   const data = await response.json();
+
+  // Capture token counts for usage tracking
+  pushAICall({
+    provider: 'claude',
+    model,
+    inputTokens: data?.usage?.input_tokens || 0,
+    outputTokens: data?.usage?.output_tokens || 0,
+  });
+
   const text = (data.content || [])
     .filter((c: any) => c.type === 'text')
     .map((c: any) => c.text || '')
@@ -917,6 +929,16 @@ export const callAIWithFallback = async (
         contents: effectiveContents,
         config: effectiveConfig
       });
+
+      // Capture Gemini token counts for usage tracking
+      const usageMeta = response?.usageMetadata;
+      pushAICall({
+        provider: 'gemini',
+        model: modelToUse,
+        inputTokens: usageMeta?.promptTokenCount || 0,
+        outputTokens: usageMeta?.candidatesTokenCount || usageMeta?.totalTokenCount || 0,
+      });
+
       const text = safeExtractResponseText(response);
       if (text) {
         return text;
@@ -1878,7 +1900,7 @@ const proofreadWithRetry = async (rawText: string, isBilingual: boolean = false,
   return runAIAction(executeProofread, userKey);
 };
 
-app.post('/api/extract', async (req, res) => {
+app.post('/api/extract', requireUser, usageMiddleware('extract'), async (req, res) => {
   const controller = new AbortController();
   res.once('close', () => { if (!res.writableEnded) controller.abort(); });
   try {
@@ -1927,7 +1949,7 @@ app.post('/api/extract', async (req, res) => {
   }
 });
 
-app.post('/api/proofread', async (req, res) => {
+app.post('/api/proofread', requireUser, usageMiddleware('proofread'), async (req, res) => {
   try {
     const { rawText, isBilingual } = req.body;
     const userKey = getUserKey(req);
@@ -1965,7 +1987,7 @@ ${HTML_LATEX_FORMAT_RULES}
   * Avoid short 1-2 line summaries. Ensure the explanation is detailed, clear, and instructive.
 - NO OPTION LETTERS IN SOLUTIONS: Never write "Option A is correct" or "सही विकल्प A है" (options shuffle dynamically). State facts, concept, and calculated values directly!`;
 
-app.post('/api/mocktest-solve', async (req, res) => {
+app.post('/api/mocktest-solve', requireUser, usageMiddleware('mocktest-solve'), async (req, res) => {
   try {
     const { question_hi, question_en, option1_hi, option2_hi, option3_hi, option4_hi, option5_hi, option1_en, option2_en, option3_en, option4_en, option5_en, answer, question_type } = req.body;
     const userKey = getUserKey(req);
@@ -2051,7 +2073,7 @@ Output ONLY valid JSON:
   }
 });
 
-app.post('/api/mocktest-repair-item', async (req, res) => {
+app.post('/api/mocktest-repair-item', requireUser, usageMiddleware('mocktest-repair-item'), async (req, res) => {
   try {
     const { item } = req.body;
     if (!item) {
@@ -2145,7 +2167,7 @@ Respond ONLY with a valid JSON object:
   }
 });
 
-app.post('/api/mocktest-reverify', async (req, res) => {
+app.post('/api/mocktest-reverify', requireUser, usageMiddleware('mocktest-reverify'), async (req, res) => {
   try {
     const { item, primaryImage, secondaryImage, missingFields } = req.body;
     if (!item) {
@@ -2256,7 +2278,7 @@ ${STRICT_MATH_AND_TEXT_PROMPT_RULES}
   }
 });
 
-app.post('/api/mocktest-extract', async (req, res) => {
+app.post('/api/mocktest-extract', requireUser, usageMiddleware('mocktest-extract'), async (req, res) => {
   try {
     const { base64Image, rawText, setName = 'Exam Paper', pendingContext, pageNumber, generateSimilar = false } = req.body;
     const userKey = getUserKey(req);
@@ -2532,7 +2554,7 @@ Output ONLY a valid JSON array of objects:
   }
 });
 
-app.post('/api/mocktest-generate-similar-item', async (req, res) => {
+app.post('/api/mocktest-generate-similar-item', requireUser, usageMiddleware('mocktest-generate-similar-item'), async (req, res) => {
   try {
     const { item } = req.body;
     if (!item) {
@@ -2626,7 +2648,7 @@ Output ONLY a JSON object matching this structure:
   }
 });
 
-app.post('/api/mocktest-proofread', async (req, res) => {
+app.post('/api/mocktest-proofread', requireUser, usageMiddleware('mocktest-proofread'), async (req, res) => {
   try {
     const { items } = req.body;
     const userKey = getUserKey(req);
@@ -2708,7 +2730,7 @@ Respond ONLY with the JSON array of proofread objects inside \`\`\`json ... \`\`
   }
 });
 
-app.post('/api/mocktest-page-chat', async (req, res) => {
+app.post('/api/mocktest-page-chat', requireUser, usageMiddleware('mocktest-page-chat'), async (req, res) => {
   const { pageNumber, rows, source, history, request, image, claudeModel, geminiModel } = req.body || {};
   if (!Number.isInteger(pageNumber) || pageNumber < 1 || !Array.isArray(rows) || !Array.isArray(history) ||
     typeof request !== 'string' || !request.trim() || typeof source !== 'string' || (image && typeof image !== 'string')) {
@@ -2726,7 +2748,7 @@ app.post('/api/mocktest-page-chat', async (req, res) => {
   }
 });
 
-app.post('/api/figure-svg', async (req, res) => {
+app.post('/api/figure-svg', requireUser, usageMiddleware('figure-svg'), async (req, res) => {
   const { image, claudeModel, geminiModel } = req.body || {};
   if (typeof image !== 'string' || !image) return res.status(400).json({ error: 'A figure image is required.' });
   try {
@@ -2745,7 +2767,7 @@ app.post('/api/figure-svg', async (req, res) => {
   }
 });
 
-app.post('/api/mocktest-ai-chat', async (req, res) => {
+app.post('/api/mocktest-ai-chat', requireUser, usageMiddleware('mocktest-ai-chat'), async (req, res) => {
   try {
     const { item, userPrompt, history = [] } = req.body;
     if (!item || !userPrompt) {
@@ -2872,7 +2894,7 @@ Respond with ONLY a strict JSON object:
   }
 });
 
-app.post('/api/mocktest-add-question', async (req, res) => {
+app.post('/api/mocktest-add-question', requireUser, usageMiddleware('mocktest-add-question'), async (req, res) => {
   try {
     const { 
       text = '', 
@@ -3036,7 +3058,7 @@ Respond with ONLY a strict JSON object:
   }
 });
 
-app.post('/api/latex/repair', async (req, res) => {
+app.post('/api/latex/repair', requireUser, usageMiddleware('latex-repair'), async (req, res) => {
   try {
     const { content, contentType = 'content', selectedFormula, item, scope } = req.body;
     const userKey = getUserKey(req);
@@ -3091,36 +3113,20 @@ app.post('/api/latex/repair', async (req, res) => {
 
 // -------------------------------------------------------------
 // Endpoint: Upload & Store Cropped Question/Option Figure Images
+// (requireStorageUser replaced by requireUser from api/auth.ts)
 // -------------------------------------------------------------
-async function requireStorageUser(req: express.Request, res: express.Response, next: express.NextFunction) {
-  try {
-    const token = req.get('authorization')?.match(/^Bearer (\S+)$/)?.[1];
-    if (!token) return res.status(401).json({ error: 'Sign in to upload a figure.' });
-    const apiKey = process.env.VITE_FIREBASE_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'Server Firebase configuration is missing.' });
-    const lookup = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(apiKey), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken: token }),
-    });
-    const uid = lookup.ok && (await lookup.json()).users?.[0]?.localId;
-    if (!uid)
-      return res.status(401).json({ error: 'Session could not be verified. Sign in again.' });
-    res.locals.uid = uid;
-    next();
-  } catch {
-    res.status(503).json({ error: 'Could not verify the signed-in account.' });
-  }
-}
 
-app.post('/api/question-sheet', requireStorageUser, async (req, res) => {
+app.post('/api/question-sheet', requireUser, async (req, res) => {
   try {
-    const result = await saveQuestions(res.locals.uid, req.body.questions, req.body.setName);
+    const uid = (res.locals as any).user?.uid;
+    const result = await saveQuestions(uid, req.body.questions, req.body.setName);
     res.json(result);
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : 'Google Sheets save failed.' });
   }
 });
 
-app.post('/api/upload-figure', requireStorageUser, async (req, res) => {
+app.post('/api/upload-figure', requireUser, async (req, res) => {
   try {
     const { imageData, svg, filename } = req.body;
     if (typeof imageData !== 'string' || imageData.length > 16_000_000 ||
@@ -3131,6 +3137,80 @@ app.post('/api/upload-figure', requireStorageUser, async (req, res) => {
     return res.json(await uploadDriveFigure(imageData, name, svg));
   } catch (error) {
     return res.status(502).json({ error: error instanceof Error ? error.message : 'Drive upload failed.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/me — own status, limit, used today
+// ---------------------------------------------------------------------------
+app.get('/api/me', async (req, res) => {
+  const user = await verifyUser(req);
+  if (!user || !user.uid) {
+    return res.status(401).json({ error: 'Sign in to continue.', code: 'auth_required' });
+  }
+
+  const { istToday } = await import('./usage.js');
+  const today = istToday();
+  let status = 'active';
+  let daily_limit: number | null = null;
+  let used = 0;
+  let blocked_reason: string | null = null;
+
+  if (adminDb) {
+    try {
+      const { data: access } = await adminDb
+        .from('user_access')
+        .select('status, daily_limit, blocked_reason')
+        .eq('uid', user.uid)
+        .maybeSingle();
+      if (access) {
+        status = access.status || 'active';
+        daily_limit = access.daily_limit;
+        blocked_reason = access.blocked_reason;
+      }
+
+      if (daily_limit == null) {
+        daily_limit = await getDefaultDailyLimit();
+      }
+
+      const { data: dailyRows } = await adminDb
+        .from('usage_daily')
+        .select('requests, errors')
+        .eq('uid', user.uid)
+        .eq('day', today)
+        .eq('engine', 'server');
+      if (dailyRows) {
+        for (const r of dailyRows) {
+          used += (r.requests || 0) - (r.errors || 0);
+        }
+      }
+    } catch (err) {
+      console.warn('[/api/me] DB query failed:', err);
+    }
+  }
+
+  res.json({
+    uid: user.uid,
+    email: user.email,
+    name: user.name,
+    picture: user.picture,
+    status,
+    daily_limit,
+    used,
+    blocked_reason: status === 'blocked' ? blocked_reason : undefined,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/usage/event — client-reported bridge/own-key run
+// ---------------------------------------------------------------------------
+app.post('/api/usage/event', requireUser, async (req, res) => {
+  const user: VerifiedUser = (res.locals as any).user;
+  const result = await recordClientEvent(user.uid, req.body);
+  if (result.ok) {
+    res.json({ ok: true });
+  } else {
+    res.status(400).json({ error: result.error });
   }
 });
 

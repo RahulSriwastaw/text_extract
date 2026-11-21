@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, Send, X } from 'lucide-react';
 import type { MockTestMcqItem } from '../types';
 import { getAiSettings } from '../services/aiDbService';
+import { apiFetch } from '../services/apiClient';
 import { directModelFields, type DirectModel } from '../services/claudeModels';
 import { extractWithStudyAiBridge, type AiProvider } from '../services/studyAiBridgeService';
 import { safeParseAiJsonObject } from '../services/textCleanService';
@@ -55,7 +56,7 @@ export function MocktestPageChat({ page, items, history, engine, provider, model
         data = safeParseAiJsonObject(result.rawText.replace(result.expectedMarker, '').trim());
       } else {
         const { apiKey } = await getAiSettings();
-        const response = await fetch('/api/mocktest-page-chat', {
+        const response = await apiFetch('/api/mocktest-page-chat', {
           method: 'POST', signal: active.signal,
           headers: { 'Content-Type': 'application/json', ...(apiKey ? { 'x-user-key': apiKey.trim() } : {}) },
           body: JSON.stringify({ pageNumber: page.pageNumber, rows, source, history: recent, request,

@@ -564,6 +564,7 @@ export async function extractWithStudyAiBridge(
   }
 
   return new Promise((resolve, reject) => {
+    const startTime = Date.now();
     let timer: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
     let poll: ReturnType<typeof setInterval> | null = null;
@@ -641,6 +642,16 @@ export async function extractWithStudyAiBridge(
 
         const rawText = data.text || '';
         const elements = parseExtensionOutputToElements(rawText);
+        // Report bridge usage (best-effort, non-blocking)
+        import('./usageReporter').then(({ reportClientUsage }) =>
+          reportClientUsage({
+            feature: 'extract',
+            engine: 'bridge',
+            provider: provider || undefined,
+            pages: 1,
+            duration_ms: Date.now() - startTime,
+          })
+        ).catch(() => {});
         resolve({ rawText, elements, expectedMarker, chatUrl: data.chatUrl });
       }
     };

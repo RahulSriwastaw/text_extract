@@ -5,6 +5,7 @@ import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from
 import { getAiSettings } from './aiDbService';
 import { hasFigureImage } from './figureStorageService';
 import { pingStudyAiExtension, solveQuestionWithStudyAiBridge, repairQuestionWithStudyAiBridge } from './studyAiBridgeService';
+import { apiFetch } from './apiClient';
 
 export type { MockTestMcqItem };
 
@@ -1914,7 +1915,7 @@ export async function generateDeepSolutionForItem(
   }
 
   try {
-    const response = await fetch('/api/mocktest-solve', {
+    const response = await apiFetch('/api/mocktest-solve', {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -2024,7 +2025,7 @@ export async function repairMockTestItemWithAi(
   }
 
   try {
-    const response = await fetch('/api/mocktest-repair-item', {
+    const response = await apiFetch('/api/mocktest-repair-item', {
       method: 'POST',
       headers,
       body: JSON.stringify({ item: baseItem })
@@ -2822,7 +2823,7 @@ export async function extractMockTestWithDirectApi(
     }
 
     try {
-      const response = await fetch('/api/mocktest-extract', {
+      const response = await apiFetch('/api/mocktest-extract', {
         method: 'POST',
         headers,
         signal,
@@ -2880,7 +2881,7 @@ export async function extractMockTestWithDirectApi(
   }
 
   // Fallback to /api/extract only for exact extraction mode
-  const extractRes = await fetch('/api/extract', {
+  const extractRes = await apiFetch('/api/extract', {
     method: 'POST',
     headers,
     signal,
@@ -2922,7 +2923,7 @@ export async function generateSimilarQuestionItem(
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/mocktest-generate-similar-item', {
+  const response = await apiFetch('/api/mocktest-generate-similar-item', {
     method: 'POST',
     headers,
     body: JSON.stringify({ item })
@@ -2992,7 +2993,7 @@ export async function reverifyMockTestItemWithImages(
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/mocktest-reverify', {
+  const response = await apiFetch('/api/mocktest-reverify', {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -3064,7 +3065,7 @@ export async function proofreadMocktestItems(
     onProgress?.(`AI Proofreading chunk ${batchNum}/${totalBatches} (${chunk.length} MCQs)...`);
 
     try {
-      const res = await fetch('/api/mocktest-proofread', {
+      const res = await apiFetch('/api/mocktest-proofread', {
         method: 'POST',
         headers,
         body: JSON.stringify({ items: chunk })
@@ -3132,7 +3133,7 @@ export async function chatFixMockTestItemWithAi(
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/mocktest-ai-chat', {
+  const response = await apiFetch('/api/mocktest-ai-chat', {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -3182,7 +3183,7 @@ export async function addMockTestQuestionWithAi(params: {
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/mocktest-add-question', {
+  const response = await apiFetch('/api/mocktest-add-question', {
     method: 'POST',
     headers,
     body: JSON.stringify(params)

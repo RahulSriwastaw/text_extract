@@ -8,6 +8,7 @@
 import { getAiSettings, AiMessage } from './aiDbService';
 import { NumberingStyle, ExtractedElement, OptionArrangement } from '../types';
 import { pingStudyAiExtension, extractWithStudyAiBridge, getStoredAiProvider, buildBridgePrompt } from './studyAiBridgeService';
+import { apiFetch } from './apiClient';
 
 const GEMINI_MODEL = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_GEMINI_MODEL)
   ? (import.meta as any).env.VITE_GEMINI_MODEL
@@ -330,6 +331,17 @@ export async function generateWithUserGemini(
     }
   }
 
+  // Report own-key usage (best-effort)
+  import('./usageReporter').then(({ reportClientUsage }) =>
+    reportClientUsage({
+      feature: action || 'explain',
+      engine: 'own_key',
+      provider: 'gemini',
+      model: GEMINI_MODEL,
+      pages: 1,
+    })
+  ).catch(() => {});
+
   return fullText.trim();
 }
 
@@ -463,7 +475,7 @@ export async function testGeminiApiKey(apiKeyInput: string): Promise<{ success: 
   // Test the key via our server-side test endpoint to avoid CORS issues
   try {
     const testKey = keys[0];
-    const res = await fetch('/api/test-key', {
+    const res = await apiFetch('/api/test-key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

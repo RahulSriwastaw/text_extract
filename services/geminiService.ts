@@ -5,6 +5,7 @@ import { performOCR } from './ocrService';
 import { getAiSettings } from './aiDbService';
 import { extractLayoutWithUserGemini } from './userGeminiService';
 import { proofreadWithStudyAiBridge, pingStudyAiExtension } from './studyAiBridgeService';
+import { apiFetch } from './apiClient';
 
 export const extractLayoutFromImage = async (
   base64Image: string, 
@@ -36,7 +37,7 @@ export const extractLayoutFromImage = async (
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
 
-  const response = await fetch('/api/extract', {
+  const response = await apiFetch('/api/extract', {
     method: 'POST',
     signal,
     headers,
@@ -92,7 +93,7 @@ export async function recreateFigureSvg(image: string, model?: DirectModel, sign
     headers['x-user-claude-key'] = settings.apiKey.trim();
     headers['x-user-gemini-key'] = settings.apiKey.trim();
   }
-  const response = await fetch('/api/figure-svg', {
+  const response = await apiFetch('/api/figure-svg', {
     method: 'POST', signal, headers, body: JSON.stringify({ image, ...directModelFields(model) }),
   });
   const data = await response.json().catch(() => ({}));
@@ -121,7 +122,7 @@ export const proofreadMcqs = async (rawText: string, isBilingual: boolean = fals
   }
 
   try {
-    const response = await fetch('/api/proofread', {
+    const response = await apiFetch('/api/proofread', {
       method: 'POST',
       headers,
       body: JSON.stringify({ rawText, isBilingual }),

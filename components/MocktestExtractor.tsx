@@ -1,5 +1,6 @@
 import type { McqFigure } from '../types';
 import { auth } from '../services/firebase';
+import { apiFetch } from '../services/apiClient';
 import { ClaudeModelSelect } from './ClaudeModelSelect';
 import { directModelLabel } from '../services/claudeModels';
 import { McqFigureReview } from './McqFigureReview';
@@ -253,8 +254,8 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
     try {
       const account = auth?.currentUser;
       if (!account) throw new Error('Sign in to save questions to the shared sheet.');
-      const response = await fetch('/api/question-sheet', { method: 'POST', headers: {
-        'Content-Type': 'application/json', Authorization: 'Bearer ' + await account.getIdToken()
+      const response = await apiFetch('/api/question-sheet', { method: 'POST', headers: {
+        'Content-Type': 'application/json'
       }, body: JSON.stringify({ questions: extractedMcqs, setName: outputFileName || setName }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not save questions.');

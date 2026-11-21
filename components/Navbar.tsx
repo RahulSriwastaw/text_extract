@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Sparkles, History, Settings, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid } from 'lucide-react';
+import React, { useState, useEffect, useContext } from 'react';
+import { Sparkles, History, Settings, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge } from 'lucide-react';
+import { UserStatusContext } from '../App';
 import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { subscribeToExtensionStatus, pingStudyAiExtension, BridgeStatus } from '../services/studyAiBridgeService';
 import GeminiConnectModal from './GeminiConnectModal';
@@ -126,6 +127,7 @@ const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
+              <UsageIndicator />
               <div className="toolbar-divider mx-1 hidden sm:block" />
 
               <button
@@ -204,5 +206,19 @@ const Navbar: React.FC<NavbarProps> = ({
     </>
   );
 };
+
+/** Small "used / limit" indicator shown when a daily limit applies. */
+function UsageIndicator() {
+  const status = useContext(UserStatusContext);
+  if (!status || status.daily_limit == null) return null;
+  const pct = status.daily_limit > 0 ? Math.min(100, Math.round(status.used / status.daily_limit * 100)) : 0;
+  const isHigh = pct >= 80;
+  return (
+    <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-ink-3 px-2 py-1 rounded-lg bg-surface-2 border border-line" title={`Server-key requests today: ${status.used} / ${status.daily_limit}`}>
+      <Gauge size={13} className={isHigh ? 'text-orange-400' : 'text-ink-3'} />
+      <span className={isHigh ? 'text-orange-400 font-bold' : ''}>{status.used}/{status.daily_limit}</span>
+    </div>
+  );
+}
 
 export default Navbar;

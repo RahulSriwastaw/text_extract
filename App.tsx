@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import PdfConverter from './components/PdfConverter';
 import MocktestExtractor from './components/MocktestExtractor';
 import QaPageStitcher from './components/QaPageStitcher';
@@ -9,8 +9,22 @@ import LoginPage from './components/LoginPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
 import { useCurrentUser } from './services/authService';
-import { Sparkles } from 'lucide-react';
+import { apiFetchJson } from './services/apiClient';
+import { Sparkles, Ban, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+// ---------------------------------------------------------------------------
+// User status context (blocked / limit info from /api/me)
+// ---------------------------------------------------------------------------
+export interface UserStatus {
+  status: string;
+  daily_limit: number | null;
+  used: number;
+  blocked_reason?: string;
+}
+
+export const UserStatusContext = createContext<UserStatus | null>(null);
+export const useUserStatus = () => useContext(UserStatusContext);
 
 const UniversalCsvConverter = React.lazy(() => import('./components/UniversalCsvConverter'));
 const PdfSplitter = React.lazy(() => import('./components/PdfSplitter'));
@@ -44,16 +58,27 @@ function ExistingApp() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [preloadedPages, setPreloadedPages] = useState<string[]>([]);
   const [user, authLoading] = useCurrentUser();
+  const [userStatus, setUserStatus] = useState<UserStatus | null>(null);
 
   useEffect(() => {
-    // Check for admin path or param
-    const isPathAdmin = ['/admin', '/admin-secure-v3-panel-x92'].includes(window.location.pathname);
-    const params = new URLSearchParams(window.location.search);
-
-    if (isPathAdmin || params.get('admin') === 'true') {
+    // Admin panel at /admin only (old secret paths removed)
+    if (window.location.pathname === '/admin') {
       setIsAdmin(true);
     }
   }, []);
+
+  // Fetch user status (blocked / limit) from /api/me
+  useEffect(() => {
+    if (!user) { setUserStatus(null); return; }
+    apiFetchJson('/api/me')
+      .then((data: any) => setUserStatus({
+        status: data.status || 'active',
+        daily_limit: data.daily_limit,
+        used: data.used || 0,
+        blocked_reason: data.blocked_reason,
+      }))
+      .catch(() => setUserStatus(null));
+  }, [user]);
 
   if (isAdmin) {
     return (
@@ -85,8 +110,25 @@ function ExistingApp() {
     );
   }
 
+  // Blocked screen
+  if (userStatus?.status === 'blocked') {
+    return (
+      <div className="min-h-screen bg-canvas flex items-center justify-center p-6">
+        <div className="max-w-md bg-surface p-8 rounded-2xl border border-line text-center">
+          <Ban className="w-14 h-14 text-red-400 mx-auto mb-4" />
+          <h2 className="text-xl font-bold mb-2">Account Blocked</h2>
+          <p className="text-ink-3 text-sm mb-4">
+            {userStatus.blocked_reason || 'Your account has been blocked by an administrator. Contact support if you think this is a mistake.'}
+          </p>
+          <p className="text-xs text-ink-3">Signed in as {user.email}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ErrorBoundary>
+      <UserStatusContext.Provider value={userStatus}>
       <div className="min-h-screen bg-canvas">
         <Navbar 
           activeTool={activeTool}
@@ -175,6 +217,7 @@ function ExistingApp() {
           )}
         </AnimatePresence>
       </div>
+      </UserStatusContext.Provider>
     </ErrorBoundary>
   );
 }

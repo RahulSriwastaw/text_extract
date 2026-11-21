@@ -1,6 +1,7 @@
 import { ClaudeModelSelect } from './ClaudeModelSelect';
 import { useConverterSettings } from '../services/converterSettings';
 import { getReadyExport } from '../services/converterExport';
+import { apiFetch } from '../services/apiClient';
 import React, { useState, useEffect, useRef } from 'react';
 import { FileDown, RefreshCw, Wand2, AlertTriangle, AlertCircle, FileText, Copy, Check, Filter, Settings, Layout, Clock, Plus, ListChecks, Zap, Type, Sparkles, Layers, Bot, FileSpreadsheet, MoreHorizontal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -151,7 +152,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
       setBridgeStatus(status);
     });
     pingStudyAiExtension().catch(() => {});
-    fetch('/api/config')
+    apiFetch('/api/config')
       .then(r => r.json())
       .then(data => {
         if (data.totalKeys) setTotalKeys(data.totalKeys);

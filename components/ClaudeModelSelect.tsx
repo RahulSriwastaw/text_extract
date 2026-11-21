@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { defaultClaudeModel, type DirectModel } from '../services/claudeModels';
 import { getAiSettings } from '../services/aiDbService';
+import { apiFetch } from '../services/apiClient';
 
 type Model = { id: string; name: string; disabled: boolean };
 
@@ -15,7 +16,7 @@ export function ClaudeModelSelect({ value, onChange }: { value: DirectModel; onC
     setStatus('Loading models…');
     (async () => {
       const { apiKey } = await getAiSettings();
-      const response = await fetch('/api/models/' + provider, {
+      const response = await apiFetch('/api/models/' + provider, {
         headers: apiKey ? { 'x-user-key': apiKey.trim() } : {}, signal: controller.signal,
       });
       if (!response.ok) throw new Error();

@@ -14,7 +14,7 @@ function encryptionKey() {
   return createHash('sha256').update(secret).digest();
 }
 export function checkOAuthStorage() { store(); }
-export async function saveRefreshToken(token: string) {
+export async function saveRefreshToken(token: string, objectName = 'drive-token.enc') {
   const storage = store();
   const exists = await storage.getBucket(bucket);
   if (exists.error) {
@@ -23,15 +23,15 @@ export async function saveRefreshToken(token: string) {
   } else if (exists.data.public) throw new Error('Google credential bucket must be private.');
   const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm',encryptionKey(),iv);
   const payload = Buffer.concat([iv,cipher.update(token,'utf8'),cipher.final(),cipher.getAuthTag()]);
-  const result = await storage.from(bucket).upload('drive-token.enc',payload,{upsert:true,contentType:'application/octet-stream'});
+  const result = await storage.from(bucket).upload(objectName,payload,{upsert:true,contentType:'application/octet-stream'});
   if(result.error) throw new Error('Could not save Google authorization to private storage.');
 }
-export async function readRefreshToken() {
-  if (!process.env.SUPABASE_SECRET_KEY && !process.env.SUPABASE_SERVICE_ROLE_KEY) return process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '';
-  const result = await store().from(bucket).download('drive-token.enc');
+export async function readRefreshToken(objectName = 'drive-token.enc') {
+  if (!process.env.SUPABASE_SECRET_KEY && !process.env.SUPABASE_SERVICE_ROLE_KEY) return objectName === 'drive-token.enc' ? process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '' : '';
+  const result = await store().from(bucket).download(objectName);
   if(result.error) {
     if (String(result.error.statusCode) === '404' || /not found|does not exist/i.test(result.error.message))
-      return process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '';
+      return objectName === 'drive-token.enc' ? process.env.GOOGLE_DRIVE_REFRESH_TOKEN || '' : '';
     throw new Error('Google credential storage is unavailable.');
   }
   const data = Buffer.from(await result.data.arrayBuffer());

@@ -3,10 +3,13 @@ import { LogIn, LogOut, User as UserIcon, Loader2, Cloud } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCurrentUser, signInWithGoogle, signOutUser } from '../services/authService';
 
+import { QuestionBankSettings } from './QuestionBankSettings';
+
 const LoginButton: React.FC = () => {
   const [user, loading] = useCurrentUser();
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
+  const [showBank,setShowBank] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -90,6 +93,7 @@ const LoginButton: React.FC = () => {
         </span>
       </button>
 
+      {showBank && <QuestionBankSettings key={user.uid} close={()=>setShowBank(false)} />}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
@@ -107,6 +111,7 @@ const LoginButton: React.FC = () => {
                 <Cloud className="w-3.5 h-3.5" /> History syncing to your account
               </p>
             </div>
+            <button type="button" className="menu-item" onClick={()=>{setMenuOpen(false);setShowBank(true);}}>My question bank</button>
             <div className="menu-divider" />
             <button
               type="button"

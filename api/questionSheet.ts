@@ -10,9 +10,10 @@ type Grid = { sheetId: number; title: string; gridProperties?: { rowCount: numbe
 type Row = { values: { userEnteredValue: { stringValue: string } }[] };
 let queue = Promise.resolve();
 
-async function save(uid: string, questions: Record<string, unknown>[], setName: string) {
-  const { id, resourceKey } = storageTarget('sheet');
-  const token = await driveToken();
+export type SheetDestination = { id: string; token: string; resourceKey?: string };
+async function save(uid: string, questions: Record<string, unknown>[], setName: string, destination?: SheetDestination) {
+  const { id, resourceKey } = destination || storageTarget('sheet');
+  const token = destination?.token || await driveToken();
   const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent(id);
   async function sheets(path: string, body?: unknown) {
     const r = await fetch(base + path, { method: body ? 'POST' : 'GET',
@@ -29,17 +30,19 @@ async function save(uid: string, questions: Record<string, unknown>[], setName: 
   const oldRows = grid?.gridProperties?.rowCount || 0;
   const oldCols = grid?.gridProperties?.columnCount || 0;
   const keys = new Map<string, number>();
+  let needsHeader = !grid;
   if (grid) {
     const existing = await sheets('/values:batchGet?ranges=Questions!1:1&ranges=Questions!A:A');
     const first = existing.valueRanges[0].values?.[0];
-    if (JSON.stringify(first) !== JSON.stringify(headers)) throw new Error('Questions tab has a different header. Choose a workbook without a Questions tab or use the existing question bank.');
+    needsHeader = !first && !existing.valueRanges[1].values?.length;
+    if (!needsHeader && JSON.stringify(first) !== JSON.stringify(headers)) throw new Error('Questions tab has a different header. Choose a workbook without a Questions tab or use the existing question bank.');
     (existing.valueRanges[1].values || []).forEach((r: string[], i: number) => { if (i && r[0]) keys.set(r[0], i); });
   }
   let next = 1;
   for (const index of keys.values()) next = Math.max(next, index + 1);
   const changes = new Map<number, Row>();
   const row = (v: string[]): Row => ({ values: v.map(stringValue => ({ userEnteredValue: { stringValue } })) });
-  if (!grid) changes.set(0, row(headers));
+  if (needsHeader) changes.set(0, row(headers));
   for (const q of questions) {
     if (typeof q?.id !== 'string' || !q.id) throw new Error('Question ID missing.');
     const key = JSON.stringify([uid,q.id]);
@@ -51,7 +54,13 @@ async function save(uid: string, questions: Record<string, unknown>[], setName: 
     changes.set(index,row(values));
   }
   const rows = Math.max(next, oldRows), cols = Math.max(headers.length, oldCols);
-  const cells = allocated - oldRows * oldCols + rows * cols;
+  const exportGrid = destination ? grids.find(g => g.title === 'Export') : undefined;
+  // Keep the import-facing view synchronized with Questions, without rewriting either tab on retries.
+  const exportColumns = MOCKTEST_CSV_HEADERS.length;
+  const exportDelta = destination ? (exportGrid
+    ? Math.max(0, rows - (exportGrid.gridProperties?.rowCount || 0)) * (exportGrid.gridProperties?.columnCount || exportColumns)
+    : rows * exportColumns) : 0;
+  const cells = allocated - oldRows * oldCols + rows * cols + exportDelta;
   if (cells > limit) {
     console.warn('[question-sheet] Save would exceed workbook capacity', {allocated,cells,limit});
     throw new Error('This batch exceeds the workbook capacity. Configure a new sheet link and retry. No questions from this batch were written.');
@@ -60,6 +69,21 @@ async function save(uid: string, questions: Record<string, unknown>[], setName: 
   const requests: unknown[] = [];
   if (!grid) requests.push({ addSheet: { properties: { sheetId, title, gridProperties: { rowCount: rows, columnCount: cols, frozenRowCount: 1 } } } });
   else if (rows > oldRows) requests.push({ appendDimension: {sheetId, dimension:'ROWS', length:rows-oldRows} });
+  if (grid && cols > oldCols) requests.push({appendDimension:{sheetId: grid.sheetId,dimension:'COLUMNS',length:cols-oldCols}});
+  if (exportGrid) {
+    const view = await sheets('/values/Export!A1?valueRenderOption=FORMULA');
+    if (view.values?.[0]?.[0] !== '=ARRAYFORMULA(Questions!D:AK)') throw Error('An unrelated Export tab exists. Choose another spreadsheet.');
+  }
+  if (destination && !exportGrid) {
+    const exportId = sheetId === 0 ? 1 : 0;
+    let availableId = exportId;
+    while (availableId === sheetId || grids.some(g => g.sheetId === availableId)) availableId++;
+    requests.push({ addSheet: {properties:{sheetId:availableId,title:'Export',gridProperties:{rowCount:rows,columnCount:exportColumns,frozenRowCount:1}}}});
+    requests.push({ updateCells:{start:{sheetId:availableId,rowIndex:0,columnIndex:0},
+      rows:[{values:[{userEnteredValue:{formulaValue:'=ARRAYFORMULA(Questions!D:AK)'}}]}],fields:'userEnteredValue'}});
+  } else if (exportGrid && rows > exportGrid.gridProperties.rowCount) {
+    requests.push({appendDimension:{sheetId:exportGrid.sheetId,dimension:'ROWS',length:rows-exportGrid.gridProperties.rowCount}});
+  }
   let group: Row[] = [], previous = -2;
   for (const [index, data] of [...changes].sort(([a],[b]) => a-b)) {
     if (index !== previous + 1) {
@@ -76,9 +100,9 @@ async function save(uid: string, questions: Record<string, unknown>[], setName: 
 }
 
 // Serialize read/allocate/write across all users of this backend process.
-export function saveQuestions(uid: string, questions: Record<string, unknown>[], setName: string) {
+export function saveQuestions(uid: string, questions: Record<string, unknown>[], setName: string, destination?: SheetDestination) {
   if (!Array.isArray(questions) || !questions.length) throw new Error('No questions to save.');
-  const operation = queue.then(() => save(uid,questions,setName));
+  const operation = queue.then(() => save(uid,questions,setName,destination));
   queue = operation.then(() => {}, () => {});
   return operation;
 }

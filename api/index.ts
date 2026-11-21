@@ -1,3 +1,4 @@
+import { registerQuestionBank, personalImages } from './questionBank.js';
 import { registerDriveOAuth } from './driveOAuth.js';
 import { registerAdminRoutes } from './adminRoutes.js';
 import { saveQuestions } from './questionSheet.js';
@@ -3116,6 +3117,8 @@ app.post('/api/latex/repair', requireUser, usageMiddleware('latex-repair'), asyn
 // (requireStorageUser replaced by requireUser from api/auth.ts)
 // -------------------------------------------------------------
 
+registerQuestionBank(app);
+
 app.post('/api/question-sheet', requireUser, async (req, res) => {
   try {
     const uid = (res.locals as any).user?.uid;
@@ -3134,7 +3137,8 @@ app.post('/api/upload-figure', requireUser, async (req, res) => {
         (svg != null && (typeof svg !== 'string' || svg.length > 100000 || !/^\s*<svg\b/.test(svg))))
       return res.status(400).json({ error: 'Invalid figure or file too large.' });
     const name = typeof filename === 'string' ? filename.slice(0, 180) : 'figure-' + crypto.randomUUID();
-    return res.json(await uploadDriveFigure(imageData, name, svg));
+    const destination = res.locals.user.uid === 'anonymous' ? undefined : await personalImages(res.locals.user.uid);
+    return res.json(await uploadDriveFigure(imageData, name, svg, destination));
   } catch (error) {
     return res.status(502).json({ error: error instanceof Error ? error.message : 'Drive upload failed.' });
   }

@@ -1,3 +1,4 @@
+import { useBankProfile, bankRequest } from '../services/questionBank';
 import type { McqFigure } from '../types';
 import { auth } from '../services/firebase';
 import { apiFetch } from '../services/apiClient';
@@ -246,6 +247,7 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
   const [isSavedToHistory, setIsSavedToHistory] = useState(false);
   const currentSessionSetIdRef = useRef<string>('');
 
+  const bank = useBankProfile(user?.uid);
   const [sheetSaving, setSheetSaving] = useState(false);
   const [sheetMessage, setSheetMessage] = useState('');
   async function saveToSheet() {
@@ -254,6 +256,15 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
     try {
       const account = auth?.currentUser;
       if (!account) throw new Error('Sign in to save questions to the shared sheet.');
+      if (bank) {
+        const selected = pages.filter(p=>p.isSelected);
+        const ids = new Set(selected.flatMap(p=>(p.items || []).map(q=>q.id)));
+        const questions = pages.length ? extractedMcqs.filter(q=>ids.has(q.id) || selected.some(p=>q.pageId ? q.pageId===p.id : q.pageNumber===p.pageNumber)) : extractedMcqs;
+        if (!questions.length) throw Error('Select a page with extracted questions.');
+        const result = await bankRequest('questions',{questions,setName:outputFileName || setName});
+        setSheetMessage(result.saved+' saved to your QB. '+(result.masterError?'Team sheet pending. Retry Save to sync. '+result.masterError:'Team sheet synced.')+(result.warning?' Sheet capacity reached 95%.':''));
+        return;
+      }
       const response = await apiFetch('/api/question-sheet', { method: 'POST', headers: {
         'Content-Type': 'application/json'
       }, body: JSON.stringify({ questions: extractedMcqs, setName: outputFileName || setName }) });
@@ -2730,7 +2741,7 @@ Rules:
             </div>
 
             <button className="btn btn-secondary" disabled={sheetSaving || !extractedMcqs.length} onClick={saveToSheet}>
-              {sheetSaving ? 'Saving…' : 'Save to Sheets'}
+              {sheetSaving ? 'Saving…' : bank ? 'Save to my QB' : 'Save to Sheets'}
             </button>
             {sheetMessage && <span role="status" className="text-xs">{sheetMessage}</span>}
             {/* Save set to account history */}

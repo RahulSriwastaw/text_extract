@@ -40,7 +40,7 @@ export function safeFigureSvg(svg: string) {
   });
 }
 
-async function drive(token: string, path: string, options: RequestInit = {}) {
+export async function drive(token: string, path: string, options: RequestInit = {}) {
   const response = await fetch('https://www.googleapis.com/' + path, { ...options,
     headers: { Authorization: 'Bearer ' + token, ...options.headers } });
   if (!response.ok) {
@@ -51,9 +51,9 @@ async function drive(token: string, path: string, options: RequestInit = {}) {
   return response;
 }
 
-export async function uploadDriveFigure(imageData: string, filename: string, svg?: string) {
-  const { id: parent, resourceKey } = storageTarget('folder');
-  const token = await driveToken();
+export async function uploadDriveFigure(imageData: string, filename: string, svg?: string, destination?: { id: string; token: string; resourceKey?: string }) {
+  const { id: parent, resourceKey } = destination || storageTarget('folder');
+  const token = destination?.token || await driveToken();
   const created: string[] = [];
   async function upload(blob: Blob, name: string) {
     const boundary = 'figure-' + crypto.randomUUID();

@@ -1,3 +1,5 @@
+import { DriveDocument } from './DriveDocument';
+import { useBankProfile } from '../services/questionBank';
 import { ClaudeModelSelect } from './ClaudeModelSelect';
 import { useConverterSettings } from '../services/converterSettings';
 import { getReadyExport } from '../services/converterExport';
@@ -83,6 +85,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
   const [showGeminiSettings, setShowGeminiSettings] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [user] = useCurrentUser();
+  const bank = useBankProfile(user?.uid);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
@@ -1500,6 +1503,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                                     <button onClick={copyAllText} className="btn btn-ghost btn-icon" title="Copy all text" aria-label="Copy all text">
                                         {copySuccess ? <Check className="text-emerald-400" /> : <Copy />}
                                     </button>
+                                    {bank && <DriveDocument key={uid + bank.documents} name={fileName || 'document'} disabled={!readyExport.pageCount} generate={()=>generateDocx(readyExport.elements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers, mcqMode)} />}
                                     <button
                                         onClick={downloadDocx}
                                         disabled={!readyExport.pageCount}

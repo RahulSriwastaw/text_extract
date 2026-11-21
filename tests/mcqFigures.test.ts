@@ -29,6 +29,7 @@ test('MCQ figures keep the source page, target and bilingual field content throu
   assert.equal(serializeMockTestToCsv([item]).split(png).length - 1, 3);
   assert.equal(mcqFigureInstruction('off'), '');
   assert.match(mcqFigureInstruction('svg'), /static SVG/);
+  assert.match(mcqFigureInstruction('crop'), /do not transcribe its plotted values into a table/);
   let blob: Blob | undefined;
   const previous = globalThis.document;
   Object.defineProperty(globalThis, 'document', { configurable: true, value: {

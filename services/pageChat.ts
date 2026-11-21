@@ -1,5 +1,5 @@
 import type { MockTestMcqItem } from '../types';
-import { HTML_LATEX_FORMAT_RULES, normalizeHtmlLatex } from './htmlLatex';
+import { HTML_LATEX_FORMAT_RULES, normalizeHtmlLatex } from './htmlLatex.js';
 
 export type PageMessage = { role: 'user' | 'assistant'; text: string };
 const fields = [

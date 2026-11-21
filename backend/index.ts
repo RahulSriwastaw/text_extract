@@ -343,6 +343,9 @@ app.get('/api/models/:provider', async (req, res) => {
         const page = await response.json();
         for (const m of google ? page.models : page.data) {
           const id = google ? m.name.replace(/^models\//, '') : m.id;
+          // Hide expensive models (opus, fable) and unsupported Gemini models
+          const isHidden = /opus|fable/i.test(id);
+          if (isHidden) continue;
           const disabled = google && (!m.supportedGenerationMethods?.includes('generateContent') || /tts|native-audio|image-generation|image-preview|robotics|computer-use/i.test(id));
           models.push({ id, name: google ? m.displayName : m.display_name, disabled });
         }

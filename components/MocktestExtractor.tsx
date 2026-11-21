@@ -1,6 +1,7 @@
 import type { McqFigure } from '../types';
 import { auth } from '../services/firebase';
 import { ClaudeModelSelect } from './ClaudeModelSelect';
+import { directModelLabel } from '../services/claudeModels';
 import { McqFigureReview } from './McqFigureReview';
 import { QuestionFigureActions } from './QuestionFigureActions';
 import { mcqFigureInstruction } from '../services/figurePrompt';
@@ -1163,8 +1164,8 @@ Rules:
         // Direct API mode
         setLiveStatusText(
           isSimilar
-            ? `[Page ${page.pageNumber}] 🧠 Calling Gemini API to generate NEW practice MCQs from reference...`
-            : `[Page ${page.pageNumber}] Calling Gemini API with carry-over context...`
+            ? `[Page ${page.pageNumber}] 🧠 Calling ${directModelLabel(claudeModel)} to generate NEW practice MCQs from reference...`
+            : `[Page ${page.pageNumber}] Calling ${directModelLabel(claudeModel)} with carry-over context...`
         );
         const startIndex = extractedMcqs.length + 1;
         rawExtractedItems = await extractMockTestWithDirectApi(
@@ -1178,6 +1179,12 @@ Rules:
           abortController.signal, figureMode, claudeModel
         );
       }
+
+      // Only this page's image was attached, so every new figure bbox refers to this page.
+      // The model often numbers the single attachment as "page 1", which cropped the wrong page.
+      rawExtractedItems = rawExtractedItems.map(item => item.figures?.length
+        ? { ...item, figures: item.figures.map(figure => ({ ...figure, sourcePage: page.pageNumber })) }
+        : item);
 
       // 1. RECONCILE CARRY-OVER MERGE
       const { mergedPendingItems, freshPageItems, logMessage } = mergePendingCarryOver(

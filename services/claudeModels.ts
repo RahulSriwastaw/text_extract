@@ -6,6 +6,13 @@ export type ClaudeModel = typeof claudeModels[number];
 export const defaultClaudeModel: ClaudeModel = 'Opus 5.5';
 
 export type DirectModel = ClaudeModel | `gemini:${string}` | `anthropic:${string}`;
+/** Human-readable provider + model for status text, e.g. "Gemini gemini-2.5-flash" or "Claude Opus 5.5". */
+export function directModelLabel(model?: DirectModel) {
+  if (!model) return 'AI model';
+  if (model.startsWith('gemini:')) return `Gemini ${model.slice(7)}`;
+  if (model.startsWith('anthropic:')) return `Claude ${model.slice(10)}`;
+  return `Claude ${model}`;
+}
 export function directModelFields(model?: DirectModel) {
   return model?.startsWith('gemini:') ? { geminiModel: model.slice(7) } : { claudeModel: model };
 }

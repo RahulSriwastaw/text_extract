@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   BarChart3, Settings, Activity, Zap, ShieldCheck, AlertTriangle, CheckCircle2,
   Trash2, RefreshCw, Clock, Key, Users, FileText, Shield, Search, ChevronRight,
-  Ban, Unlock, Download, Eye, X, User as UserIcon, Hash, Globe, Cpu, ArrowLeft
+  Ban, Unlock, Download, Eye, X, User as UserIcon, Hash, Globe, Cpu, ArrowLeft, Coins
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -14,11 +14,12 @@ import { useCurrentUser, signInWithGoogle } from '../services/authService';
 import * as api from '../services/adminApi';
 import { setAdminPassword, getAdminPassword, clearAdminPassword } from '../services/adminApi';
 
-type Tab = 'Overview' | 'Users' | 'Reports' | 'Activity' | 'API Keys' | 'Settings' | 'Audit';
+type Tab = 'Overview' | 'Users' | 'Plans' | 'Reports' | 'Activity' | 'API Keys' | 'Settings' | 'Audit';
 
 const TABS: { name: Tab; icon: any }[] = [
   { name: 'Overview', icon: BarChart3 },
   { name: 'Users', icon: Users },
+  { name: 'Plans', icon: Coins },
   { name: 'Reports', icon: FileText },
   { name: 'Activity', icon: Activity },
   { name: 'API Keys', icon: Key },
@@ -31,6 +32,31 @@ const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4
 const fmt = (n: number) => n?.toLocaleString?.() ?? '0';
 const fmtDate = (s: string) => s ? new Date(s).toLocaleString() : '-';
 const fmtTime = (ms: number) => ms > 0 ? new Date(ms).toLocaleTimeString() : 'Never';
+/** Compact token count: 1.5M, 320K, 950 */
+const fmtTok = (n: number) => {
+  n = Number(n) || 0;
+  if (n >= 1e6) return +(n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return +(n / 1e3).toFixed(1) + 'K';
+  return String(n);
+};
+const daysLeft = (iso: string | null) => iso ? Math.ceil((Date.parse(iso) - Date.now()) / 86400000) : null;
+
+const PLAN_BADGE = {
+  none: { label: 'No plan', cls: 'bg-surface-2 text-ink-3' },
+  active: { label: 'Active', cls: 'bg-green-500/15 text-green-400' },
+  expired: { label: 'Expired', cls: 'bg-red-500/15 text-red-400' },
+  exhausted: { label: 'Tokens used up', cls: 'bg-orange-500/15 text-orange-400' },
+};
+
+const PlanBadge = ({ p }: { p: { plan_name?: string | null; plan_tokens: number | null; plan_tokens_used: number; plan_expires_at: string | null } }) => {
+  const state = api.planState(p);
+  const badge = PLAN_BADGE[state];
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${badge.cls}`}>
+      {state === 'none' ? badge.label : `${p.plan_name || 'Plan'} · ${badge.label}`}
+    </span>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Main AdminPanel
@@ -210,6 +236,7 @@ const AdminPanel = () => {
         <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
           {activeTab === 'Overview' && <OverviewTab />}
           {activeTab === 'Users' && <UsersTab />}
+          {activeTab === 'Plans' && <PlansTab />}
           {activeTab === 'Reports' && <ReportsTab />}
           {activeTab === 'Activity' && <ActivityTab />}
           {activeTab === 'API Keys' && <ApiKeysTab />}
@@ -274,7 +301,7 @@ const OverviewTab = () => {
         <KpiCard label="Active Today" value={fmt(k.activeToday)} sub={`7d: ${fmt(k.active7d)} / 30d: ${fmt(k.active30d)}`} icon={Activity} color="text-green-400" />
         <KpiCard label="Requests" value={fmt(k.totalRequests)} icon={Zap} color="text-yellow-400" />
         <KpiCard label="Error Rate" value={`${k.errorRate}%`} sub={`${fmt(k.totalErrors)} errors`} icon={AlertTriangle} color="text-red-400" />
-        <KpiCard label="Pages" value={fmt(k.totalPages)} icon={FileText} color="text-purple-400" />
+        <KpiCard label="Tokens" value={fmtTok(k.totalInputTokens + k.totalOutputTokens)} sub={`${fmt(k.totalPages)} pages`} icon={Coins} color="text-purple-400" />
         <KpiCard label="Blocked" value={fmt(k.blockedUsers)} icon={Ban} color="text-red-400" />
       </div>
 
@@ -393,10 +420,11 @@ const UsersTab = () => {
           <thead><tr className="bg-canvas text-xs text-ink-3 uppercase">
             <th className="px-4 py-3 text-left">User</th>
             <th className="px-4 py-3 text-left">Account access</th>
-            <th className="px-4 py-3 text-right">Today</th>
-            <th className="px-4 py-3 text-right">30d</th>
+            <th className="px-4 py-3 text-left">Plan</th>
+            <th className="px-4 py-3 text-right">Requests today</th>
+            <th className="px-4 py-3 text-right">Requests 30d</th>
+            <th className="px-4 py-3 text-right">Tokens 30d</th>
             <th className="px-4 py-3 text-left">Last Seen</th>
-            <th className="px-4 py-3 text-right">Limit</th>
             <th className="px-4 py-3"></th>
           </tr></thead>
           <tbody>
@@ -419,15 +447,24 @@ const UsersTab = () => {
                     {u.status}
                   </span>
                 </td>
+                <td className="px-4 py-3">
+                  <PlanBadge p={u} />
+                  {u.plan_tokens != null && (
+                    <p className="text-[11px] text-ink-3 mt-1 font-mono">
+                      {fmtTok(u.plan_tokens_used)} / {fmtTok(u.plan_tokens)}
+                      {daysLeft(u.plan_expires_at) != null && daysLeft(u.plan_expires_at)! > 0 && ` · ${daysLeft(u.plan_expires_at)}d left`}
+                    </p>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right font-mono text-xs">{u.usageToday}</td>
                 <td className="px-4 py-3 text-right font-mono text-xs">{u.usage30d}</td>
+                <td className="px-4 py-3 text-right font-mono text-xs">{fmtTok(u.tokens30d)}</td>
                 <td className="px-4 py-3 text-xs text-ink-3">{Date.parse(u.last_seen_at) >= Date.now() - 300000 && <strong className="block text-green-400">Recently active</strong>}{u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : '-'}</td>
-                <td className="px-4 py-3 text-right text-xs">{u.daily_limit ?? 'default'}</td>
                 <td className="px-4 py-3"><button className="btn btn-secondary btn-sm" aria-label={`View profile for ${u.name || u.email || u.uid}`} onClick={e=>{e.stopPropagation();setSelectedUid(u.uid);}}>View profile</button></td>
               </tr>
             ))}
             {users.length === 0 && !error && !loading && (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-ink-3">No users found</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-ink-3">No users found</td></tr>
             )}
           </tbody>
         </table>
@@ -506,6 +543,8 @@ const UserDetailView = ({ uid, onBack }: { uid: string; onBack: () => void }) =>
               <p>Last seen: {fmtDate(u.last_seen_at)}</p>
             </div>
           </div>
+
+          <UserPlanCard uid={uid} access={a} onChanged={() => setRetry(v => v + 1)} />
 
           <div className="bg-surface p-5 rounded-2xl border border-line space-y-3">
             <h4 className="text-sm font-bold">Controls</h4>
@@ -619,6 +658,224 @@ const UserDetailView = ({ uid, onBack }: { uid: string; onBack: () => void }) =>
 };
 
 // ---------------------------------------------------------------------------
+// Plan card on a user's profile: activate / renew, top up, extend, remove
+// ---------------------------------------------------------------------------
+const UserPlanCard = ({ uid, access, onChanged }: { uid: string; access: any; onChanged: () => void }) => {
+  const [plans, setPlans] = useState<api.Plan[]>([]);
+  const [planId, setPlanId] = useState('');
+  const [tokens, setTokens] = useState('');
+  const [days, setDays] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.fetchPlans().then(list => {
+      const active = list.filter(p => p.is_active);
+      setPlans(active);
+      setPlanId(String(active.find(p => p.id === access.plan_id)?.id ?? active[0]?.id ?? ''));
+    }).catch(e => setError(e.message));
+  }, []);
+
+  const p = {
+    plan_name: access.plan_name as string | null,
+    plan_tokens: access.plan_id != null ? Number(access.plan_tokens) || 0 : null,
+    plan_tokens_used: Number(access.plan_tokens_used) || 0,
+    plan_expires_at: (access.plan_expires_at as string | null) || null,
+  };
+  const hasPlan = p.plan_tokens != null;
+  const pct = hasPlan && p.plan_tokens! > 0 ? Math.min(100, Math.round(p.plan_tokens_used / p.plan_tokens! * 100)) : 0;
+  const left = daysLeft(p.plan_expires_at);
+
+  const run = async (body: Parameters<typeof api.setUserPlan>[1]) => {
+    setBusy(true); setError('');
+    try { await api.setUserPlan(uid, body); setTokens(''); setDays(''); onChanged(); }
+    catch (e: any) { setError(e.message || 'Could not update the plan.'); }
+    finally { setBusy(false); }
+  };
+
+  const input = 'flex-1 min-w-0 bg-surface-2 border border-line rounded-lg px-3 py-2 text-sm';
+  const button = 'px-3 py-2 bg-surface-2 border border-line text-xs font-bold rounded-lg hover:border-accent disabled:opacity-50 whitespace-nowrap';
+
+  return (
+    <div className="bg-surface p-5 rounded-2xl border border-line space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-sm font-bold">Plan</h4>
+        <PlanBadge p={p} />
+      </div>
+
+      {hasPlan ? (
+        <div>
+          <div className="flex justify-between text-xs mb-1">
+            <span className="font-mono">{fmt(p.plan_tokens_used)} / {fmt(p.plan_tokens!)} tokens</span>
+            <span className="text-ink-3">{fmtTok(Math.max(0, p.plan_tokens! - p.plan_tokens_used))} left</span>
+          </div>
+          <div className="h-2 rounded-full bg-surface-2 overflow-hidden">
+            <div className={`h-full ${pct >= 100 ? 'bg-red-500' : pct >= 80 ? 'bg-orange-400' : 'bg-green-500'}`} style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-xs text-ink-3 mt-2">
+            {left == null ? 'No expiry' : left > 0 ? `Expires ${fmtDate(p.plan_expires_at!)} (${left} days left)` : `Expired ${fmtDate(p.plan_expires_at!)}`}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-ink-3">This user has no plan. While "Require a plan" is on, they cannot use any AI feature.</p>
+      )}
+
+      <div>
+        <label className="text-xs text-ink-3">{hasPlan ? 'Renew or change plan (resets used tokens and expiry)' : 'Activate a plan'}</label>
+        <div className="flex gap-2 mt-1">
+          <select value={planId} onChange={e => setPlanId(e.target.value)} className={input} aria-label="Plan">
+            {plans.length === 0 && <option value="">No active plans — create one in the Plans tab</option>}
+            {plans.map(pl => <option key={pl.id} value={pl.id}>{pl.name} · {fmtTok(pl.token_limit)} tokens · {pl.duration_days}d</option>)}
+          </select>
+          <button disabled={busy || !planId} onClick={() => run({ plan_id: Number(planId) })}
+            className="px-3 py-2 bg-accent text-on-accent text-xs font-bold rounded-lg disabled:opacity-50">
+            {hasPlan ? 'Renew' : 'Activate'}
+          </button>
+        </div>
+      </div>
+
+      {hasPlan && (
+        <>
+          <div className="flex gap-2">
+            <input value={tokens} onChange={e => setTokens(e.target.value)} type="number" min="1" placeholder="Extra tokens" aria-label="Extra tokens" className={input} />
+            <button disabled={busy || !(Number(tokens) > 0)} onClick={() => run({ add_tokens: Number(tokens) })} className={button}>Add tokens</button>
+          </div>
+          <div className="flex gap-2">
+            <input value={days} onChange={e => setDays(e.target.value)} type="number" min="1" placeholder="Extra days" aria-label="Extra days" className={input} />
+            <button disabled={busy || !(Number(days) > 0)} onClick={() => run({ extend_days: Number(days) })} className={button}>Extend</button>
+          </div>
+          <button disabled={busy} onClick={() => confirm('Remove this user\'s plan?') && run({ remove: true })}
+            className="text-xs text-red-400 hover:underline disabled:opacity-50">Remove plan</button>
+        </>
+      )}
+      {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Plans Tab — master switch + plan catalogue
+// ---------------------------------------------------------------------------
+const PlansTab = () => {
+  const [plans, setPlans] = useState<api.Plan[]>([]);
+  const [required, setRequired] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [draft, setDraft] = useState({ name: '', token_limit: '', duration_days: '30' });
+  const [editing, setEditing] = useState<{ id: number; name: string; token_limit: string; duration_days: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [list, settings] = await Promise.all([api.fetchPlans(), api.fetchSettings()]);
+      setPlans(list); setRequired(settings.plans_required === true); setError('');
+    } catch (e: any) { setError(e.message || 'Could not load plans.'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true); setError('');
+    try { await action(); await load(); }
+    catch (e: any) { setError(e.message || 'Request failed.'); }
+    finally { setBusy(false); }
+  };
+
+  const toggleRequired = () => {
+    const next = !required;
+    if (next && !confirm('Turn on "Require a plan"?\n\nEvery user without an active plan (except admins) will be locked out of all AI features immediately.')) return;
+    run(async () => {
+      const result = await api.updateSettings({ plans_required: next });
+      if (result?.error) throw new Error(result.error);
+    });
+  };
+
+  const input = 'bg-surface-2 border border-line rounded-lg px-3 py-2 text-sm';
+  if (loading) return <div className="flex justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-ink-3" /></div>;
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      {error && <p role="alert" className="text-red-400 text-sm">{error}</p>}
+
+      <div className="bg-surface p-6 rounded-2xl border border-line flex items-start justify-between gap-6">
+        <div>
+          <h3 className="text-sm font-bold">Require a plan</h3>
+          <p className="text-xs text-ink-3 mt-1 max-w-xl">
+            When on, only users with an active plan and tokens left can use the app. Users without a plan, with an expired plan,
+            or without sign-in are blocked. Admins are never blocked. Activate plans for users from the Users tab first.
+          </p>
+        </div>
+        <button onClick={toggleRequired} disabled={busy} role="switch" aria-checked={required}
+          className={`shrink-0 px-4 py-2 text-xs font-bold rounded-lg border disabled:opacity-50 ${required ? 'bg-green-500/15 text-green-400 border-green-500/30' : 'bg-surface-2 text-ink-3 border-line'}`}>
+          {required ? 'ON — plans enforced' : 'OFF — everyone can use'}
+        </button>
+      </div>
+
+      <div className="bg-surface rounded-2xl border border-line overflow-hidden">
+        <div className="p-5 border-b border-line">
+          <h3 className="text-sm font-bold flex items-center gap-2"><Coins size={16} className="text-accent" /> Plans</h3>
+          <p className="text-xs text-ink-3 mt-1">Tokens = input + output tokens spent on the server's API keys during the plan period. Editing a plan does not change plans already given to users.</p>
+        </div>
+        <table className="w-full text-sm">
+          <thead><tr className="bg-canvas text-xs text-ink-3 uppercase">
+            <th className="px-4 py-3 text-left">Name</th>
+            <th className="px-4 py-3 text-right">Tokens</th>
+            <th className="px-4 py-3 text-right">Validity (days)</th>
+            <th className="px-4 py-3 text-left">Status</th>
+            <th className="px-4 py-3"></th>
+          </tr></thead>
+          <tbody>
+            {plans.map(p => editing?.id === p.id ? (
+              <tr key={p.id} className="border-t border-line">
+                <td className="px-4 py-2"><input className={input + ' w-full'} aria-label="Plan name" value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></td>
+                <td className="px-4 py-2 text-right"><input className={input + ' w-36 text-right'} aria-label="Tokens" type="number" value={editing.token_limit} onChange={e => setEditing({ ...editing, token_limit: e.target.value })} /></td>
+                <td className="px-4 py-2 text-right"><input className={input + ' w-24 text-right'} aria-label="Validity days" type="number" value={editing.duration_days} onChange={e => setEditing({ ...editing, duration_days: e.target.value })} /></td>
+                <td className="px-4 py-2" />
+                <td className="px-4 py-2 text-right whitespace-nowrap">
+                  <button disabled={busy} className="text-xs font-bold text-accent mr-3"
+                    onClick={() => run(async () => {
+                      await api.updatePlan(p.id, { name: editing.name, token_limit: Number(editing.token_limit), duration_days: Number(editing.duration_days) });
+                      setEditing(null);
+                    })}>Save</button>
+                  <button className="text-xs text-ink-3" onClick={() => setEditing(null)}>Cancel</button>
+                </td>
+              </tr>
+            ) : (
+              <tr key={p.id} className={`border-t border-line ${p.is_active ? '' : 'opacity-50'}`}>
+                <td className="px-4 py-3 font-medium">{p.name}</td>
+                <td className="px-4 py-3 text-right font-mono">{fmt(p.token_limit)}</td>
+                <td className="px-4 py-3 text-right font-mono">{p.duration_days}</td>
+                <td className="px-4 py-3 text-xs">{p.is_active ? <span className="text-green-400">Available</span> : <span className="text-ink-3">Hidden</span>}</td>
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <button className="text-xs font-bold text-accent mr-3"
+                    onClick={() => setEditing({ id: p.id, name: p.name, token_limit: String(p.token_limit), duration_days: String(p.duration_days) })}>Edit</button>
+                  <button disabled={busy} className="text-xs text-ink-3 hover:text-ink"
+                    onClick={() => run(() => api.updatePlan(p.id, { is_active: !p.is_active }))}>{p.is_active ? 'Hide' : 'Show'}</button>
+                </td>
+              </tr>
+            ))}
+            {plans.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-ink-3">No plans yet. Add one below.</td></tr>}
+          </tbody>
+        </table>
+        <form className="p-4 border-t border-line flex flex-wrap gap-2 items-center"
+          onSubmit={e => {
+            e.preventDefault();
+            run(async () => {
+              await api.createPlan({ name: draft.name, token_limit: Number(draft.token_limit), duration_days: Number(draft.duration_days) });
+              setDraft({ name: '', token_limit: '', duration_days: '30' });
+            });
+          }}>
+          <input required className={input + ' flex-1 min-w-40'} placeholder="New plan name" aria-label="New plan name" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} />
+          <input required className={input + ' w-40'} type="number" min="1" placeholder="Tokens (e.g. 1000000)" aria-label="Tokens" value={draft.token_limit} onChange={e => setDraft({ ...draft, token_limit: e.target.value })} />
+          <input required className={input + ' w-28'} type="number" min="1" placeholder="Days" aria-label="Validity days" value={draft.duration_days} onChange={e => setDraft({ ...draft, duration_days: e.target.value })} />
+          <button disabled={busy} className="px-4 py-2 bg-accent text-on-accent text-xs font-bold rounded-lg disabled:opacity-50">Add plan</button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Reports Tab
 // ---------------------------------------------------------------------------
 const ReportsTab = () => {
@@ -695,6 +952,7 @@ const ReportsTab = () => {
                 <th className="px-4 py-3 text-right">Pages</th>
                 <th className="px-4 py-3 text-right">Input Tokens</th>
                 <th className="px-4 py-3 text-right">Output Tokens</th>
+                <th className="px-4 py-3 text-right">Total Tokens</th>
               </tr></thead>
               <tbody>
                 {rows.map((r, i) => (
@@ -705,6 +963,7 @@ const ReportsTab = () => {
                     <td className="px-4 py-2 text-right font-mono">{fmt(r.pages)}</td>
                     <td className="px-4 py-2 text-right font-mono">{fmt(r.input_tokens)}</td>
                     <td className="px-4 py-2 text-right font-mono">{fmt(r.output_tokens)}</td>
+                    <td className="px-4 py-2 text-right font-mono font-bold">{fmt(r.total_tokens)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -36,7 +36,10 @@ async function adminFetchJson<T = any>(path: string, init: RequestInit = {}): Pr
   const response = await adminFetch(path, init);
   if (!response.ok) {
     const text = await response.text().catch(() => '');
-    throw new Error(text || `HTTP ${response.status}`);
+    let message = text;
+    // Keep the raw body for the admin-password check, but show a readable error otherwise.
+    try { const body = JSON.parse(text); if (body?.error && !body.code) message = body.error; } catch { /* not JSON */ }
+    throw new Error(message || `HTTP ${response.status}`);
   }
   return response.json();
 }
@@ -98,6 +101,27 @@ export interface UserRow {
   daily_limit: number | null;
   usageToday: number;
   usage30d: number;
+  tokens30d: number;
+  plan_name: string | null;
+  plan_tokens: number | null;
+  plan_tokens_used: number;
+  plan_expires_at: string | null;
+}
+
+export interface Plan {
+  id: number;
+  name: string;
+  token_limit: number;
+  duration_days: number;
+  is_active: boolean;
+}
+
+/** Same rule as the server's planDenial(): what state is this user's plan in? */
+export function planState(p: { plan_tokens: number | null; plan_tokens_used: number; plan_expires_at: string | null }) {
+  if (p.plan_tokens == null) return 'none' as const;
+  if (p.plan_expires_at && Date.parse(p.plan_expires_at) <= Date.now()) return 'expired' as const;
+  if (p.plan_tokens_used >= p.plan_tokens) return 'exhausted' as const;
+  return 'active' as const;
 }
 
 export interface UserDetail {
@@ -182,7 +206,18 @@ export const patchUser = (uid: string, body: { status?: string; daily_limit?: nu
     body: JSON.stringify(body),
   }).then(r => r.json());
 
-export const fetchReports = (params: { from?: string; to?: string; groupBy?: string; format?: string } = {}) => {
+const postJson = <T = any>(path: string, body: unknown, method = 'POST') =>
+  adminFetchJson<T>(path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+export const fetchPlans = () => adminFetchJson<{ plans: Plan[] }>('/api/admin/plans').then(d => d.plans);
+export const createPlan = (body: { name: string; token_limit: number; duration_days: number }) =>
+  postJson('/api/admin/plans', body);
+export const updatePlan = (id: number, body: Partial<Omit<Plan, 'id'>>) =>
+  postJson(`/api/admin/plans/${id}`, body, 'PATCH');
+export const setUserPlan = (uid: string, body: { plan_id?: number; add_tokens?: number; extend_days?: number; remove?: true }) =>
+  postJson(`/api/admin/users/${encodeURIComponent(uid)}/plan`, body);
+
+export const fetchReports =(params: { from?: string; to?: string; groupBy?: string; format?: string } = {}) => {
   const q = new URLSearchParams();
   if (params.from) q.set('from', params.from);
   if (params.to) q.set('to', params.to);
@@ -230,7 +265,7 @@ export const resetKeyHealth = (keyId?: string) =>
 export const fetchSettings = () =>
   adminFetchJson<Record<string, any>>('/api/admin/settings');
 
-export const updateSettings = (body: { default_daily_limit?: number | null; retention_days?: number }) =>
+export const updateSettings = (body: { default_daily_limit?: number | null; retention_days?: number; plans_required?: boolean }) =>
   adminFetch('/api/admin/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

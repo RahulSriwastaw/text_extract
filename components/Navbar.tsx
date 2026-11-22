@@ -210,6 +210,21 @@ const Navbar: React.FC<NavbarProps> = ({
 /** Small "used / limit" indicator shown when a daily limit applies. */
 function UsageIndicator() {
   const status = useContext(UserStatusContext);
+  if (status?.plan) {
+    const { name, tokens, used, expiresAt } = status.plan;
+    const left = Math.max(0, tokens - used);
+    const short = (n: number) => n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? +(n / 1e3).toFixed(1) + 'K' : String(n);
+    const low = tokens > 0 && left / tokens <= 0.2;
+    const days = expiresAt ? Math.ceil((Date.parse(expiresAt) - Date.now()) / 86400000) : null;
+    return (
+      <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-ink-3 px-2 py-1 rounded-lg bg-surface-2 border border-line"
+        title={`${name} plan: ${used.toLocaleString()} of ${tokens.toLocaleString()} tokens used${expiresAt ? `, valid till ${new Date(expiresAt).toLocaleDateString()}` : ''}`}>
+        <Gauge size={13} className={low ? 'text-orange-400' : 'text-ink-3'} />
+        <span className={low ? 'text-orange-400 font-bold' : ''}>{short(left)} tokens left</span>
+        {days != null && days <= 7 && <span className="text-orange-400 font-bold">· {Math.max(days, 0)}d</span>}
+      </div>
+    );
+  }
   if (!status || status.daily_limit == null) return null;
   const pct = status.daily_limit > 0 ? Math.min(100, Math.round(status.used / status.daily_limit * 100)) : 0;
   const isHigh = pct >= 80;

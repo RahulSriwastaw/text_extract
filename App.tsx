@@ -8,8 +8,8 @@ import ToolsPage from './components/ToolsPage';
 import LoginPage from './components/LoginPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
-import { useCurrentUser } from './services/authService';
-import { apiFetchJson } from './services/apiClient';
+import { useCurrentUser, signOutUser } from './services/authService';
+import { apiFetchJson, PLAN_CHANGED_EVENT } from './services/apiClient';
 import { Sparkles, Ban, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -21,7 +21,16 @@ export interface UserStatus {
   daily_limit: number | null;
   used: number;
   blocked_reason?: string;
+  plan?: { name: string; tokens: number; used: number; expiresAt: string | null } | null;
+  /** 'ok', or why the plan does not let this user in. Always 'ok' while plans are not required. */
+  plan_state?: 'ok' | 'no_plan' | 'plan_expired' | 'token_limit';
 }
+
+const PLAN_LOCK: Record<string, { title: string; text: string }> = {
+  no_plan: { title: 'Plan Required', text: 'Your account has no active plan yet. Ask the admin to activate a plan for you.' },
+  plan_expired: { title: 'Plan Expired', text: 'Your plan has expired. Ask the admin to renew it.' },
+  token_limit: { title: 'Tokens Used Up', text: 'You have used all the tokens in your plan. Ask the admin to renew the plan or add tokens.' },
+};
 
 export const UserStatusContext = createContext<UserStatus | null>(null);
 export const useUserStatus = () => useContext(UserStatusContext);
@@ -59,6 +68,7 @@ function ExistingApp() {
   const [preloadedPages, setPreloadedPages] = useState<string[]>([]);
   const [user, authLoading] = useCurrentUser();
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null);
+  const [statusCheck, setStatusCheck] = useState(0);
 
   useEffect(() => {
     // Admin panel at /admin only (old secret paths removed)
@@ -79,14 +89,21 @@ function ExistingApp() {
         daily_limit: data.daily_limit,
         used: data.used || 0,
         blocked_reason: data.blocked_reason,
+        plan: data.plan || null,
+        plan_state: data.plan_state || 'ok',
       }))
       .catch(() => active && setUserStatus(null));
     };
     refresh();
     const timer = setInterval(refresh, 120000);
     document.addEventListener("visibilitychange", refresh);
-    return () => { active = false; clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
-  }, [user]);
+    window.addEventListener(PLAN_CHANGED_EVENT, refresh);
+    return () => {
+      active = false; clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener(PLAN_CHANGED_EVENT, refresh);
+    };
+  }, [user, statusCheck]);
 
   if (isAdmin) {
     return (
@@ -129,6 +146,32 @@ function ExistingApp() {
             {userStatus.blocked_reason || 'Your account has been blocked by an administrator. Contact support if you think this is a mistake.'}
           </p>
           <p className="text-xs text-ink-3">Signed in as {user.email}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Plan lock: no plan / expired / tokens used up → nothing in the app is usable
+  const planLock = userStatus?.plan_state && PLAN_LOCK[userStatus.plan_state];
+  if (planLock) {
+    const plan = userStatus!.plan;
+    return (
+      <div className="min-h-screen bg-canvas flex items-center justify-center p-6">
+        <div className="max-w-md bg-surface p-8 rounded-2xl border border-line text-center">
+          <AlertTriangle className="w-14 h-14 text-orange-400 mx-auto mb-4" />
+          <h2 className="text-xl font-bold mb-2">{planLock.title}</h2>
+          <p className="text-ink-3 text-sm mb-4">{planLock.text}</p>
+          {plan && (
+            <p className="text-xs text-ink-3 mb-4">
+              {plan.name}: {plan.used.toLocaleString()} / {plan.tokens.toLocaleString()} tokens used
+              {plan.expiresAt && ` · valid till ${new Date(plan.expiresAt).toLocaleDateString()}`}
+            </p>
+          )}
+          <p className="text-xs text-ink-3 mb-5">Signed in as {user.email}</p>
+          <div className="flex gap-2 justify-center">
+            <button className="btn btn-secondary btn-sm" onClick={() => setStatusCheck(v => v + 1)}>Check again</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => signOutUser()}>Sign out</button>
+          </div>
         </div>
       </div>
     );

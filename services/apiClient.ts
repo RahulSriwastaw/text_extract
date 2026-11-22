@@ -35,6 +35,19 @@ export class ApiLimitError extends Error {
   }
 }
 
+/** No plan, expired plan, or plan tokens used up. */
+export class ApiPlanError extends Error {
+  code: 'no_plan' | 'plan_expired' | 'token_limit';
+  constructor(body: { code: ApiPlanError['code']; error?: string }) {
+    super(body.error || 'An active plan is required.');
+    this.name = 'ApiPlanError';
+    this.code = body.code;
+  }
+}
+
+/** Fired when the server refuses a request because of the plan, so the app can re-check /api/me. */
+export const PLAN_CHANGED_EVENT = 'plan-status-changed';
+
 // ---------------------------------------------------------------------------
 // Token helper
 // ---------------------------------------------------------------------------
@@ -83,8 +96,12 @@ export async function apiFetch(
       if (body.code === 'daily_limit') {
         throw new ApiLimitError(body);
       }
+      if (body.code === 'no_plan' || body.code === 'plan_expired' || body.code === 'token_limit') {
+        window.dispatchEvent(new Event(PLAN_CHANGED_EVENT));
+        throw new ApiPlanError(body);
+      }
     } catch (err) {
-      if (err instanceof ApiBlockedError || err instanceof ApiLimitError) throw err;
+      if (err instanceof ApiBlockedError || err instanceof ApiLimitError || err instanceof ApiPlanError) throw err;
       // If JSON parse failed, fall through to return the original response
     }
   }

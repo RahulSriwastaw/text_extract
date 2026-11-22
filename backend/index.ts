@@ -30,7 +30,7 @@ import {
   validateAndExtractLatex
 } from './latexRepair.js';
 import { pushAICall, setEngine, getUsageContext, usageMiddleware, setPages, recordClientEvent } from './usage.js';
-import { upsertAppUser, requireUser, requireAdmin, verifyUser, getDefaultDailyLimit, isAdminEmail, invalidateAccessCache } from './auth.js';
+import { upsertAppUser, requireUser, requireAdmin, verifyUser, getDefaultDailyLimit, isAdminEmail, invalidateAccessCache, getPlansRequired, loadAccess, planDenial } from './auth.js';
 import type { VerifiedUser } from './auth.js';
 import { adminDb, isAdminDbConfigured } from './db.js';
 
@@ -3198,6 +3198,11 @@ app.get('/api/me', async (req, res) => {
     }
   }
 
+  // Plan state, so the app can show the balance and lock itself when there is no usable plan
+  const plansRequired = await getPlansRequired();
+  const isAdmin = user.email_verified && isAdminEmail(user.email);
+  const access = await loadAccess(user.uid);
+
   res.json({
     uid: user.uid,
     email: user.email,
@@ -3207,6 +3212,9 @@ app.get('/api/me', async (req, res) => {
     daily_limit,
     used,
     blocked_reason: status === 'blocked' ? blocked_reason : undefined,
+    plans_required: plansRequired,
+    plan: access.plan || null,
+    plan_state: plansRequired && !isAdmin ? planDenial(access) || 'ok' : 'ok',
   });
 });
 

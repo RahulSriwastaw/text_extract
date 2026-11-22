@@ -6,7 +6,7 @@ import { syncDirectory } from './firebaseDirectory.js';
  * Data comes from the service-role Supabase client (api/db.ts).
  */
 import type { Express } from 'express';
-import { requireAdmin, invalidateAccessCache, getDefaultDailyLimit } from './auth.js';
+import { requireAdmin, invalidateAccessCache, invalidatePlansRequired } from './auth.js';
 import type { VerifiedUser } from './auth.js';
 import { adminDb } from './db.js';
 import { istToday } from './usage.js';
@@ -175,11 +175,9 @@ export function registerAdminRoutes(app: Express) {
 
       const uids = allUsers.map(u => u.uid);
 
-      // Load access rows
-      const { data: accessRows } = await adminDb.from('user_access')
-        .select('uid, status, daily_limit, blocked_reason, note')
-        .in('uid', uids);
-      const accessMap = new Map((accessRows || []).map(a => [a.uid, a]));
+      // Load access rows ('*' so this keeps working before the plans migration is run)
+      const { data: accessRows } = await adminDb.from('user_access').select('*').in('uid', uids);
+      const accessMap = new Map((accessRows || []).map((a: any) => [a.uid, a]));
 
       // Load today's and 30-day usage
       const today = istToday();
@@ -190,16 +188,17 @@ export function registerAdminRoutes(app: Express) {
         .in('uid', uids)
         .gte('day', thirtyDaysAgo);
 
-      const usageMap: Record<string, { today: number; thirtyDay: number }> = {};
+      const usageMap: Record<string, { today: number; thirtyDay: number; tokens30d: number }> = {};
       for (const r of dailyRows || []) {
-        if (!usageMap[r.uid]) usageMap[r.uid] = { today: 0, thirtyDay: 0 };
+        if (!usageMap[r.uid]) usageMap[r.uid] = { today: 0, thirtyDay: 0, tokens30d: 0 };
         usageMap[r.uid].thirtyDay += r.requests;
+        usageMap[r.uid].tokens30d += Number(r.input_tokens) + Number(r.output_tokens);
         if (r.day === today) usageMap[r.uid].today += r.requests;
       }
 
       const users = allUsers.map(u => {
         const access = accessMap.get(u.uid);
-        const usage = usageMap[u.uid] || { today: 0, thirtyDay: 0 };
+        const usage = usageMap[u.uid] || { today: 0, thirtyDay: 0, tokens30d: 0 };
         return {
           uid: u.uid,
           email: u.email,
@@ -211,6 +210,11 @@ export function registerAdminRoutes(app: Express) {
           daily_limit: access?.daily_limit ?? null,
           usageToday: usage.today,
           usage30d: usage.thirtyDay,
+          tokens30d: usage.tokens30d,
+          plan_name: access?.plan_id != null ? access.plan_name || 'Plan' : null,
+          plan_tokens: access?.plan_id != null ? Number(access.plan_tokens) || 0 : null,
+          plan_tokens_used: Number(access?.plan_tokens_used) || 0,
+          plan_expires_at: access?.plan_expires_at || null,
         };
       });
 
@@ -350,6 +354,116 @@ export function registerAdminRoutes(app: Express) {
   });
 
   // -----------------------------------------------------------------------
+  // Plans catalogue: GET / POST /api/admin/plans, PATCH /api/admin/plans/:id
+  // Plans are never deleted (users may still be on them) — only deactivated.
+  // -----------------------------------------------------------------------
+  const PLANS_HINT = ' If the plans tables are missing, run supabase_plans_schema.sql in the Supabase SQL Editor.';
+  const positiveInt = (v: unknown) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
+
+  app.get('/api/admin/plans', requireAdmin, async (_req, res) => {
+    if (!adminDb) return res.status(503).json({ error: 'DB not configured.' });
+    const { data, error } = await adminDb.from('plans').select('*').order('token_limit', { ascending: true });
+    if (error) return res.status(500).json({ error: error.message + PLANS_HINT });
+    res.json({ plans: data || [] });
+  });
+
+  app.post('/api/admin/plans', requireAdmin, async (req, res) => {
+    if (!adminDb) return res.status(503).json({ error: 'DB not configured.' });
+    const admin: VerifiedUser = (res.locals as any).admin;
+    const name = String(req.body?.name || '').trim().slice(0, 60);
+    const token_limit = positiveInt(req.body?.token_limit);
+    const duration_days = positiveInt(req.body?.duration_days);
+    if (!name || !token_limit || !duration_days) return res.status(400).json({ error: 'Name, tokens and validity days are required.' });
+    const { data, error } = await adminDb.from('plans').insert({ name, token_limit, duration_days }).select().single();
+    if (error) return res.status(500).json({ error: error.message + PLANS_HINT });
+    await adminDb.from('admin_audit').insert({ admin_uid: admin.uid, admin_email: admin.email, action: 'create_plan', details: data });
+    res.json({ plan: data });
+  });
+
+  app.patch('/api/admin/plans/:id', requireAdmin, async (req, res) => {
+    if (!adminDb) return res.status(503).json({ error: 'DB not configured.' });
+    const admin: VerifiedUser = (res.locals as any).admin;
+    const update: Record<string, any> = {};
+    if (req.body?.name !== undefined) update.name = String(req.body.name).trim().slice(0, 60);
+    if (req.body?.token_limit !== undefined) update.token_limit = positiveInt(req.body.token_limit);
+    if (req.body?.duration_days !== undefined) update.duration_days = positiveInt(req.body.duration_days);
+    if (req.body?.is_active !== undefined) update.is_active = !!req.body.is_active;
+    if (!Object.keys(update).length || update.name === '' || update.token_limit === null || update.duration_days === null)
+      return res.status(400).json({ error: 'Invalid plan values.' });
+    const { data, error } = await adminDb.from('plans').update(update).eq('id', Number(req.params.id)).select().maybeSingle();
+    if (error) return res.status(500).json({ error: error.message + PLANS_HINT });
+    if (!data) return res.status(404).json({ error: 'Plan not found.' });
+    await adminDb.from('admin_audit').insert({ admin_uid: admin.uid, admin_email: admin.email, action: 'update_plan', details: data });
+    res.json({ plan: data });
+  });
+
+  // -----------------------------------------------------------------------
+  // POST /api/admin/users/:uid/plan — one of:
+  //   { plan_id }      activate / renew: fresh quota, usage reset, new expiry
+  //   { add_tokens }   top up the current plan
+  //   { extend_days }  push the expiry out
+  //   { remove: true } take the plan away
+  // -----------------------------------------------------------------------
+  app.post('/api/admin/users/:uid/plan', requireAdmin, async (req, res) => {
+    if (!adminDb) return res.status(503).json({ error: 'DB not configured.' });
+    try {
+      const admin: VerifiedUser = (res.locals as any).admin;
+      const uid = String(req.params.uid);
+      const body = req.body || {};
+
+      const { data: existing } = await adminDb.from('app_users').select('uid').eq('uid', uid).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'User not found.' });
+
+      const { data: current, error: readError } = await adminDb.from('user_access')
+        .select('plan_id, plan_tokens, plan_expires_at').eq('uid', uid).maybeSingle();
+      if (readError) throw new Error(readError.message + PLANS_HINT);
+
+      const update: Record<string, any> = { uid, updated_by: admin.email, updated_at: new Date().toISOString() };
+      let action = 'assign_plan';
+
+      if (body.remove === true) {
+        action = 'remove_plan';
+        Object.assign(update, { plan_id: null, plan_name: null, plan_tokens: null, plan_tokens_used: 0, plan_started_at: null, plan_expires_at: null });
+      } else if (body.plan_id != null) {
+        const { data: plan, error } = await adminDb.from('plans').select('*').eq('id', Number(body.plan_id)).maybeSingle();
+        if (error) throw new Error(error.message + PLANS_HINT);
+        if (!plan) return res.status(404).json({ error: 'Plan not found.' });
+        Object.assign(update, {
+          plan_id: plan.id, plan_name: plan.name, plan_tokens: plan.token_limit, plan_tokens_used: 0,
+          plan_started_at: new Date().toISOString(),
+          plan_expires_at: new Date(Date.now() + plan.duration_days * 86400000).toISOString(),
+        });
+      } else if (body.add_tokens != null || body.extend_days != null) {
+        if (current?.plan_id == null) return res.status(400).json({ error: 'This user has no plan. Activate a plan first.' });
+        const tokens = positiveInt(body.add_tokens), days = positiveInt(body.extend_days);
+        if (!tokens && !days) return res.status(400).json({ error: 'Enter a positive number.' });
+        if (tokens) { action = 'add_plan_tokens'; update.plan_tokens = Number(current.plan_tokens || 0) + tokens; }
+        if (days) {
+          action = tokens ? 'topup_plan' : 'extend_plan';
+          // Extend from the later of now / current expiry, so an expired plan gets full days.
+          const base = Math.max(Date.now(), Date.parse(current.plan_expires_at || '') || 0);
+          update.plan_expires_at = new Date(base + days * 86400000).toISOString();
+        }
+      } else {
+        return res.status(400).json({ error: 'Nothing to change.' });
+      }
+
+      const { error: writeError } = await adminDb.from('user_access').upsert(update, { onConflict: 'uid' });
+      if (writeError) throw new Error(writeError.message + PLANS_HINT);
+
+      await adminDb.from('admin_audit').insert({
+        admin_uid: admin.uid, admin_email: admin.email, action, target_uid: uid,
+        details: { ...body, plan_name: update.plan_name, plan_tokens: update.plan_tokens, plan_expires_at: update.plan_expires_at },
+      });
+      invalidateAccessCache(uid);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error('[admin/users/:uid/plan]', err);
+      res.status(500).json({ error: err?.message || 'Failed to update plan.' });
+    }
+  });
+
+  // -----------------------------------------------------------------------
   // GET /api/admin/reports?from=&to=&groupBy=&format=json|csv
   // -----------------------------------------------------------------------
   app.get('/api/admin/reports', requireAdmin, async (req, res) => {
@@ -394,13 +508,26 @@ export function registerAdminRoutes(app: Express) {
         grouped[k].output_tokens += Number(r.output_tokens);
       }
 
-      const result = Object.entries(grouped).map(([key, v]) => ({ [groupBy]: key, ...v }));
+      // Per-user report: show who it is (name / email), not a raw uid
+      const labels = new Map<string, string>();
+      if (groupBy === 'user') {
+        const uids = Object.keys(grouped);
+        for (let i = 0; i < uids.length; i += 200) {
+          const { data: people } = await adminDb.from('app_users').select('uid, name, email').in('uid', uids.slice(i, i + 200));
+          for (const p of people || []) labels.set(p.uid, [p.name, p.email].filter(Boolean).join(' · ') || p.uid);
+        }
+      }
+
+      const result = Object.entries(grouped)
+        .map(([key, v]) => ({ [groupBy]: labels.get(key) || key, ...v, total_tokens: v.input_tokens + v.output_tokens }))
+        .sort((a, b) => groupBy === 'day' ? 0 : b.total_tokens - a.total_tokens);
 
       if (format === 'csv') {
-        const headers = [groupBy, 'requests', 'errors', 'pages', 'input_tokens', 'output_tokens'];
+        const headers = [groupBy, 'requests', 'errors', 'pages', 'input_tokens', 'output_tokens', 'total_tokens'];
         const csvLines = [headers.join(',')];
+        const cell = (v: unknown) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '');
         for (const row of result) {
-          csvLines.push(headers.map(h => String((row as any)[h] ?? '')).join(','));
+          csvLines.push(headers.map(h => cell((row as any)[h])).join(','));
         }
         res.type('text/csv')
           .set('Content-Disposition', `attachment; filename="report-${from}-${to}.csv"`)
@@ -502,7 +629,13 @@ export function registerAdminRoutes(app: Express) {
     if (!adminDb) return res.status(503).json({ error: 'DB not configured.' });
     try {
       const admin: VerifiedUser = (res.locals as any).admin;
-      const { default_daily_limit, retention_days } = req.body;
+      const { default_daily_limit, retention_days, plans_required } = req.body;
+
+      if (plans_required !== undefined) {
+        const { error } = await adminDb.from('app_settings').upsert({ key: 'plans_required', value: plans_required === true });
+        if (error) throw error;
+        invalidatePlansRequired();
+      }
 
       if (default_daily_limit !== undefined) {
         const val = default_daily_limit === null ? null : Number(default_daily_limit);

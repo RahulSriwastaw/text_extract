@@ -146,6 +146,62 @@ describe('decideAccess', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Plans — these import the real implementation (pure functions, no DB needed)
+// ---------------------------------------------------------------------------
+import { decideAccess as realDecideAccess, planDenial } from '../backend/auth.ts';
+
+describe('plans', () => {
+  const now = Date.now();
+  const future = new Date(now + 86400000).toISOString();
+  const past = new Date(now - 86400000).toISOString();
+  const base = { status: 'active', daily_limit: null, blocked_reason: null, serverCountToday: 0, fetchedAt: now, planKnown: true };
+  const plan = (over = {}) => ({ id: 1, name: 'Starter', tokens: 1000, used: 0, expiresAt: future, ...over });
+  const required = { required: true, isAdmin: false };
+
+  it('no plan → denied when plans are required', () => {
+    const r = realDecideAccess({ ...base, plan: null }, null, false, required);
+    assert.ok(!r.allowed);
+    assert.equal(r.code, 'no_plan');
+  });
+
+  it('no plan → allowed while plans are not required', () => {
+    assert.ok(realDecideAccess({ ...base, plan: null }, null, false).allowed);
+  });
+
+  it('active plan with tokens left → allowed', () => {
+    assert.ok(realDecideAccess({ ...base, plan: plan({ used: 999 }) }, null, false, required).allowed);
+  });
+
+  it('expired plan → denied', () => {
+    assert.equal(realDecideAccess({ ...base, plan: plan({ expiresAt: past }) }, null, false, required).code, 'plan_expired');
+  });
+
+  it('tokens used up → denied, even with an own API key', () => {
+    const r = realDecideAccess({ ...base, plan: plan({ used: 1000 }) }, null, true, required);
+    assert.ok(!r.allowed);
+    assert.equal(r.code, 'token_limit');
+    assert.equal(r.limit, 1000);
+  });
+
+  it('admins are never locked out', () => {
+    assert.ok(realDecideAccess({ ...base, plan: null }, null, false, { required: true, isAdmin: true }).allowed);
+  });
+
+  it('blocked wins over an active plan', () => {
+    assert.equal(realDecideAccess({ ...base, status: 'blocked', plan: plan() }, null, false, required).code, 'blocked');
+  });
+
+  it('fails open when plan data could not be read', () => {
+    assert.equal(planDenial({ ...base, plan: null, planKnown: false }), null);
+  });
+
+  it('daily request limit still applies on top of a plan', () => {
+    const r = realDecideAccess({ ...base, daily_limit: 5, serverCountToday: 5, plan: plan() }, null, false, required);
+    assert.equal(r.code, 'daily_limit');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // maskKey
 // ---------------------------------------------------------------------------
 import { createHash } from 'node:crypto';

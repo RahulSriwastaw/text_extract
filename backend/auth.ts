@@ -86,13 +86,26 @@ export async function verifyUser(req: Request): Promise<VerifiedUser | null> {
 // ---------------------------------------------------------------------------
 // Per-user cache: access row + today's server-key count
 // ---------------------------------------------------------------------------
-interface CachedAccess {
+export interface UserPlan {
+  id: number;
+  name: string;
+  tokens: number;      // quota for this plan period
+  used: number;        // server-key tokens spent so far
+  expiresAt: string | null;
+}
+
+export interface CachedAccess {
   status: string;
   daily_limit: number | null;
   blocked_reason: string | null;
   serverCountToday: number;
   fetchedAt: number;
+  plan?: UserPlan | null;
+  /** false when the plan columns could not be read (DB error / migration not run): plan checks are skipped. */
+  planKnown?: boolean;
 }
+
+const PLAN_COLUMNS = 'plan_id, plan_name, plan_tokens, plan_tokens_used, plan_expires_at';
 
 const accessCache = new Map<string, CachedAccess>();
 const CACHE_TTL_MS = 60_000; // 60 s
@@ -126,7 +139,7 @@ export async function upsertAppUser(user: VerifiedUser): Promise<void> {
   }
 }
 
-async function loadAccess(uid: string): Promise<CachedAccess> {
+export async function loadAccess(uid: string): Promise<CachedAccess> {
   const now = Date.now();
   const cached = accessCache.get(uid);
   if (cached && now - cached.fetchedAt < CACHE_TTL_MS) return cached;
@@ -135,19 +148,39 @@ async function loadAccess(uid: string): Promise<CachedAccess> {
   let daily_limit: number | null = null;
   let blocked_reason: string | null = null;
   let serverCountToday = 0;
+  let plan: UserPlan | null = null;
+  let planKnown = false;
 
   if (adminDb) {
     try {
-      const { data: access } = await adminDb
+      let { data: access, error } = await adminDb
         .from('user_access')
-        .select('status, daily_limit, blocked_reason')
+        .select('status, daily_limit, blocked_reason, ' + PLAN_COLUMNS)
         .eq('uid', uid)
-        .maybeSingle();
+        .maybeSingle<any>();
+      planKnown = !error;
+      if (error) {
+        // Plan columns missing (migration not run yet): keep block/limit checks working.
+        ({ data: access } = await adminDb
+          .from('user_access')
+          .select('status, daily_limit, blocked_reason')
+          .eq('uid', uid)
+          .maybeSingle<any>());
+      }
 
       if (access) {
         status = access.status || 'active';
         daily_limit = access.daily_limit;
         blocked_reason = access.blocked_reason;
+        if (access.plan_id != null) {
+          plan = {
+            id: Number(access.plan_id),
+            name: access.plan_name || 'Plan',
+            tokens: Number(access.plan_tokens) || 0,
+            used: Number(access.plan_tokens_used) || 0,
+            expiresAt: access.plan_expires_at || null,
+          };
+        }
       }
 
       // Today's server-key request count for limit checks
@@ -166,6 +199,7 @@ async function loadAccess(uid: string): Promise<CachedAccess> {
         }
       }
     } catch (err) {
+      planKnown = false;
       console.warn('[auth] loadAccess query failed, failing open:', err);
     }
   }
@@ -176,6 +210,8 @@ async function loadAccess(uid: string): Promise<CachedAccess> {
     blocked_reason,
     serverCountToday,
     fetchedAt: now,
+    plan,
+    planKnown,
   };
   accessCache.set(uid, entry);
   return entry;
@@ -184,9 +220,27 @@ async function loadAccess(uid: string): Promise<CachedAccess> {
 // ---------------------------------------------------------------------------
 // decideAccess — pure function (exported for unit tests)
 // ---------------------------------------------------------------------------
+export type PlanDenial = 'no_plan' | 'plan_expired' | 'token_limit';
+
+/** Plan check on its own (pure). Returns null when the plan allows the request. */
+export function planDenial(access: CachedAccess, now = Date.now()): PlanDenial | null {
+  if (access.planKnown === false) return null; // could not read plan data: fail open
+  const plan = access.plan;
+  if (!plan) return 'no_plan';
+  if (plan.expiresAt && Date.parse(plan.expiresAt) <= now) return 'plan_expired';
+  if (plan.used >= plan.tokens) return 'token_limit';
+  return null;
+}
+
+const PLAN_MESSAGES: Record<PlanDenial, string> = {
+  no_plan: 'No active plan. Ask the admin to activate a plan for your account.',
+  plan_expired: 'Your plan has expired. Ask the admin to renew it.',
+  token_limit: 'Your plan tokens are used up. Ask the admin to renew the plan or add tokens.',
+};
+
 export interface AccessDecision {
   allowed: boolean;
-  code?: 'blocked' | 'daily_limit';
+  code?: 'blocked' | 'daily_limit' | PlanDenial;
   reason?: string;
   limit?: number;
   used?: number;
@@ -198,10 +252,23 @@ export interface AccessDecision {
 export function decideAccess(
   access: CachedAccess,
   defaultLimit: number | null,
-  hasOwnKey: boolean
+  hasOwnKey: boolean,
+  plans: { required: boolean; isAdmin: boolean } = { required: false, isAdmin: false }
 ): AccessDecision {
   if (access.status === 'blocked') {
     return { allowed: false, code: 'blocked', reason: access.blocked_reason || 'Your account has been blocked.' };
+  }
+
+  // Plans: nobody but admins uses AI features without an active plan with tokens left.
+  // An own API key does not bypass this.
+  if (plans.required && !plans.isAdmin) {
+    const denial = planDenial(access);
+    if (denial) {
+      return {
+        allowed: false, code: denial, reason: PLAN_MESSAGES[denial],
+        limit: access.plan?.tokens, used: access.plan?.used,
+      };
+    }
   }
 
   const limit = access.daily_limit ?? defaultLimit;
@@ -267,6 +334,29 @@ export async function getDefaultDailyLimit(): Promise<number | null> {
 }
 
 // ---------------------------------------------------------------------------
+// "Plans required" master switch (app_settings.plans_required)
+// ---------------------------------------------------------------------------
+let cachedPlansRequired = { value: false, at: 0 };
+
+export async function getPlansRequired(): Promise<boolean> {
+  const now = Date.now();
+  if (now - cachedPlansRequired.at < CACHE_TTL_MS) return cachedPlansRequired.value;
+  let value = false;
+  if (adminDb) {
+    try {
+      const { data } = await adminDb.from('app_settings').select('value').eq('key', 'plans_required').maybeSingle();
+      value = data?.value === true;
+    } catch { /* keep off */ }
+  }
+  cachedPlansRequired = { value, at: now };
+  return value;
+}
+
+export function invalidatePlansRequired(): void {
+  cachedPlansRequired.at = 0;
+}
+
+// ---------------------------------------------------------------------------
 // requireUser middleware
 // ---------------------------------------------------------------------------
 const AUTH_REQUIRED = () => process.env.AUTH_REQUIRED === 'true';
@@ -277,9 +367,10 @@ export async function requireUser(
   next: NextFunction
 ): Promise<void> {
   const user = await verifyUser(req);
+  const plansRequired = await getPlansRequired();
 
   if (!user || !user.uid) {
-    if (AUTH_REQUIRED()) {
+    if (AUTH_REQUIRED() || plansRequired) {
       res.status(401).json({ error: 'Sign in to continue.', code: 'auth_required' });
       return;
     }
@@ -313,10 +404,13 @@ export async function requireUser(
     req.headers['x-user-gemini-key'] ||
     req.headers['x-user-key']
   );
-  const decision = decideAccess(access, defaultLimit, hasOwnKey);
+  const decision = decideAccess(access, defaultLimit, hasOwnKey, {
+    required: plansRequired,
+    isAdmin: user.email_verified && isAdminEmail(user.email),
+  });
 
   if (!decision.allowed) {
-    const statusCode = decision.code === 'blocked' ? 403 : 429;
+    const statusCode = decision.code === 'daily_limit' || decision.code === 'token_limit' ? 429 : 403;
     res.status(statusCode).json({
       error: decision.reason || 'Request not allowed.',
       code: decision.code,

@@ -10,7 +10,7 @@ import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
 import { useCurrentUser, signOutUser } from './services/authService';
 import { apiFetchJson, PLAN_CHANGED_EVENT, formatPlanTokens } from './services/apiClient';
-import { Sparkles, Ban, AlertTriangle } from 'lucide-react';
+import { Sparkles, Ban, AlertTriangle, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // ---------------------------------------------------------------------------
@@ -24,10 +24,12 @@ export interface UserStatus {
   plan?: { name: string; tokens: number; used: number; expiresAt: string | null } | null;
   /** 'ok', or why the plan does not let this user in. Always 'ok' while plans are not required. */
   plan_state?: 'ok' | 'no_plan' | 'plan_expired' | 'token_limit';
+  /** Admin's WhatsApp number (digits with country code) for plan requests; '' when not set. */
+  support_whatsapp?: string;
 }
 
 const PLAN_LOCK: Record<string, { title: string; text: string }> = {
-  no_plan: { title: 'Plan Required', text: 'Your account has no active plan yet. Ask the admin to activate a plan for you.' },
+  no_plan: { title: 'Activate a Plan to Use This Tool', text: 'Your account has no active plan yet. Contact the admin to get a plan activated.' },
   plan_expired: { title: 'Plan Expired', text: 'Your plan has expired. Ask the admin to renew it.' },
   token_limit: { title: 'Tokens Used Up', text: 'You have used all the tokens in your plan. Ask the admin to renew the plan or add tokens.' },
 };
@@ -91,6 +93,7 @@ function ExistingApp() {
         blocked_reason: data.blocked_reason,
         plan: data.plan || null,
         plan_state: data.plan_state || 'ok',
+        support_whatsapp: data.support_whatsapp || '',
       }))
       .catch(() => active && setUserStatus(null));
     };
@@ -151,10 +154,14 @@ function ExistingApp() {
     );
   }
 
-  // Plan lock: no plan / expired / tokens used up → nothing in the app is usable
-  const planLock = userStatus?.plan_state && PLAN_LOCK[userStatus.plan_state];
+  // Plan lock: the home and tools pages stay open, but starting any tool without a usable
+  // plan (none / expired / tokens used up) asks the user to get one activated on WhatsApp.
+  const planLock = activeTool !== 'landing' && activeTool !== 'tools'
+    && userStatus?.plan_state && PLAN_LOCK[userStatus.plan_state];
   if (planLock) {
     const plan = userStatus!.plan;
+    const whatsapp = userStatus!.support_whatsapp;
+    const message = `Hello, please activate a plan for my TextExtract account: ${user.email || ''}`;
     return (
       <div className="min-h-screen bg-canvas flex items-center justify-center p-6">
         <div className="max-w-md bg-surface p-8 rounded-2xl border border-line text-center">
@@ -167,8 +174,18 @@ function ExistingApp() {
               {plan.expiresAt && ` · valid till ${new Date(plan.expiresAt).toLocaleDateString()}`}
             </p>
           )}
+          {whatsapp && (
+            <div className="mb-5">
+              <a href={`https://wa.me/${whatsapp}?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-[#25D366] hover:bg-[#1ebe5b] text-black font-bold text-sm transition-colors">
+                <MessageCircle className="w-5 h-5" /> Chat on WhatsApp to activate
+              </a>
+              <p className="text-xs text-ink-3 mt-2">WhatsApp: +{whatsapp}</p>
+            </div>
+          )}
           <p className="text-xs text-ink-3 mb-5">Signed in as {user.email}</p>
-          <div className="flex gap-2 justify-center">
+          <div className="flex flex-wrap gap-2 justify-center">
+            <button className="btn btn-secondary btn-sm" onClick={() => setActiveTool('landing')}>Back to home</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setStatusCheck(v => v + 1)}>Check again</button>
             <button className="btn btn-secondary btn-sm" onClick={() => signOutUser()}>Sign out</button>
           </div>

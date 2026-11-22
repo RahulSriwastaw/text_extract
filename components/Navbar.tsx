@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Sparkles, History, Settings, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge, Coins } from 'lucide-react';
+import { Sparkles, History, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge, Coins } from 'lucide-react';
 import { formatPlanTokens } from '../services/apiClient';
 import { UserStatusContext } from '../App';
-import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { subscribeToExtensionStatus, pingStudyAiExtension, BridgeStatus } from '../services/studyAiBridgeService';
 import GeminiConnectModal from './GeminiConnectModal';
 import AiHistoryDrawer from './AiHistoryDrawer';
-import GeminiSettingsModal from './GeminiSettingsModal';
 import MocktestStudioModal from './MocktestStudioModal';
 import LoginButton from './LoginButton';
 
@@ -30,11 +28,9 @@ const Navbar: React.FC<NavbarProps> = ({
   activeTool = 'landing',
   onSelectTool
 }) => {
-  const [authStatus, setAuthStatus] = useState<'none' | 'apikey' | 'oauth'>('none');
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>({ connected: false });
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showMocktestStudio, setShowMocktestStudio] = useState(false);
 
   useEffect(() => {
@@ -46,11 +42,7 @@ const Navbar: React.FC<NavbarProps> = ({
     return () => unsub();
   }, []);
 
-  const refreshAuth = async () => {
-    const res = await checkUserGeminiAuth();
-    setAuthStatus(res.isAuthenticated ? res.authType : 'none');
-    pingStudyAiExtension().catch(() => {});
-  };
+  const refreshAuth = () => { pingStudyAiExtension().catch(() => {}); };
 
   return (
     <>
@@ -107,24 +99,15 @@ const Navbar: React.FC<NavbarProps> = ({
                   <span>{(bridgeStatus.provider || 'AI').charAt(0).toUpperCase() + (bridgeStatus.provider || 'AI').slice(1)}</span>
                   <span className="hidden xl:inline text-emerald-300/70 font-medium">· Bridge</span>
                 </button>
-              ) : authStatus !== 'none' ? (
-                <button
-                  type="button"
-                  onClick={() => setShowSettingsModal(true)}
-                  title="Direct Claude API Active - Click to configure"
-                  className="badge badge-info h-8 px-3 rounded-lg cursor-pointer hover:bg-blue-500/20"
-                >
-                  <CheckCircle2 />
-                  <span>Claude API</span>
-                </button>
               ) : (
                 <button
                   type="button"
                   onClick={() => setShowConnectModal(true)}
+                  title="Connect the browser extension bridge"
                   className="btn btn-secondary btn-sm"
                 >
                   <Zap className="text-accent" />
-                  <span>Connect AI</span>
+                  <span>Connect Bridge</span>
                 </button>
               )}
 
@@ -150,16 +133,6 @@ const Navbar: React.FC<NavbarProps> = ({
               >
                 <History />
                 <span className="hidden xl:inline">History</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowSettingsModal(true)}
-                title="AI & API settings"
-                aria-label="Settings"
-                className="btn btn-ghost btn-sm btn-icon"
-              >
-                <Settings />
               </button>
 
               {/* Token balance sits right beside the profile */}
@@ -193,14 +166,6 @@ const Navbar: React.FC<NavbarProps> = ({
         }}
       />
 
-      <GeminiSettingsModal
-        isOpen={showSettingsModal}
-        onClose={() => {
-          setShowSettingsModal(false);
-          refreshAuth();
-        }}
-      />
-
       <MocktestStudioModal
         isOpen={showMocktestStudio}
         onClose={() => setShowMocktestStudio(false)}
@@ -225,6 +190,16 @@ function UsageIndicator() {
           {formatPlanTokens(left)}<span className="hidden md:inline font-medium"> tokens left</span>
         </span>
         {days != null && days <= 7 && <span className="text-orange-400 font-bold">· {Math.max(days, 0)}d</span>}
+      </div>
+    );
+  }
+  // Signed in but no plan yet: say so, instead of showing nothing beside the profile
+  if (status && status.daily_limit == null) {
+    return (
+      <div className="flex items-center gap-1.5 h-8 text-[11px] text-ink-3 px-2 rounded-lg bg-surface-2 border border-line whitespace-nowrap"
+        title="No plan is active on your account. Ask the admin to activate one.">
+        <Coins size={13} />
+        <span className="font-bold">No plan</span>
       </div>
     );
   }

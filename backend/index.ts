@@ -30,7 +30,7 @@ import {
   validateAndExtractLatex
 } from './latexRepair.js';
 import { pushAICall, setEngine, getUsageContext, usageMiddleware, setPages, recordClientEvent } from './usage.js';
-import { upsertAppUser, requireUser, requireAdmin, verifyUser, getDefaultDailyLimit, isAdminEmail, invalidateAccessCache, getPlansRequired, loadAccess, planDenial } from './auth.js';
+import { upsertAppUser, requireUser, requireAdmin, verifyUser, getDefaultDailyLimit, isAdminEmail, invalidateAccessCache, getPlansRequired, loadAccess, planDenial, getSupportWhatsapp } from './auth.js';
 import type { VerifiedUser } from './auth.js';
 import { adminDb, isAdminDbConfigured } from './db.js';
 
@@ -74,14 +74,12 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-export const getUserKey = (req: express.Request): string => {
-  return (
-    (req.headers['x-user-claude-key'] as string) ||
-    (req.headers['x-user-gemini-key'] as string) ||
-    (req.headers['x-user-key'] as string) ||
-    ''
-  );
-};
+/**
+ * Personal API keys are switched off: everyone runs on the server keys and is
+ * metered by their plan. Key headers from old clients are ignored.
+ */
+const PERSONAL_KEYS_ENABLED = false;
+export const getUserKey = (_req: express.Request): string => '';
 
 app.get('/api/config', (req, res) => {
   try {
@@ -103,6 +101,8 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/test-key', async (req, res) => {
+  // Personal API keys are switched off (see getUserKey). Remove this line to allow them again.
+  if (!PERSONAL_KEYS_ENABLED) return res.status(403).json({ success: false, message: 'Personal API keys are disabled. Usage runs on your plan.' });
   try {
     const { apiKey, provider = 'claude' } = req.body || {};
     if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 10) {
@@ -3215,6 +3215,7 @@ app.get('/api/me', async (req, res) => {
     plans_required: plansRequired,
     plan: access.plan || null,
     plan_state: plansRequired && !isAdmin ? planDenial(access) || 'ok' : 'ok',
+    support_whatsapp: await getSupportWhatsapp(),
   });
 });
 

@@ -279,7 +279,7 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
                         Zero Token Cost
                       </span>
                     </h3>
-                    <p className="text-xs text-slate-400">Unlimited Extraction via Browser Extension or API</p>
+                    <p className="text-xs text-slate-400">Extraction via the browser extension bridge</p>
                   </div>
                 </div>
                 <button
@@ -342,33 +342,8 @@ const GeminiConnectModal: React.FC<GeminiConnectModalProps> = ({ isOpen, onClose
 
               {/* Body */}
               <div className="p-5 space-y-4">
-                {/* Method Tabs */}
-                <div className="flex p-1 bg-white/[0.04] border border-white/[0.06] rounded-xl gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('chrome_key')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                      activeTab === 'chrome_key'
-                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Key className="w-3.5 h-3.5" />
-                    <span>Claude API Key</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('extension')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold transition-all ${
-                      activeTab === 'extension'
-                        ? 'bg-surface-3 text-ink shadow-[inset_0_0_0_1px_rgb(255_255_255/0.14)]'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Bot className="w-3.5 h-3.5" />
-                    <span>Claude Web Bridge (100% Free)</span>
-                  </button>
-                </div>
+                {/* Personal API keys are switched off, so there is no "Claude API Key" tab:
+                    only the browser-extension bridge can be connected here. */}
 
                 {/* Tab 1: Extension Bridge (Free Unlimited) */}
                 {activeTab === 'extension' && (

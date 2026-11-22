@@ -758,6 +758,8 @@ const PlansTab = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [whatsapp, setWhatsapp] = useState('');
+  const [saved, setSaved] = useState('');
   const [draft, setDraft] = useState({ name: '', token_limit: '', duration_days: '30' });
   const [editing, setEditing] = useState<{ id: number; name: string; token_limit: string; duration_days: string } | null>(null);
 
@@ -765,6 +767,7 @@ const PlansTab = () => {
     try {
       const [list, settings] = await Promise.all([api.fetchPlans(), api.fetchSettings()]);
       setPlans(list); setRequired(settings.plans_required === true); setError('');
+      setWhatsapp(typeof settings.support_whatsapp === 'string' ? settings.support_whatsapp : '');
     } catch (e: any) { setError(e.message || 'Could not load plans.'); }
     finally { setLoading(false); }
   }, []);
@@ -797,8 +800,8 @@ const PlansTab = () => {
         <div>
           <h3 className="text-sm font-bold">Require a plan</h3>
           <p className="text-xs text-ink-3 mt-1 max-w-xl">
-            When on, only users with an active plan and tokens left can use the app. Users without a plan, with an expired plan,
-            or without sign-in are blocked. Admins are never blocked. Activate plans for users from the Users tab first.
+            When on, only users with an active plan and tokens left can open the tools. Anyone else who opens a tool is asked
+            to get a plan activated (with the WhatsApp button below). Admins are never blocked. Activate plans for users from the Users tab first.
           </p>
         </div>
         <button onClick={toggleRequired} disabled={busy} role="switch" aria-checked={required}
@@ -806,6 +809,29 @@ const PlansTab = () => {
           {required ? 'ON — plans enforced' : 'OFF — everyone can use'}
         </button>
       </div>
+
+      <form className="bg-surface p-6 rounded-2xl border border-line"
+        onSubmit={e => {
+          e.preventDefault();
+          setSaved('');
+          run(async () => {
+            const result = await api.updateSettings({ support_whatsapp: whatsapp });
+            if (result?.error) throw new Error(result.error);
+            setSaved('Saved.');
+          });
+        }}>
+        <h3 className="text-sm font-bold">WhatsApp number for plan requests</h3>
+        <p className="text-xs text-ink-3 mt-1 max-w-xl">
+          Users without an active plan see a "Chat on WhatsApp" button with this number when they open a tool.
+          Enter it with country code and no spaces, e.g. 919876543210. Leave empty to hide the button.
+        </p>
+        <div className="flex gap-2 mt-3 max-w-md">
+          <input className={input + ' flex-1'} inputMode="tel" placeholder="919876543210" aria-label="WhatsApp number"
+            value={whatsapp} onChange={e => setWhatsapp(e.target.value)} />
+          <button disabled={busy} className="px-4 py-2 bg-accent text-on-accent text-xs font-bold rounded-lg disabled:opacity-50">Save</button>
+        </div>
+        {saved && <p role="status" className="text-xs text-green-400 mt-2">{saved}</p>}
+      </form>
 
       <div className="bg-surface rounded-2xl border border-line overflow-hidden">
         <div className="p-5 border-b border-line">

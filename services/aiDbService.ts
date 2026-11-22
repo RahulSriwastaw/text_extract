@@ -85,7 +85,22 @@ function openDb(): Promise<IDBDatabase> {
 
 // ----------------- AI SETTINGS -----------------
 
+/**
+ * Personal API keys / Google OAuth are switched off: usage runs on the user's plan.
+ * Credentials are never returned or stored, and any key saved earlier is wiped.
+ */
+function withoutCredentials(settings: AiSettings): AiSettings {
+  const { apiKey, accessToken, tokenExpiresAt, ...rest } = settings;
+  return { ...rest, authType: 'none' };
+}
+
 export async function getAiSettings(): Promise<AiSettings> {
+  const stored = await readAiSettings();
+  if (stored.apiKey || stored.accessToken) saveAiSettings({}).catch(() => {}); // wipe the old key from this browser
+  return withoutCredentials(stored);
+}
+
+async function readAiSettings(): Promise<AiSettings> {
   try {
     const db = await openDb();
     return new Promise((resolve) => {
@@ -128,13 +143,13 @@ export async function getAiSettings(): Promise<AiSettings> {
 }
 
 export async function saveAiSettings(settings: Partial<AiSettings>): Promise<AiSettings> {
-  const current = await getAiSettings();
-  const updated: AiSettings = {
+  const current = await readAiSettings();
+  const updated: AiSettings = withoutCredentials({
     ...current,
     ...settings,
     id: 'current_settings',
     updatedAt: Date.now()
-  };
+  });
 
   const db = await openDb();
   return new Promise((resolve, reject) => {

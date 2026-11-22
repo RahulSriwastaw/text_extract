@@ -354,6 +354,27 @@ export async function getPlansRequired(): Promise<boolean> {
 
 export function invalidatePlansRequired(): void {
   cachedPlansRequired.at = 0;
+  cachedWhatsapp.at = 0;
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp number users contact to get a plan (app_settings.support_whatsapp)
+// Stored as digits with country code, e.g. "919876543210".
+// ---------------------------------------------------------------------------
+let cachedWhatsapp = { value: '', at: 0 };
+
+export async function getSupportWhatsapp(): Promise<string> {
+  const now = Date.now();
+  if (now - cachedWhatsapp.at < CACHE_TTL_MS) return cachedWhatsapp.value;
+  let value = '';
+  if (adminDb) {
+    try {
+      const { data } = await adminDb.from('app_settings').select('value').eq('key', 'support_whatsapp').maybeSingle();
+      value = typeof data?.value === 'string' ? data.value.replace(/\D/g, '') : '';
+    } catch { /* none */ }
+  }
+  cachedWhatsapp = { value, at: now };
+  return value;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,11 +420,8 @@ export async function requireUser(
   // Load access + today count
   const access = await loadAccess(user.uid);
   const defaultLimit = await getDefaultDailyLimit();
-  const hasOwnKey = !!(
-    req.headers['x-user-claude-key'] ||
-    req.headers['x-user-gemini-key'] ||
-    req.headers['x-user-key']
-  );
+  // Personal API keys are switched off (backend/index.ts getUserKey), so nobody has one.
+  const hasOwnKey = false;
   const decision = decideAccess(access, defaultLimit, hasOwnKey, {
     required: plansRequired,
     isAdmin: user.email_verified && isAdminEmail(user.email),

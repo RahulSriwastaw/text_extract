@@ -265,7 +265,7 @@ export const resetKeyHealth = (keyId?: string) =>
 export const fetchSettings = () =>
   adminFetchJson<Record<string, any>>('/api/admin/settings');
 
-export const updateSettings = (body: { default_daily_limit?: number | null; retention_days?: number; plans_required?: boolean }) =>
+export const updateSettings = (body: { default_daily_limit?: number | null; retention_days?: number; plans_required?: boolean; support_whatsapp?: string }) =>
   adminFetch('/api/admin/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

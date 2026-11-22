@@ -629,7 +629,17 @@ export function registerAdminRoutes(app: Express) {
     if (!adminDb) return res.status(503).json({ error: 'DB not configured.' });
     try {
       const admin: VerifiedUser = (res.locals as any).admin;
-      const { default_daily_limit, retention_days, plans_required } = req.body;
+      const { default_daily_limit, retention_days, plans_required, support_whatsapp } = req.body;
+
+      if (support_whatsapp !== undefined) {
+        // Digits only, with country code (wa.me format). Empty string clears it.
+        const digits = String(support_whatsapp || '').replace(/\D/g, '');
+        if (digits && (digits.length < 10 || digits.length > 15))
+          return res.status(400).json({ error: 'Enter the WhatsApp number with country code, e.g. 919876543210.' });
+        const { error } = await adminDb.from('app_settings').upsert({ key: 'support_whatsapp', value: digits });
+        if (error) throw error;
+        invalidatePlansRequired();
+      }
 
       if (plans_required !== undefined) {
         const { error } = await adminDb.from('app_settings').upsert({ key: 'plans_required', value: plans_required === true });

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { defaultClaudeModel, type DirectModel } from '../services/claudeModels';
+import { defaultClaudeModel, isBlockedModel, type DirectModel } from '../services/claudeModels';
 import { getAiSettings } from '../services/aiDbService';
 import { apiFetch } from '../services/apiClient';
 
@@ -23,7 +23,7 @@ export function ClaudeModelSelect({ value, onChange }: { value: DirectModel; onC
       const data = await response.json();
       if (!controller.signal.aborted) {
         // Hide expensive models (opus, fable) from the dropdown
-        const filtered = (data.models as Model[]).filter(m => !/opus|fable/i.test(m.id));
+        const filtered = (data.models as Model[]).filter(m => !isBlockedModel(m.id));
         setModels(filtered);
         setStatus('');
       }

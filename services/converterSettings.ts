@@ -1,4 +1,4 @@
-import { defaultClaudeModel, type DirectModel } from './claudeModels';
+import { defaultClaudeModel, safeDirectModel, type DirectModel } from './claudeModels';
 import { useEffect, useRef, useState } from 'react';
 import { doc, getFirestore, onSnapshot, setDoc } from 'firebase/firestore';
 import { NumberingStyle, OptionArrangement } from '../types';
@@ -23,11 +23,17 @@ const mcqDefaults = {
 type Cache<T> = { values: T; pending: Partial<T> };
 
 export function useConverterSettings(uid: string) {
-  return useAccountPreferences(uid, 'converter', defaults);
+  return withSafeModel(useAccountPreferences(uid, 'converter', defaults));
 }
 
 export function useMcqSettings(uid: string) {
-  return useAccountPreferences(uid, 'mcq', mcqDefaults, readLegacyMcqSettings);
+  return withSafeModel(useAccountPreferences(uid, 'mcq', mcqDefaults, readLegacyMcqSettings));
+}
+
+// Accounts that saved Opus/Fable before those were hidden fall back to the default model.
+function withSafeModel<S extends { claudeModel: DirectModel }, U, E>([values, update, error]: readonly [S, U, E]) {
+  const claudeModel = safeDirectModel(values.claudeModel) as DirectModel;
+  return [claudeModel === values.claudeModel ? values : { ...values, claudeModel }, update, error] as const;
 }
 
 function readLegacyMcqSettings(): Partial<typeof mcqDefaults> {

@@ -5,7 +5,7 @@ import { saveQuestions } from './questionSheet.js';
 import { uploadDriveFigure } from './driveFigures.js';
 import { resolveClaudeModel } from './claudeModelSelection.js';
 import { pageChatPrompt } from '../services/pageChat.js';
-import type { ClaudeModel } from '../services/claudeModels.js';
+import { isBlockedModel, safeDirectModel, type ClaudeModel } from '../services/claudeModels.js';
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
@@ -344,8 +344,7 @@ app.get('/api/models/:provider', async (req, res) => {
         for (const m of google ? page.models : page.data) {
           const id = google ? m.name.replace(/^models\//, '') : m.id;
           // Hide expensive models (opus, fable) and unsupported Gemini models
-          const isHidden = /opus|fable/i.test(id);
-          if (isHidden) continue;
+          if (isBlockedModel(id)) continue;
           const disabled = google && (!m.supportedGenerationMethods?.includes('generateContent') || /tts|native-audio|image-generation|image-preview|robotics|computer-use/i.test(id));
           models.push({ id, name: google ? m.displayName : m.display_name, disabled });
         }
@@ -870,7 +869,8 @@ export const callAIWithFallback = async (
 
   if (isClaude) {
     const claudeKey = client?.apiKey || client?.key || process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
-    const selected = config.claudeModel;
+    // Opus/Fable are blocked server-side too: old clients and saved settings get the default model.
+    const selected = safeDirectModel(config.claudeModel);
     const modelsToTry = selected ? [/^anthropic:claude-[a-z0-9.-]+$/.test(selected)
       ? selected.slice(10) : await resolveClaudeModel(selected, claudeKey, config.abortSignal)] : [
       primaryModel || getPrimaryModel(),

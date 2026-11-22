@@ -508,7 +508,19 @@ img[src^="data:image/svg+xml"] { min-width: 8rem; min-height: 3rem; }
 .design-md ul { list-style: disc; padding-left: 1.3em; }
 .design-md ol { list-style: decimal; padding-left: 1.3em; }
 .design-md table { border-collapse: collapse; width: 100%; margin: 4px 0; }
-.design-md th, .design-md td { border: 1px solid #6B7280; padding: 4px 8px; text-align: center; }
-.design-md th { background: #F3F4F6; font-weight: 700; }
+.design-md th, .design-md td { border: 1px solid var(--design-table-border, #6B7280); padding: 4px 8px; text-align: center; }
+.design-md th { background: var(--design-table-head, #F3F4F6); color: var(--design-table-head-text, inherit); font-weight: 700; }
 .design-md .katex-display { margin: 0.4em 0; }
-.design-md mark { background: #FDE68A; color: inherit; padding: 0 0.15em; border-radius: 0.15em; }
+/* The pen colour comes from the theme (--design-hl) or the mark itself; text on a pen is always dark. */
+.design-md mark { background: var(--design-hl, #FDE68A); color: #111827; padding: 0 0.15em; border-radius: 0.15em; }
+
+/* Design Studio: Print / Save as PDF. Only the print view is printed, one slide per sheet. */
+.design-print { display: none; }
+@media print {
+  body > *:not(.design-print) { display: none !important; }
+  html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+  .design-print { display: block; }
+  .design-print .design-sheet { break-after: page; break-inside: avoid; }
+  .design-print .design-sheet:last-child { break-after: auto; }
+  .design-print, .design-print * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

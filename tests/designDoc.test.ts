@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   elementsToDesignDoc, applyDesignOps, outlineForAi, autoPaginate, allBlocks, sanitizeStyle, tint, PRESET_THEMES,
   emphasizeText, stripHighlight, splitBlockText, planOverflowFix, fullTextChunks, emphasisToLinks, balanceStars, plainText,
+  resolveStyle, styleKey, elementCounts, contrast, readableOn, highlightSegments, markSelection, unemphasizeText, calloutInfo, HIGHLIGHTERS,
 } from '../services/designDoc.ts';
 import type { ExtractedElement } from '../types.ts';
 
@@ -46,10 +47,14 @@ describe('outlineForAi', () => {
 });
 
 describe('applyDesignOps', () => {
-  it('styles every block of a type', () => {
+  it('styling "every block of a type" becomes a group style, so it also covers blocks added later', () => {
     const { doc, applied } = applyDesignOps(build(), [{ op: 'styleBlocks', type: 'question', style: { color: '#1d4ed8', border: 'box' } }]);
     assert.equal(applied, 1);
-    for (const q of allBlocks(doc).filter(b => b.type === 'question')) assert.deepEqual(q.style, { color: '#1D4ED8', border: 'box' });
+    assert.deepEqual(doc.theme.styles?.question, { color: '#1D4ED8', border: 'box' });
+    for (const q of allBlocks(doc).filter(b => b.type === 'question')) {
+      assert.equal(q.style, undefined);
+      assert.equal(resolveStyle(doc.theme, q).color, '#1D4ED8');
+    }
   });
 
   it('skips invalid colours, unknown ids and unknown ops without throwing', () => {
@@ -226,8 +231,156 @@ describe('helpers', () => {
     assert.equal(tint('#000000', 1), '#FFFFFF');
     assert.equal(tint('#1D4ED8', 0), '#1D4ED8');
   });
-  it('ships six preset themes with valid colours', () => {
-    assert.equal(PRESET_THEMES.length, 6);
-    for (const t of PRESET_THEMES) assert.match(t.primary, /^#[0-9A-F]{6}$/);
+  it('every preset theme has valid colours and readable text, also the dark ones', () => {
+    assert.equal(PRESET_THEMES.length, 12);
+    for (const t of PRESET_THEMES) {
+      assert.match(t.primary, /^#[0-9A-F]{6}$/);
+      for (const type of ['heading', 'paragraph', 'question', 'answer', 'callout'] as const) {
+        const st = resolveStyle(t, { type, level: 1 });
+        assert.ok(contrast(st.color, st.background || t.pageBackground) >= 2.5, `${t.name}: ${type} is hard to read`);
+      }
+    }
+  });
+});
+
+describe('element styles (all H2, all questions…)', () => {
+  const withHeadings = () => elementsToDesignDoc([{ id: 't', type: 'text', content: '## Chapter\n\nIntro text.\n\n### Section A\n\nBody A.\n\n### Section B\n\nBody B.' }], 'T');
+
+  it('one operation restyles every element of a kind and clears single-block overrides', () => {
+    let doc = withHeadings();
+    const h2s = allBlocks(doc).filter(b => styleKey(b) === 'h2');
+    assert.equal(h2s.length, 2);
+    doc = applyDesignOps(doc, [{ op: 'styleBlocks', ids: [h2s[0].id], style: { color: '#FF0000', bold: false } }]).doc;
+    doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'h2', style: { color: '#16a34a', underline: true } }]).doc;
+    for (const b of allBlocks(doc).filter(x => styleKey(x) === 'h2')) {
+      const st = resolveStyle(doc.theme, b);
+      assert.equal(st.color, '#16A34A');
+      assert.equal(st.underline, true);
+    }
+    assert.deepEqual(allBlocks(doc).find(b => b.id === h2s[0].id)!.style, { bold: false });   // its other override survives
+    assert.notEqual(resolveStyle(doc.theme, allBlocks(doc).find(b => styleKey(b) === 'h1')!).color, '#16A34A');
+  });
+
+  it('a block keeps its own style on top of the group style, and reset brings the theme look back', () => {
+    let doc = applyDesignOps(withHeadings(), [{ op: 'setElementStyle', target: 'paragraph', style: { size: 'lg', font: 'kokila' } }]).doc;
+    const p = allBlocks(doc).find(b => b.type === 'paragraph')!;
+    doc = applyDesignOps(doc, [{ op: 'styleBlocks', ids: [p.id], style: { color: '#123456' } }]).doc;
+    const st = resolveStyle(doc.theme, allBlocks(doc).find(b => b.id === p.id)!);
+    assert.equal(st.color, '#123456');
+    assert.equal(st.font, 'kokila');
+    assert.equal(st.sizePt, doc.theme.baseSize * 1.25);
+    doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'paragraph', reset: true }]).doc;
+    assert.equal(doc.theme.styles?.paragraph, undefined);
+  });
+
+  it('unset removes one property; unknown targets are skipped', () => {
+    let doc = applyDesignOps(withHeadings(), [{ op: 'setElementStyle', target: 'h1', style: { color: '#111111', align: 'center' } }]).doc;
+    doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'h1', unset: ['color'] }]).doc;
+    assert.deepEqual(doc.theme.styles?.h1, { align: 'center' });
+    assert.equal(applyDesignOps(doc, [{ op: 'setElementStyle', target: 'h9', style: { color: '#111111' } }]).applied, 0);
+  });
+
+  it('counts elements by kind and relabels a block', () => {
+    let doc = withHeadings();
+    assert.deepEqual(elementCounts(doc), { h1: 1, h2: 2, paragraph: 3, footer: 1 });
+    const p = allBlocks(doc).find(b => b.type === 'paragraph')!;
+    doc = applyDesignOps(doc, [{ op: 'updateBlock', id: p.id, type: 'callout', variant: 'remember' }]).doc;
+    const box = allBlocks(doc).find(b => b.id === p.id)!;
+    assert.equal(box.variant, 'remember');
+    doc = applyDesignOps(doc, [{ op: 'updateBlock', id: p.id, type: 'heading', level: 3 }]).doc;
+    assert.deepEqual([allBlocks(doc).find(b => b.id === p.id)!.variant, allBlocks(doc).find(b => b.id === p.id)!.level], [undefined, 3]);
+  });
+});
+
+describe('highlighter pens', () => {
+  it('a named pen is written into the marker and shown in its own colour', () => {
+    const marked = emphasizeText('Acid turns blue litmus red', ['blue litmus'], 'highlight', 'green').text;
+    assert.equal(marked, 'Acid turns =={green}blue litmus== red');
+    assert.equal(emphasisToLinks(marked), 'Acid turns [blue litmus](#hl-green) red');
+    assert.deepEqual(highlightSegments(marked, 'yellow'), [{ text: 'Acid turns ' }, { text: 'blue litmus', fill: HIGHLIGHTERS.green, bold: false }, { text: ' red' }]);
+    assert.equal(plainText(marked), 'Acid turns blue litmus red');
+  });
+
+  it('highlights without a pen follow the default pen; "all" recolours the named ones too', () => {
+    let doc = elementsToDesignDoc([{ id: 't', type: 'text', content: 'One ==alpha== and =={pink}**beta**== here.' }], 'T');
+    assert.deepEqual(highlightSegments(allBlocks(doc)[0].text!, 'blue').filter(s => s.fill).map(s => s.fill), [HIGHLIGHTERS.blue, HIGHLIGHTERS.pink]);
+    doc = applyDesignOps(doc, [{ op: 'setHighlighter', color: 'orange', all: true }]).doc;
+    assert.equal(doc.theme.highlight, 'orange');
+    assert.equal(allBlocks(doc)[0].text, 'One ==alpha== and ==**beta**== here.');
+  });
+
+  it('marking a selection merges with what is already there instead of nesting', () => {
+    assert.equal(markSelection('The **key term** matters', 'key term', 'highlight', 'green'), 'The =={green}**key term**== matters');   // stays bold
+    assert.equal(markSelection('The =={pink}key term== matters', 'key term', 'bold'), 'The =={pink}**key term**== matters');           // keeps its pen
+    assert.equal(markSelection('The =={pink}key term== matters', 'key term', 'highlight', 'blue'), 'The =={blue}key term== matters');   // new pen
+    assert.equal(markSelection('Value $x^2$ here', 'x^2', 'bold'), null);                                                              // inside math
+  });
+
+  it('clearMarks removes marks around a phrase, in one block or everywhere', () => {
+    assert.equal(unemphasizeText('A ==**b**== c **d**', 'b'), 'A b c **d**');
+    assert.equal(unemphasizeText('A ==**b**== c **d**', undefined, 'highlight'), 'A **b** c **d**');
+    const doc0 = elementsToDesignDoc([{ id: 't', type: 'text', content: 'A ==b== c\n\nD **e** ==f=='}], 'T');
+    const { doc } = applyDesignOps(doc0, [{ op: 'clearMarks', what: 'highlight' }]);
+    assert.deepEqual(allBlocks(doc).map(b => b.text), ['A b c', 'D **e** f']);
+  });
+});
+
+describe('teaching boxes and slides', () => {
+  const lesson = () => elementsToDesignDoc([{ id: 't', type: 'text', content: '## पाठ\n\nसावधानी — पिन से सावधान रहिए।\n\nयह एक अनुच्छेद है।' }], 'T');
+
+  it('labels a box in the lesson language and drops a label the text already starts with', () => {
+    const doc = lesson();
+    assert.equal(doc.theme.labelLang, 'hi');
+    assert.equal(calloutInfo({ variant: 'caution', text: 'सावधानी — पिन से सावधान रहिए।' }, doc.theme)!.label, '');
+    assert.equal(calloutInfo({ variant: 'remember', text: 'जल उबलता है।' }, doc.theme)!.label, 'याद रखें');
+    assert.equal(calloutInfo({ variant: 'remember', text: 'x' }, { ...doc.theme, labelLang: 'en' })!.label, 'Remember');
+  });
+
+  it('insertSlide adds a slide with typed blocks; the AI still cannot add images', () => {
+    const { doc, applied } = applyDesignOps(lesson(), [{ op: 'insertSlide', atStart: true, layout: 'title', notes: 'Greet the class',
+      blocks: [{ type: 'heading', level: 1, text: 'Cover' }, { type: 'image', text: 'x' }, { type: 'callout', variant: 'objective', text: '- a\n- b' }] }]);
+    assert.equal(applied, 1);
+    assert.deepEqual([doc.pages[0].layout, doc.pages[0].notes, doc.pages[0].blocks.map(b => b.type)], ['title', 'Greet the class', ['heading', 'callout']]);
+    assert.equal(doc.pages[0].blocks[1].variant, 'objective');
+  });
+
+  it('re-splitting the lesson keeps cover slides, notes and columns', () => {
+    let doc = applyDesignOps(lesson(), [{ op: 'insertSlide', atStart: true, layout: 'title', blocks: [{ type: 'heading', level: 1, text: 'Cover' }] }]).doc;
+    const body = doc.pages[1];
+    doc = applyDesignOps(doc, [{ op: 'setPage', pageId: body.id, notes: 'Ask about change', layout: 'two-column' }]).doc;
+    doc = applyDesignOps(doc, [{ op: 'paginate', breaks: [{ beforeBlockId: body.blocks[2].id, title: 'More' }] }]).doc;
+    assert.equal(doc.pages.length, 3);
+    assert.deepEqual([doc.pages[0].layout, doc.pages[0].blocks[0].text], ['title', 'Cover']);
+    assert.deepEqual([doc.pages[1].notes, doc.pages[1].layout, doc.pages[2].title], ['Ask about change', 'two-column', 'More']);
+  });
+
+  it('duplicates, moves and removes slides, but never the last one', () => {
+    let doc = applyDesignOps(lesson(), [{ op: 'insertSlide', title: 'Recap', blocks: [{ type: 'paragraph', text: 'End' }] }]).doc;
+    const [first, second] = doc.pages;
+    doc = applyDesignOps(doc, [{ op: 'movePage', pageId: second.id }]).doc;                      // to the start
+    assert.deepEqual(doc.pages.map(p => p.id), [second.id, first.id]);
+    doc = applyDesignOps(doc, [{ op: 'duplicatePage', pageId: first.id }]).doc;
+    assert.equal(doc.pages.length, 3);
+    assert.notEqual(doc.pages[2].blocks[0].id, first.blocks[0].id);
+    doc = applyDesignOps(doc, [{ op: 'removePage', pageId: doc.pages[2].id }, { op: 'removePage', pageId: second.id }]).doc;
+    assert.deepEqual(doc.pages.map(p => p.id), [first.id]);
+    assert.equal(applyDesignOps(doc, [{ op: 'removePage', pageId: first.id }]).applied, 0);
+  });
+
+  it('find and replace changes text and titles', () => {
+    let doc = applyDesignOps(lesson(), [{ op: 'setPage', pageId: lesson().pages[0].id, title: 'x' }]).doc;
+    doc = applyDesignOps(doc, [{ op: 'findReplace', find: 'अनुच्छेद', replace: 'पैराग्राफ' }]).doc;
+    assert.ok(allBlocks(doc).some(b => b.text === 'यह एक पैराग्राफ है।'));
+    assert.equal(applyDesignOps(doc, [{ op: 'findReplace', find: 'not there', replace: 'x' }]).applied, 0);
+  });
+
+  it('section slides get the theme colour with readable text; a whole-lesson outline fits its budget', () => {
+    const theme = PRESET_THEMES[1];
+    const st = resolveStyle(theme, { type: 'heading', level: 1 }, { pageLayout: 'section', layout: 'slides' });
+    assert.equal(st.align, 'center');
+    assert.equal(st.color, readableOn(theme.primary));
+    assert.equal(st.background, undefined);
+    const big = elementsToDesignDoc([{ id: 't', type: 'text', content: Array.from({ length: 40 }, (_, i) => `Para ${i} ` + 'x'.repeat(900)).join('\n\n') }], 'T');
+    assert.ok(JSON.stringify(outlineForAi(big, { maxChars: 9000 })).length < 13000);
   });
 });

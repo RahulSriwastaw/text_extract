@@ -1,72 +1,37 @@
 /**
  * Design Studio → Word (.docx).
  *
- * Renders the same theme + block styles the canvas shows, using the `docx` library.
+ * Draws what the canvas shows with the `docx` library: theme, per-element styles, teaching
+ * boxes, highlighter pens, cover / section / two-column slides and page decorations.
  * Math and bold/italic inside text reuse the converters of the plain DOCX export.
  * Slides layout becomes 16:9 landscape pages, one slide per page.
+ *
+ * Word has no per-page background, so a slide with its own colour (or a section slide) is
+ * drawn as one shaded panel that fills the area inside the page margins.
  */
 import {
   Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, ImageRun, Table, TableRow, TableCell,
-  WidthType, Header, Footer, PageNumber, PageOrientation, ShadingType,
+  WidthType, Header, Footer, PageNumber, PageOrientation, ShadingType, HeightRule, VerticalAlign,
+  PageBorderOffsetFrom, PageBorderDisplay, LineRuleType,
 } from 'docx';
-import { parseLineToChildren, createDocxTable, type DocxRunStyle } from './docxService';
+import { parseLineToChildren, type DocxRunStyle } from './docxService';
 import {
-  type DesignDoc, type DesignBlock, type Theme, type BlockStyle, type Layout,
-  SIZE_SCALE, HEADING_SCALE, PAGE_SIZE, LAYOUT_TEXT_SCALE, tint, questionNumbers, displayText, stripHighlight, balanceStars, FONT_IDS, FONTS as FONT_LIST,
+  type DesignDoc, type DesignBlock, type DesignPage, type StyleContext, type ResolvedStyle,
+  FONTS, PAGE_SIZE, SPACING, IMAGE_WIDTH, HIGHLIGHT_TEXT,
+  resolveStyle, pageFill, calloutInfo, mix, legible, questionNumbers, displayText, balanceStars, highlightSegments, plainText,
 } from './designDoc';
 
-const FONTS = Object.fromEntries(FONT_IDS.map(id => [id, FONT_LIST[id].docx])) as Record<Theme['font'], string>;
+export interface DesignDocxOptions {
+  /** Append every slide's teacher notes after the last slide. */
+  includeNotes?: boolean;
+}
+
 const hex = (c: string) => c.replace('#', '');
 const PX_TO_TWIP = 15;
 const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
 const NO_BORDERS = { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER };
-
-/** What a block looks like once the theme defaults and its own style are combined. */
-export interface ResolvedStyle extends Required<Pick<BlockStyle, 'color' | 'align' | 'bold' | 'italic' | 'border' | 'borderColor'>> {
-  background?: string;
-  sizePt: number;
-}
-
-/** Theme defaults per block type + the block's own overrides. Shared with the canvas so both look the same. */
-export function resolveStyle(theme: Theme, block: DesignBlock, layout: Layout = 'document', pageScale = 1): ResolvedStyle {
-  const s = block.style || {};
-  const base = theme.baseSize * LAYOUT_TEXT_SCALE[layout] * pageScale;
-  const out: ResolvedStyle = {
-    color: theme.text, align: 'left', bold: false, italic: false, border: 'none', borderColor: theme.primary,
-    sizePt: base,
-  };
-  switch (block.type) {
-    case 'heading':
-      out.bold = true;
-      out.sizePt = base * HEADING_SCALE[block.level || 2];
-      out.color = theme.headingStyle === 'banner' ? '#FFFFFF' : theme.primary;
-      if (theme.headingStyle === 'banner') out.background = theme.primary;
-      if (theme.headingStyle === 'bar') out.border = 'left-bar';
-      break;
-    case 'question':
-      out.bold = true;
-      if (theme.questionStyle === 'boxed') { out.border = 'box'; out.background = tint(theme.primary, 0.93); }
-      if (theme.questionStyle === 'numbered-badge') out.color = theme.primary;
-      break;
-    case 'answer':
-      out.bold = true; out.color = theme.accent;
-      break;
-    case 'callout':
-      out.border = 'left-bar'; out.borderColor = theme.accent; out.background = tint(theme.accent, 0.9);
-      break;
-  }
-  if (s.color) out.color = s.color;
-  if (s.background) out.background = s.background;
-  if (s.align) out.align = s.align;
-  if (s.bold !== undefined) out.bold = s.bold;
-  if (s.italic !== undefined) out.italic = s.italic;
-  if (s.border) out.border = s.border;
-  if (s.borderColor) out.borderColor = s.borderColor;
-  if (s.size) out.sizePt *= SIZE_SCALE[s.size];
-  return out;
-}
-
 const ALIGN = { left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: AlignmentType.RIGHT };
+type Child = Paragraph | Table;
 
 function imageSize(dataUrl: string, maxWidth: number, maxHeight: number): Promise<{ width: number; height: number }> {
   return new Promise(resolve => {
@@ -80,62 +45,75 @@ function imageSize(dataUrl: string, maxWidth: number, maxHeight: number): Promis
   });
 }
 
-export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
+export async function generateDesignDocx(doc: DesignDoc, options: DesignDocxOptions = {}): Promise<Blob> {
   const { theme } = doc;
-  const page = PAGE_SIZE[doc.layout];
-  const contentWidth = page.width - page.padding * 2;
+  const slides = doc.layout === 'slides';
+  const size = PAGE_SIZE[doc.layout];
+  const usableWidth = size.width - size.padding * 2;
+  const usableHeight = (size.height - size.padding * 2) * PX_TO_TWIP;
+  const spacing = SPACING[theme.spacing || 'normal'];
   const numbers = questionNumbers(doc);
-  const children: (Paragraph | Table)[] = [];
-  let breakPending = false;          // the next paragraph starts a new page
 
-  let pageScale = 1;                 // per-slide text shrink (page.scale)
-  const HIGHLIGHT = { type: ShadingType.CLEAR, fill: 'FDE68A', color: 'auto' };
+  const runStyle = (st: ResolvedStyle): DocxRunStyle => ({
+    font: FONTS[st.font].docx, size: Math.round(st.sizePt * 2), color: hex(st.color),
+    ...(st.italic && { italics: true }), ...(st.underline && { underline: {} }),
+  });
 
-  /** Text → runs. ==highlight== and ==**bold highlight**== become shaded runs; the rest keeps bold/italic/math. */
+  /** Text → runs. Highlighted words become shaded runs in their pen colour; the rest keeps bold/italic/math. */
   const runs = (text: string, bold: boolean, run: DocxRunStyle): any[] =>
-    text.split(/(==[^=\n]+==)/g).filter(Boolean).flatMap(part => {
-      const both = part.match(/^==\s*\*\*([^=*\n]+)\*\*\s*==$/), marked = part.match(/^==([^=\n]+)==$/);
-      if (both) return parseLineToChildren(both[1], true, undefined, { ...run, shading: HIGHLIGHT });
-      if (marked) return parseLineToChildren(balanceStars(marked[1]), bold, undefined, { ...run, shading: HIGHLIGHT });
-      return parseLineToChildren(balanceStars(part).replace(/==/g, ''), bold, undefined, run);
-    });
+    highlightSegments(text, theme.highlight).flatMap(part => part.fill
+      ? parseLineToChildren(balanceStars(part.text), bold || !!part.bold, undefined,
+        { ...run, color: hex(HIGHLIGHT_TEXT), shading: { type: ShadingType.CLEAR, fill: hex(part.fill), color: 'auto' } })
+      : parseLineToChildren(balanceStars(part.text).replace(/==/g, ''), bold, undefined, run));
 
-  const paragraph = (block: DesignBlock, text: string, extra: Record<string, any> = {}) => {
-    const st = resolveStyle(theme, block, doc.layout, pageScale);
-    const run: DocxRunStyle = { font: FONTS[theme.font], size: Math.round(st.sizePt * 2), color: hex(st.color), ...(st.italic && { italics: true }) };
-    const line = (color: string, size: number) => ({ style: BorderStyle.SINGLE, size, color: hex(color), space: 6 });
+  const paragraphProps = (st: ResolvedStyle, heading: boolean) => {
+    const line = (color: string, width: number) => ({ style: BorderStyle.SINGLE, size: width, color: hex(color), space: 6 });
     const border =
       st.border === 'box' ? { top: line(st.borderColor, 8), bottom: line(st.borderColor, 8), left: line(st.borderColor, 8), right: line(st.borderColor, 8) }
       : st.border === 'left-bar' ? { left: line(st.borderColor, 32) }
       : st.border === 'underline' ? { bottom: line(st.borderColor, 12) }
       : undefined;
-    const p = new Paragraph({
-      children: runs(text, st.bold, run),
+    return {
       alignment: ALIGN[st.align],
-      spacing: { before: block.type === 'heading' ? 200 : 80, after: block.type === 'heading' ? 140 : 80, line: 300 },
+      spacing: { before: Math.round((heading ? 200 : 80) * spacing), after: Math.round((heading ? 140 : 80) * spacing), line: Math.round(290 * spacing) },
       ...(border && { border }),
       ...(st.background && { shading: { type: ShadingType.CLEAR, fill: hex(st.background), color: 'auto' } }),
-      ...(breakPending && { pageBreakBefore: true }),
-      ...extra,
+    };
+  };
+
+  const paragraph = (block: Pick<DesignBlock, 'type' | 'level' | 'variant' | 'style'>, text: string, ctx: StyleContext, extra: Record<string, any> = {}) => {
+    const st = resolveStyle(theme, block, ctx);
+    return new Paragraph({ children: runs(text, st.bold, runStyle(st)), ...paragraphProps(st, block.type === 'heading'), ...extra });
+  };
+
+  /** A Markdown table, in the theme's colours. */
+  const table = (block: DesignBlock, ctx: StyleContext, fill: string): Table => {
+    const st = resolveStyle(theme, block, ctx);
+    const run = runStyle(st);
+    const edge = { style: BorderStyle.SINGLE, size: 6, color: hex(mix(st.color, fill, 0.45)) };
+    const headerFill = mix(theme.primary, fill, 0.8);
+    const lines = (block.text || '').split('\n').filter(l => l.trim() && !/^\|\s*[-:]+/.test(l));
+    const rows = lines.map((line, r) => {
+      const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+      return new TableRow({
+        children: cells.map(cell => new TableCell({
+          width: { size: 100 / cells.length, type: WidthType.PERCENTAGE },
+          verticalAlign: VerticalAlign.CENTER,
+          borders: { top: edge, bottom: edge, left: edge, right: edge },
+          ...(r === 0 && { shading: { type: ShadingType.CLEAR, fill: hex(headerFill), color: 'auto' } }),
+          children: [new Paragraph({
+            children: runs(cell.trim(), r === 0 || st.bold, r === 0 ? { ...run, color: hex(legible(st.color, headerFill, 3)) } : run),
+            alignment: AlignmentType.CENTER, spacing: { before: 40, after: 40 },
+          })],
+        })),
+      });
     });
-    breakPending = false;
-    return p;
-  };
-  /** Tables cannot carry a page break themselves: spend it on an empty paragraph first. */
-  const flushBreak = () => {
-    if (!breakPending) return;
-    children.push(new Paragraph({ pageBreakBefore: true, spacing: { before: 0, after: 0 }, children: [] }));
-    breakPending = false;
+    return new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } });
   };
 
-  for (const [pageIndex, designPage] of doc.pages.entries()) {
-    breakPending = pageIndex > 0;
-    pageScale = designPage.scale || 1;
-    if (designPage.title) {
-      children.push(paragraph({ id: 'title', type: 'heading', level: 1 }, designPage.title));
-    }
-
-    const blocks = designPage.blocks;
+  /** One slide's blocks → Word content. `width` is the px width they may use (half in a column). */
+  const renderBlocks = async (blocks: DesignBlock[], ctx: StyleContext, fill: string, width: number): Promise<Child[]> => {
+    const out: Child[] = [];
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
 
@@ -144,20 +122,18 @@ export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
         const group: DesignBlock[] = [];
         while (i < blocks.length && blocks[i].type === 'option') group.push(blocks[i++]);
         i--;
-        flushBreak();
         const columns = theme.optionColumns;
         const rows: TableRow[] = [];
         for (let r = 0; r < group.length; r += columns) {
-          const cells = Array.from({ length: columns }, (_, c) => group[r + c]);
           rows.push(new TableRow({
-            children: cells.map(option => new TableCell({
+            children: Array.from({ length: columns }, (_, c) => group[r + c]).map(option => new TableCell({
               width: { size: 100 / columns, type: WidthType.PERCENTAGE },
               borders: NO_BORDERS,
-              children: [option ? paragraph(option, displayText(option)) : new Paragraph({ children: [] })],
+              children: [option ? paragraph(option, displayText(option), ctx) : new Paragraph({ children: [] })],
             })),
           }));
         }
-        children.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE }, borders: { ...NO_BORDERS, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER } }));
+        out.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE }, borders: { ...NO_BORDERS, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER } }));
         continue;
       }
 
@@ -165,47 +141,154 @@ export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
         case 'image': {
           const data = block.assetId && doc.assets[block.assetId];
           if (!data || !/^data:image\/(png|jpe?g);base64,/.test(data)) break;
-          const size = await imageSize(data, Math.min(contentWidth, 520), doc.layout === 'slides' ? 330 : 420);
-          children.push(new Paragraph({
-            children: [new ImageRun({ data, transformation: size })],
-            alignment: ALIGN[block.style?.align || 'center'],
+          const st = resolveStyle(theme, block, ctx);
+          const box = await imageSize(data, Math.round(width * IMAGE_WIDTH[st.width]), slides ? 400 : 520);
+          out.push(new Paragraph({
+            children: [new ImageRun({ data, transformation: box })],
+            alignment: ALIGN[block.style?.align || theme.styles?.image?.align || 'center'],
             spacing: { before: 120, after: 120 },
-            ...(breakPending && { pageBreakBefore: true }),
           }));
-          breakPending = false;
           break;
         }
         case 'table':
-          flushBreak();
-          children.push(createDocxTable(stripHighlight(block.text || '').split('\n').filter(Boolean), {
-            font: FONTS[theme.font], color: hex(theme.text),
-            size: Math.round(resolveStyle(theme, block, doc.layout, pageScale).sizePt * 2),
-          }));
-          children.push(new Paragraph({ children: [], spacing: { before: 0, after: 80 } }));
+          out.push(table(block, ctx, fill));
+          out.push(new Paragraph({ children: [], spacing: { before: 0, after: 80 } }));
           break;
         case 'divider':
-          children.push(paragraph({ ...block, style: { ...block.style, border: 'underline' } }, ''));
+          out.push(paragraph({ ...block, style: { ...block.style, border: 'underline' } }, '', ctx));
           break;
         case 'list':
           for (const item of (block.text || '').split('\n').filter(Boolean)) {
-            children.push(paragraph(block, item.replace(/^([-*•])\s+/, '•  '), { indent: { left: 360, hanging: 240 } }));
+            out.push(paragraph(block, item.replace(/^([-*•])\s+/, '•  '), ctx, { indent: { left: 360, hanging: 240 } }));
           }
           break;
+        case 'callout': {
+          // Label line + body share the same bar and shading, so Word joins them into one box.
+          const info = calloutInfo(block, theme);
+          const st = resolveStyle(theme, block, ctx);
+          if (info?.label) {
+            const tone = legible(info.color, st.background || fill, 4.5);
+            out.push(new Paragraph({
+              children: [
+                new TextRun({ text: info.icon + ' ', font: 'Segoe UI Emoji', size: Math.round(st.sizePt * 1.7) }),
+                new TextRun({ text: info.label, font: FONTS[st.font].docx, size: Math.round(st.sizePt * 1.7), bold: true, color: hex(tone) }),
+              ],
+              ...paragraphProps(st, false), keepNext: true,
+            }));
+          }
+          out.push(paragraph(block, block.text || '', ctx));
+          break;
+        }
         default:
-          children.push(paragraph(block, displayText(block, numbers[block.id]), block.type === 'option' ? { indent: { left: 360 } } : {}));
+          out.push(paragraph(block, displayText(block, numbers[block.id]), ctx, block.type === 'option' ? { indent: { left: 360 } } : {}));
       }
+    }
+    return out;
+  };
+
+  /** Rough size of a block, to balance two columns. */
+  const weight = (b: DesignBlock) => b.type === 'image' ? 500 : b.type === 'table' ? 120 + (b.text || '').split('\n').length * 90 : 90 + plainText(b.text || '').length;
+
+  /** A cell must end with a paragraph. */
+  const cellChildren = (items: Child[]) => items.length && items[items.length - 1] instanceof Paragraph ? items : [...items, new Paragraph({ children: [] })];
+
+  const renderPage = async (page: DesignPage): Promise<Child[]> => {
+    const ctx: StyleContext = { layout: doc.layout, pageScale: page.scale, pageLayout: page.layout, pageBackground: page.background };
+    const fill = pageFill(theme, page);
+    const ownFill = fill.toUpperCase() !== theme.pageBackground.toUpperCase() ? fill : undefined;
+    const special = page.layout === 'title' || page.layout === 'section';
+    const content: Child[] = [];
+    if (page.title) content.push(paragraph({ type: 'heading', level: 1 }, page.title, { ...ctx, key: 'title' }));
+
+    if (page.layout === 'two-column' && page.blocks.length > 1) {
+      // A leading heading runs across both columns.
+      const lead = page.blocks[0].type === 'heading' ? 1 : 0;
+      content.push(...await renderBlocks(page.blocks.slice(0, lead), ctx, fill, usableWidth));
+      const rest = page.blocks.slice(lead);
+      const total = rest.reduce((n, b) => n + weight(b), 0);
+      let cut = 0, run = 0;
+      while (cut < rest.length - 1 && run + weight(rest[cut]) / 2 < total / 2) run += weight(rest[cut++]);
+      cut = Math.max(1, cut);
+      const half = usableWidth / 2 - 16;
+      const column = async (blocks: DesignBlock[], pad: 'left' | 'right') => new TableCell({
+        width: { size: 50, type: WidthType.PERCENTAGE }, borders: NO_BORDERS,
+        margins: { [pad]: 200 },
+        children: cellChildren(await renderBlocks(blocks, ctx, fill, half)),
+      });
+      content.push(new Table({
+        rows: [new TableRow({ children: [await column(rest.slice(0, cut), 'right'), await column(rest.slice(cut), 'left')] })],
+        width: { size: 100, type: WidthType.PERCENTAGE }, borders: { ...NO_BORDERS, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER },
+      }));
+    } else {
+      content.push(...await renderBlocks(page.blocks, ctx, fill, usableWidth));
+    }
+
+    if (!ownFill && !(special && slides)) return content;
+    // One panel filling the slide: its own colour, and (covers, section slides) content centred vertically.
+    return [new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: { ...NO_BORDERS, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER },
+      rows: [new TableRow({
+        ...(slides && { height: { value: usableHeight - 600, rule: HeightRule.ATLEAST } }),
+        children: [new TableCell({
+          borders: NO_BORDERS,
+          verticalAlign: special ? VerticalAlign.CENTER : VerticalAlign.TOP,
+          margins: { top: 200, bottom: 200, left: 300, right: 300 },
+          ...(ownFill && { shading: { type: ShadingType.CLEAR, fill: hex(ownFill), color: 'auto' } }),
+          children: cellChildren(content),
+        })],
+      })],
+    })];
+  };
+
+  // ---- pages --------------------------------------------------------------------
+  const children: Child[] = [];
+  /** An (almost) zero-height paragraph that starts a new page; works before tables too. */
+  const pageBreak = () => new Paragraph({
+    pageBreakBefore: true, spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT },
+    children: [new TextRun({ text: '', size: 2 })],
+  });
+  for (const [index, page] of doc.pages.entries()) {
+    if (index > 0) children.push(pageBreak());
+    children.push(...await renderPage(page));
+  }
+
+  const notes = options.includeNotes ? doc.pages.map((page, i) => ({ page, i })).filter(x => x.page.notes) : [];
+  if (notes.length) {
+    const ctx: StyleContext = { layout: 'document' };
+    children.push(pageBreak());
+    children.push(paragraph({ type: 'heading', level: 1 }, theme.labelLang === 'hi' ? 'शिक्षक के लिए नोट्स' : 'Teacher notes', ctx));
+    for (const { page, i } of notes) {
+      const name = plainText(page.title || (page.blocks[0]?.type === 'heading' ? page.blocks[0].text || '' : ''));
+      children.push(paragraph({ type: 'heading', level: 3 }, `${slides ? 'Slide' : 'Section'} ${i + 1}${name ? ' — ' + name : ''}`, ctx));
+      for (const line of page.notes!.split('\n').filter(l => l.trim())) children.push(paragraph({ type: 'paragraph' }, line, ctx));
     }
   }
   if (!children.length) children.push(new Paragraph({ children: [] }));
 
-  const small = (text: string | undefined, withPageNumber: boolean) => new Paragraph({
-    alignment: AlignmentType.CENTER,
-    children: [
-      ...(text ? [new TextRun({ text, font: FONTS[theme.font], size: 16, color: '6B7280' })] : []),
-      ...(withPageNumber ? [new TextRun({ children: [text ? '   ·   ' : '', PageNumber.CURRENT], font: FONTS[theme.font], size: 16, color: '6B7280' })] : []),
-    ],
-  });
-  const margin = page.padding * PX_TO_TWIP;
+  // ---- header, footer, page decoration ----------------------------------------------
+  const running = (key: 'header' | 'footer', text: string | undefined, withPageNumber: boolean) => {
+    const st = resolveStyle(theme, { type: 'paragraph' }, { layout: doc.layout, key });
+    const run = { font: FONTS[st.font].docx, size: Math.round(st.sizePt * 2), color: hex(st.color), bold: st.bold, italics: st.italic };
+    return new Paragraph({
+      alignment: ALIGN[st.align],
+      children: [
+        ...(text ? [new TextRun({ text, ...run })] : []),
+        ...(withPageNumber ? [new TextRun({ children: [text ? '   ·   ' : '', PageNumber.CURRENT], ...run })] : []),
+      ],
+    });
+  };
+  const margin = size.padding * PX_TO_TWIP;
+  const bar = { style: BorderStyle.SINGLE, size: 96, color: hex(theme.primary), space: 0 };       // 12 pt, the widest Word allows
+  const frame = { style: BorderStyle.SINGLE, size: 24, color: hex(theme.primary), space: 14 };
+  const decoration = theme.decoration || 'none';
+  const borders = decoration === 'none' ? undefined : {
+    pageBorders: { offsetFrom: PageBorderOffsetFrom.PAGE, display: PageBorderDisplay.ALL_PAGES },
+    ...(decoration === 'top-bar' && { pageBorderTop: bar }),
+    ...(decoration === 'bottom-bar' && { pageBorderBottom: bar }),
+    ...(decoration === 'left-bar' && { pageBorderLeft: bar }),
+    ...(decoration === 'frame' && { pageBorderTop: frame, pageBorderBottom: frame, pageBorderLeft: frame, pageBorderRight: frame }),
+  };
 
   const document = new Document({
     ...(theme.pageBackground.toUpperCase() !== '#FFFFFF' && { background: { color: hex(theme.pageBackground) } }),
@@ -213,14 +296,15 @@ export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
       properties: {
         page: {
           margin: { top: margin, right: margin, bottom: margin, left: margin },
-          size: doc.layout === 'slides'
+          size: slides
             // docx swaps width/height itself when the orientation is landscape
-            ? { width: page.height * PX_TO_TWIP, height: page.width * PX_TO_TWIP, orientation: PageOrientation.LANDSCAPE }
-            : { width: page.width * PX_TO_TWIP, height: page.height * PX_TO_TWIP, orientation: PageOrientation.PORTRAIT },
+            ? { width: size.height * PX_TO_TWIP, height: size.width * PX_TO_TWIP, orientation: PageOrientation.LANDSCAPE }
+            : { width: size.width * PX_TO_TWIP, height: size.height * PX_TO_TWIP, orientation: PageOrientation.PORTRAIT },
+          ...(borders && { borders }),
         },
       },
-      ...(theme.header && { headers: { default: new Header({ children: [small(theme.header, false)] }) } }),
-      ...((theme.footer || theme.showPageNumbers) && { footers: { default: new Footer({ children: [small(theme.footer, theme.showPageNumbers)] }) } }),
+      ...(theme.header && { headers: { default: new Header({ children: [running('header', theme.header, false)] }) } }),
+      ...((theme.footer || theme.showPageNumbers) && { footers: { default: new Footer({ children: [running('footer', theme.footer, theme.showPageNumbers)] }) } }),
       children,
     }],
   });

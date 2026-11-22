@@ -3,7 +3,7 @@ import { Send, Sparkles, Undo2, Loader2, Square, GraduationCap } from 'lucide-re
 import { apiFetch } from '../../services/apiClient';
 import { directModelFields, defaultClaudeModel, type DirectModel } from '../../services/claudeModels';
 import { ClaudeModelSelect } from '../ClaudeModelSelect';
-import { DESIGN_TEMPLATES, type DesignChatTurn, type DesignChatResponse, type DesignTemplate } from '../../services/designChat';
+import { DESIGN_TEMPLATES, type DesignChatTurn, type DesignChatResponse, type DesignTemplate, type TemplateMode } from '../../services/designChat';
 import { type DesignDoc, outlineForAi, fullTextChunks } from '../../services/designDoc';
 
 export interface ChatMessage extends DesignChatTurn {
@@ -14,6 +14,10 @@ export interface ChatMessage extends DesignChatTurn {
 }
 
 type Scope = 'design' | 'text' | 'page';
+/** Whole-lesson requests send at most this much text in one go. */
+const LESSON_CHARS = 9000;
+const GROUPS = [...new Set(DESIGN_TEMPLATES.map(t => t.group))];
+const MODE_HINT: Record<TemplateMode, string> = { design: '', fullText: 'reads every word', lesson: 'writes new content' };
 
 interface Props {
   doc: DesignDoc;
@@ -26,11 +30,9 @@ interface Props {
   /** Apply the AI's operations; returns how many were applied and skipped. */
   applyOps: (ops: unknown[]) => { applied: number; skipped: number };
   restore: (doc: DesignDoc) => void;
-  /** Lets the canvas ask the chat to send a request (e.g. "split this slide"). */
-  pending?: { request: string; pageId?: string; key: number };
 }
 
-const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messages, setMessages, applyOps, restore, pending }) => {
+const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, setMessages, applyOps, restore }) => {
   const [draft, setDraft] = useState('');
   const [scope, setScope] = useState<Scope>('design');
   const [model, setModel] = useState<DirectModel>(defaultClaudeModel);
@@ -38,10 +40,10 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
   const [error, setError] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
-  const handled = useRef(0);
   const stop = useRef(false);
 
-  useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages, sending]);
+  // Follow the conversation; an empty chat shows the list of jobs from its top.
+  useEffect(() => { if (messages.length) listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages, sending]);
 
   const call = async (body: Record<string, unknown>): Promise<DesignChatResponse> => {
     const response = await apiFetch('/api/design-chat', {
@@ -54,7 +56,8 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
     return data;
   };
 
-  const send = async (request: string, options: { pageId?: string; fullText?: boolean } = {}) => {
+  /** `mode` comes from a template; a typed message uses the Design / Full text / This page switch. */
+  const send = async (request: string, mode?: TemplateMode) => {
     request = request.trim();
     if (!request || sending) return;
     const before = getDoc();
@@ -65,17 +68,20 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
     const shown = request.length > 220 ? request.slice(0, 220) + '…' : request;
     setMessages(m => [...m, { id: 'u' + Date.now(), role: 'user', text: shown }]);
 
-    const scopePageId = options.pageId || (scope === 'page' && !options.fullText ? selectedPageId : undefined);
-    const fullText = !scopePageId && (options.fullText ?? scope === 'text');
+    const scopePageId = !mode && scope === 'page' ? selectedPageId : undefined;
+    const how: TemplateMode | 'page' = scopePageId ? 'page' : mode || (scope === 'text' ? 'fullText' : 'design');
     let applied = 0, skipped = 0, reply = '', done = 0, failure = '', cutShort = 0;
+    const common = () => { const current = getDoc()!; return { theme: current.theme, layout: current.layout, history, request }; };
 
     try {
-      if (!fullText) {
-        setSending('Designing…');
+      if (how !== 'fullText') {
+        setSending(how === 'lesson' ? 'Reading the lesson and writing…' : 'Designing…');
         const current = getDoc()!;
         const data = await call({
-          outline: outlineForAi(current, { pageIds: scopePageId ? [scopePageId] : undefined, fullText: !!scopePageId, fill }),
-          theme: current.theme, layout: current.layout, history, request, scopePageId,
+          ...common(),
+          ...(how === 'page' ? { outline: outlineForAi(current, { pageIds: [scopePageId!], fullText: true, fill }), scopePageId }
+            : how === 'lesson' ? { outline: outlineForAi(current, { maxChars: LESSON_CHARS }), lesson: true }
+            : { outline: outlineForAi(current, { fill }) }),
         });
         ({ applied, skipped } = applyOps(data.ops || []));
         reply = data.reply;
@@ -89,10 +95,8 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
         for (const [i, blockIds] of chunks.entries()) {
           if (stop.current) break;
           setSending(chunks.length > 1 ? `Reading part ${i + 1} of ${chunks.length}…` : 'Reading the full text…');
-          const current = getDoc()!;
           const data = await call({
-            outline: outlineForAi(current, { blockIds, fullText: true }),
-            theme: current.theme, layout: current.layout, history, request, fullText: true,
+            ...common(), outline: outlineForAi(getDoc()!, { blockIds, fullText: true }), fullText: true,
             ...(chunks.length > 1 && { part: `${i + 1} of ${chunks.length}` }),
           });
           const ops = (data.ops || []).filter((op: any) => {
@@ -135,20 +139,20 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
     setSending('');
   };
 
-  const runTemplate = (t: DesignTemplate) => send(t.request, { fullText: !!t.fullText });
-
-  // A request raised from the canvas (split an overflowing slide)
-  useEffect(() => {
-    if (pending && pending.key !== handled.current) { handled.current = pending.key; send(pending.request, { pageId: pending.pageId }); }
-  }, [pending]);
-
   const templates = (
-    <div className="flex flex-wrap gap-1.5">
-      {DESIGN_TEMPLATES.map(t => (
-        <button key={t.label} type="button" disabled={!!sending} onClick={() => runTemplate(t)} title={t.request}
-          className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-ink-2 bg-white/[0.04] border border-white/[0.08] hover:border-accent hover:text-ink text-left disabled:opacity-50">
-          {t.label}{t.fullText && <span className="text-ink-3"> · reads full text</span>}
-        </button>
+    <div className="space-y-2.5">
+      {GROUPS.map(group => (
+        <div key={group}>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-ink-3 mb-1">{group}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {DESIGN_TEMPLATES.filter(t => t.group === group).map((t: DesignTemplate) => (
+              <button key={t.label} type="button" disabled={!!sending} onClick={() => send(t.request, t.mode)} title={t.request}
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-ink-2 bg-white/[0.04] border border-white/[0.08] hover:border-accent hover:text-ink text-left disabled:opacity-50">
+                {t.label}{MODE_HINT[t.mode] && <span className="text-ink-3"> · {MODE_HINT[t.mode]}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );
@@ -158,7 +162,7 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
       <div ref={listRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-3 p-3" aria-live="polite">
         {messages.length === 0 && (
           <div>
-            <p className="text-xs text-ink-3 mb-2">Pick a teaching template or tell the AI what you want. It changes design, layout, bold and highlight; your wording stays the same unless you ask.</p>
+            <p className="text-xs text-ink-3 mb-3">Pick a ready-made job or tell the AI what you want. It designs, labels elements, marks words and writes extra slides; your own wording stays the same unless you ask.</p>
             {templates}
           </div>
         )}
@@ -176,10 +180,13 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
             </div>
           </div>
         ))}
+        {messages.length > 0 && showTemplates && <div className="pt-1">{templates}</div>}
         {sending && (
           <p className="flex items-center gap-2 text-xs text-ink-3">
             <Loader2 size={13} className="animate-spin" /> {sending}
-            <button type="button" onClick={() => { stop.current = true; }} className="inline-flex items-center gap-1 text-[11px] font-bold text-ink-2 hover:text-ink"><Square size={10} /> Stop after this part</button>
+            {sending.startsWith('Reading part') && (
+              <button type="button" onClick={() => { stop.current = true; }} className="inline-flex items-center gap-1 text-[11px] font-bold text-ink-2 hover:text-ink"><Square size={10} /> Stop after this part</button>
+            )}
           </p>
         )}
       </div>
@@ -188,33 +195,30 @@ const DesignChat: React.FC<Props> = ({ doc, getDoc, fill, selectedPageId, messag
 
       <div className="border-t border-line p-3 space-y-2">
         {messages.length > 0 && (
-          <div>
-            <button type="button" onClick={() => setShowTemplates(v => !v)} aria-expanded={showTemplates}
-              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-accent-light hover:underline mb-1.5">
-              <GraduationCap size={13} /> {showTemplates ? 'Hide teaching templates' : 'Teaching templates'}
-            </button>
-            {showTemplates && templates}
-          </div>
+          <button type="button" onClick={() => setShowTemplates(v => !v)} aria-expanded={showTemplates}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-accent-light hover:underline">
+            <GraduationCap size={13} /> {showTemplates ? 'Hide ready-made jobs' : 'Ready-made jobs for teachers'}
+          </button>
         )}
-        <div className="seg seg-sm w-full" role="group" aria-label="What the AI reads">
+        <div className="seg seg-sm w-full" role="group" aria-label="What the AI reads for a typed message">
           <button type="button" className="seg-item flex-1" aria-pressed={scope === 'design'} onClick={() => setScope('design')}
-            title="Whole document with shortened text. Cheapest. For colours, layout, slides, removing leftovers.">Design</button>
+            title="Whole document with shortened text. Cheapest. For colours, layout, slides, labelling elements.">Design</button>
           <button type="button" className="seg-item flex-1" aria-pressed={scope === 'text'} onClick={() => setScope('text')}
-            title="Whole document with every word, sent in parts. Needed to bold or highlight words. Uses more tokens.">Full text</button>
+            title="Whole document with every word, sent in parts. Needed to bold, highlight, proofread or translate. Uses more tokens.">Full text</button>
           <button type="button" className="seg-item flex-1" aria-pressed={scope === 'page'} onClick={() => setScope('page')} disabled={!selectedPageId}
             title="Only the selected page, with its full text.">This page</button>
         </div>
         <ClaudeModelSelect value={model} onChange={setModel} />
         <form className="flex items-end gap-2" onSubmit={e => { e.preventDefault(); send(draft); }}>
           <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={2} aria-label="Message to the design AI"
-            placeholder="e.g. Important words ko bold aur highlight karo, headings bade karo"
+            placeholder="e.g. Sabhi H2 ko hara karo, definitions ko green highlight karo"
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft); } }}
             className="textarea flex-1 text-xs resize-none" />
           <button type="submit" disabled={!!sending || !draft.trim()} className="btn btn-primary btn-icon" aria-label="Send" title="Send">
             {sending ? <Loader2 className="animate-spin" /> : <Send />}
           </button>
         </form>
-        <p className="flex items-center gap-1 text-[10px] text-ink-3"><Sparkles size={11} /> Each message uses plan tokens; "Full text" uses the most. Themes, manual edits and auto-fit are free.</p>
+        <p className="flex items-center gap-1 text-[10px] text-ink-3"><Sparkles size={11} /> Each AI message uses plan tokens. The Theme, Elements and Insert tabs are free.</p>
       </div>
     </div>
   );

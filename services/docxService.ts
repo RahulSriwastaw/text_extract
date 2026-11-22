@@ -981,7 +981,7 @@ function wrapAllLatexExpressions(text: string): string {
  * Returns an array of Docx Children (TextRun, Math, etc.)
  */
 /** Text-run overrides for themed exports (Design Studio). Size is in half-points; color is hex without '#'. */
-export interface DocxRunStyle { font?: string; size?: number; color?: string; italics?: boolean; shading?: { type: any; fill: string; color: string } }
+export interface DocxRunStyle { font?: string; size?: number; color?: string; italics?: boolean; underline?: Record<string, never>; shading?: { type: any; fill: string; color: string } }
 
 export function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?: { isBlockquote?: boolean }, runStyle?: DocxRunStyle): any[] {
     let content = fixDanglingMathOnLine(trimmed);

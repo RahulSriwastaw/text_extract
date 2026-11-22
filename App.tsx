@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
 import PdfConverter from './components/PdfConverter';
 import MocktestExtractor from './components/MocktestExtractor';
 import QaPageStitcher from './components/QaPageStitcher';
@@ -45,6 +45,25 @@ const DesignStudio = React.lazy(() => import('./components/DesignStudio'));
 
 export type ActiveTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher' | 'design-studio';
 
+/**
+ * Every tool has its own address, so a refresh, the Back button or a shared link opens
+ * the same tool instead of the home page. (The CSV converter, the PDF splitter and the
+ * admin panel already have /csv-converter, /pdf-splitter and /admin.)
+ */
+export const TOOL_PATHS: Record<ActiveTool, string> = {
+  landing: '/',
+  tools: '/tools',
+  'text-converter': '/text-to-docx',
+  'mcq-extractor': '/mcq-extractor',
+  'qa-stitcher': '/page-stitcher',
+  'design-studio': '/design-studio',
+};
+
+export function toolFromPath(pathname: string): ActiveTool {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  return (Object.keys(TOOL_PATHS) as ActiveTool[]).find(tool => TOOL_PATHS[tool] === path) || 'landing';
+}
+
 function App() {
   if (window.location.pathname.replace(/\/$/, '') === '/csv-converter') {
     return (
@@ -68,7 +87,20 @@ function App() {
 }
 
 function ExistingApp() {
-  const [activeTool, setActiveTool] = useState<ActiveTool>('landing');
+  // The address bar is the source of truth for which tool is open.
+  const [activeTool, showTool] = useState<ActiveTool>(() => toolFromPath(window.location.pathname));
+  const setActiveTool = useCallback((tool: ActiveTool) => {
+    showTool(tool);
+    if (window.location.pathname !== TOOL_PATHS[tool]) {
+      window.history.pushState({ tool }, '', TOOL_PATHS[tool]);
+      window.scrollTo(0, 0);
+    }
+  }, []);
+  useEffect(() => {
+    const onNavigate = () => showTool(toolFromPath(window.location.pathname));   // Back / Forward buttons
+    window.addEventListener('popstate', onNavigate);
+    return () => window.removeEventListener('popstate', onNavigate);
+  }, []);
   const [isAdmin, setIsAdmin] = useState(false);
   const [preloadedPages, setPreloadedPages] = useState<string[]>([]);
   // Extracted content handed from the Text tool to Design Studio

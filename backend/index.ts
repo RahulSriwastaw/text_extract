@@ -2767,7 +2767,7 @@ function salvageDesignOps(raw: string): unknown[] {
 // (theme / block styles / pagination), never with a rewritten document.
 // ---------------------------------------------------------------------------
 app.post('/api/design-chat', requireUser, usageMiddleware('design-chat'), async (req, res) => {
-  const { outline, theme, layout, history, request, scopePageId, fullText, part, claudeModel, geminiModel } = req.body || {};
+  const { outline, theme, layout, history, request, scopePageId, fullText, part, lesson, claudeModel, geminiModel } = req.body || {};
   const outlineSize = Array.isArray(outline) ? JSON.stringify(outline).length : 0;
   if (!outlineSize || typeof request !== 'string' || !request.trim() || !theme || typeof theme !== 'object'
       || (layout !== 'document' && layout !== 'slides'))
@@ -2782,6 +2782,7 @@ app.post('/api/design-chat', requireUser, usageMiddleware('design-chat'), async 
       outline, theme, layout, history: turns, request: request.trim().slice(0, 2000),
       scopePageId: typeof scopePageId === 'string' ? scopePageId.slice(0, 20) : undefined,
       fullText: fullText === true,
+      lesson: lesson === true,
       part: typeof part === 'string' && /^\d{1,3} of \d{1,3}$/.test(part) ? part : undefined,
     });
     const raw = await runAIAction(client => callGeminiWithFallback(client, getPrimaryModel(), getFallbackModel(),

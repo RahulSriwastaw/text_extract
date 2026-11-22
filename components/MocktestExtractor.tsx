@@ -2379,14 +2379,15 @@ Rules:
     setPages(prev => prev.map(page => page.items ? { ...page, items: page.items.map(attach) } : page));
   }
 
-  function applyReviewedFigure(item: MockTestMcqItem, figure: McqFigure, url?: string) {
-    if (!url || !figure.sharedId) {
-      updateItemDraft(item.id, resolveMcqFigure(item, figure, url));
+  /** `urls` is empty when the figure is removed, and holds several when the teacher cropped several figures in one go. */
+  function applyReviewedFigure(item: MockTestMcqItem, figure: McqFigure, urls?: string[]) {
+    if (!urls?.length || !figure.sharedId) {
+      updateItemDraft(item.id, resolveMcqFigure(item, figure, urls));
       return;
     }
     const attachSharedFigure = (question: MockTestMcqItem) => {
       const match = question.figures?.find(candidate => candidate.sharedId === figure.sharedId);
-      return match ? { ...question, ...resolveMcqFigure(question, match, url) } : question;
+      return match ? { ...question, ...resolveMcqFigure(question, match, urls) } : question;
     };
     attachFigureToQuestions(attachSharedFigure);
   }
@@ -4458,7 +4459,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                                 {item.figures?.map(figure => <McqFigureReview key={figure.id} figure={figure}
                                   image={figure.sourcePage ? pages.find(p => p.pageNumber === figure.sourcePage)?.imageUrl : page.imageUrl}
                                   mode={figure.svg || figureMode === 'svg' ? 'svg' : 'crop'}
-                                  resolve={url => applyReviewedFigure(item, figure, url)} />)}
+                                  resolve={urls => applyReviewedFigure(item, figure, urls)} />)}
                                 {/* Extra metadata (edit mode) */}
                                 {isEditing && (
                                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 panel p-3">

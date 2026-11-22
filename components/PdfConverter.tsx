@@ -14,7 +14,7 @@ import McqSidebar from './McqSidebar';
 import MocktestStudioModal from './MocktestStudioModal';
 import UploadProgressBar, { UploadProgressData } from './UploadProgressBar';
 import { AppState, ScannedPage, NumberingStyle, OptionArrangement, HistoryItem, MockTestMcqItem, ExtractedElement } from '../types';
-import { prepareConverterFigures, removeConverterFigure } from '../services/converterFigures';
+import { applyConverterFigure, prepareConverterFigures, removeConverterFigure, type FigureCrop } from '../services/converterFigures';
 import type { FigureMode, BoundingBox } from '../types';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
@@ -143,12 +143,8 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
   const { pendingFigures } = readyExport;
   const needsReview = pendingFigures > 0;
 
-  function applyFigure(pageId: string, figure: ExtractedElement, imageB64: string, bbox?: BoundingBox) {
-    setPages(prev => prev.map(page => page.id !== pageId ? page : {
-      ...page, elements: page.elements?.map(el => el !== figure ? el : {
-        id: el.id, type: 'image', content: el.content, bbox, imageB64
-      })
-    }));
+  function applyFigure(pageId: string, figure: ExtractedElement, imageB64: string, bbox?: BoundingBox, extra?: FigureCrop[]) {
+    setPages(prev => prev.map(page => page.id !== pageId ? page : applyConverterFigure(page, figure, imageB64, bbox, extra)));
   }
 
   useEffect(() => {

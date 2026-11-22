@@ -27,6 +27,14 @@ test('MCQ figures keep the source page, target and bilingual field content throu
   assert.match(item.option2_hi, /दूसरा/);
   for (const field of [item.option2_hi, item.option2_en, item.hash_figure!]) assert.ok(field.includes(png));
   assert.equal(serializeMockTestToCsv([item]).split(png).length - 1, 3);
+  // Several manual crops made in one go: every URL is attached once, in order, and nothing is lost.
+  const many = resolveMcqFigure({ ...item, question_en: 'Q', question_hi: 'प्र', hash_figure: 'old.png' },
+    { id: 'manual', type: 'image', target: 'question' }, ['a.png', 'b.png', 'a.png']);
+  assert.equal(many.hash_figure, 'old.png, a.png, b.png');
+  for (const field of [many.question_en!, many.question_hi!]) {
+    assert.equal(field.split('<img').length - 1, 2);
+    assert.ok(field.indexOf('a.png') < field.indexOf('b.png'));
+  }
   assert.equal(mcqFigureInstruction('off'), '');
   assert.match(mcqFigureInstruction('svg'), /static SVG/);
   assert.match(mcqFigureInstruction('crop'), /do not transcribe its plotted values into a table/);

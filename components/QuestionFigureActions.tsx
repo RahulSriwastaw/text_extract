@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CropDialog } from './ConverterFigure';
-import { renderFigureSvg, sanitizeFigureSvg } from '../services/converterFigures';
+import { renderFigureSvg, sanitizeFigureSvg, type FigureCrop } from '../services/converterFigures';
 import { extractWithStudyAiBridge, type AiProvider } from '../services/studyAiBridgeService';
 import { recreateFigureSvg } from '../services/geminiService';
 import type { DirectModel } from '../services/claudeModels';
@@ -10,15 +10,23 @@ export function QuestionFigureActions({ image, engine, provider, model, hasPassa
   image?: string; engine: string; provider: AiProvider; model: DirectModel; hasPassageGroup?: boolean; attach: (image: string, svg?: string, shared?: boolean) => Promise<void>;
 }) {
   const [mode, setMode] = useState<'crop' | 'svg'>();
-  const [original, setOriginal] = useState('');
+  /** Crops waiting to be attached: several when the teacher boxed several figures in one crop dialog. */
+  const [originals, setOriginals] = useState<string[]>([]);
   const [preview, setPreview] = useState('');
   const [status, setStatus] = useState('');
   const [sourceSvg, setSourceSvg] = useState('');
   const [shared, setShared] = useState(false);
   const [uploading, setUploading] = useState(false);
-  async function save(image: string, svg?: string) {
+  async function save(images: string[], svg?: string) {
     setUploading(true);
-    try { await attach(image, svg, hasPassageGroup && shared); clear(); }
+    try {
+      for (const image of images) {
+        await attach(image, svg, hasPassageGroup && shared);
+        // Attached crops leave the waiting list, so a retry after a failed upload never attaches them twice.
+        setOriginals(current => current.filter(waiting => waiting !== image));
+      }
+      clear();
+    }
     catch (error) { setStatus(error instanceof Error ? error.message : 'Drive upload failed. Retry.'); }
     finally { setUploading(false); }
   }
@@ -27,19 +35,20 @@ export function QuestionFigureActions({ image, engine, provider, model, hasPassa
   function clear() {
     request.current?.abort();
     setMode(undefined);
-    setOriginal('');
+    setOriginals([]);
     setPreview('');
     setSourceSvg('');
     setShared(false);
     setStatus('');
   }
-  async function apply(region: string) {
+  async function apply(crops: FigureCrop[]) {
     const recreate = mode === 'svg';
     clear();
-    if (!recreate) { setOriginal(region); return; }
+    setOriginals(crops.map(crop => crop.image));
+    if (!recreate) return;
+    const region = crops[0].image;
     const controller = new AbortController();
     request.current = controller;
-    setOriginal(region);
     setStatus('Creating SVG…');
     try {
       let svg: string | undefined;
@@ -69,15 +78,17 @@ export function QuestionFigureActions({ image, engine, provider, model, hasPassa
     <button className="btn btn-secondary btn-sm" disabled={!image || uploading} onClick={() => { clear(); setMode('crop'); }}>Crop image</button>
     <button className="btn btn-secondary btn-sm" disabled={!image || uploading} onClick={() => { clear(); setMode('svg'); }}>Create SVG</button>
     {!image && <span>Original page image unavailable</span>}
-    {mode && image && <CropDialog pageImage={image} apply={apply} close={clear} actionLabel={mode === 'svg' ? 'Create SVG from selection' : 'Attach crop'} />}
-    {original && hasPassageGroup && <label className="inline-flex items-center gap-1.5 text-xs">
+    {mode && image && <CropDialog pageImage={image} apply={apply} close={clear} multiple={mode === 'crop'}
+      actionLabel={mode === 'svg' ? 'Create SVG from selection' : 'Attach crop'} pluralLabel={count => `Attach ${count} crops`} />}
+    {originals.length > 0 && hasPassageGroup && <label className="inline-flex items-center gap-1.5 text-xs">
       <input type="checkbox" checked={shared} disabled={uploading} onChange={e => setShared(e.target.checked)} />
       Attach to all questions in this group
     </label>}
     {status && <span role="status">{status}</span>}
     {preview && <><img className="max-h-40 bg-white" src={preview} alt="Recreated question figure" />
-      <button className="btn btn-primary btn-sm" disabled={uploading} onClick={() => save(preview, sourceSvg)}>Use SVG</button></>}
-    {original && <><button className="btn btn-secondary btn-sm" disabled={uploading} onClick={() => save(original)}>Upload crop to Drive</button>
+      <button className="btn btn-primary btn-sm" disabled={uploading} onClick={() => save([preview], sourceSvg)}>Use SVG</button></>}
+    {originals.length > 0 && <><button className="btn btn-secondary btn-sm" disabled={uploading} onClick={() => save(originals)}>
+        {originals.length > 1 ? `Upload ${originals.length} crops to Drive` : 'Upload crop to Drive'}</button>
       <button className="btn btn-ghost btn-sm" disabled={uploading} onClick={clear}>Cancel</button></>}
   </div>;
 }

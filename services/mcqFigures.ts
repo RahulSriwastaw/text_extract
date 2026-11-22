@@ -22,16 +22,17 @@ export function readMcqFigures(raw: unknown): McqFigure[] {
   return figures;
 }
 
-export function resolveMcqFigure(item: MockTestMcqItem, figure: McqFigure, image?: string): Partial<MockTestMcqItem> {
+/** `image` may be several URLs: manual crops made together for one figure are attached in the order given. */
+export function resolveMcqFigure(item: MockTestMcqItem, figure: McqFigure, image?: string | string[]): Partial<MockTestMcqItem> {
   const changes: Partial<MockTestMcqItem> = { figures: item.figures?.filter(f => f.id !== figure.id) };
-  if (image) {
-    changes.hash_figure = [...new Set([...(item.hash_figure || '').split(', ').filter(Boolean), image])].join(', ');
+  for (const url of ([] as string[]).concat(image || []).filter(Boolean)) {
+    changes.hash_figure = [...new Set([...(changes.hash_figure ?? item.hash_figure ?? '').split(', ').filter(Boolean), url])].join(', ');
     const tag = figure.target.startsWith('option')
-      ? buildOptionFigureTag(image, String.fromCharCode(64 + Number(figure.target.slice(-1))))
-      : buildQuestionFigureTag(image, figure.target);
+      ? buildOptionFigureTag(url, String.fromCharCode(64 + Number(figure.target.slice(-1))))
+      : buildQuestionFigureTag(url, figure.target);
     for (const lang of ['hi', 'en'] as const) {
       const key = `${figure.target}_${lang}` as const;
-      const content = item[key] || '';
+      const content = changes[key] ?? item[key] ?? '';
       changes[key] = content.includes(tag) ? content : content + tag;
     }
   }

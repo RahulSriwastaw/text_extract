@@ -93,6 +93,37 @@ export function isPageDecoration(element: ExtractedElement) {
     || /^(?:(?:a|the|circular|publisher|coaching|school|institute|header|footer)\s+)*logo\b.*\b(?:header|footer|banner|branding)\b/i.test(caption);
 }
 
+/** One manual crop from the crop dialog: the cropped PNG and the page region (0-1000) it came from. */
+export interface FigureCrop { image: string; bbox: BoundingBox }
+
+/**
+ * Use the chosen image for a reviewed figure. When the crop dialog returned more boxes than one,
+ * each further crop becomes its own figure right after it, in the order the boxes were numbered.
+ */
+export function applyConverterFigure(page: ScannedPage, figure: ExtractedElement, imageB64: string,
+  bbox?: BoundingBox, extra: FigureCrop[] = []): ScannedPage {
+  const index = page.elements?.indexOf(figure) ?? -1;
+  if (!page.elements || index < 0) return page;
+  const taken = new Set(page.elements.map(el => el.id));
+  let serial = 2;
+  const added = extra.map((crop): ExtractedElement => {
+    let id = `${figure.id}_crop${serial++}`;
+    while (taken.has(id)) id = `${figure.id}_crop${serial++}`;
+    taken.add(id);
+    return { id, type: 'image', content: 'Manual crop', bbox: crop.bbox, imageB64: crop.image };
+  });
+  const elements = [...page.elements];
+  elements.splice(index, 1, { id: figure.id, type: 'image', content: figure.content, bbox, imageB64 }, ...added);
+  if (!added.length) return { ...page, elements };
+  // Keep the preview text in step: one marker per new figure, right after the figure it was cropped with.
+  const marker = '[Image: ' + (figure.content || '') + ']';
+  let occurrence = page.elements.slice(0, index)
+    .filter(el => el.type !== 'text' && el.content === figure.content).length;
+  const extractedText = page.extractedText?.split('\n\n').flatMap(block =>
+    block === marker && occurrence-- === 0 ? [block, ...added.map(() => '[Image: Manual crop]')] : [block]).join('\n\n');
+  return { ...page, elements, extractedText };
+}
+
 export function removeConverterFigure(page: ScannedPage, figure: ExtractedElement): ScannedPage {
   if (figure.type !== 'image' || !page.elements?.includes(figure)) return page;
   const marker = '[Image: ' + (figure.content || '') + ']';

@@ -18,6 +18,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { ConverterFigure } from './ConverterFigure';
+import type { FigureCrop } from '../services/converterFigures';
 import { ScannedPage, NumberingStyle, OptionArrangement, ExtractedElement, BoundingBox } from '../types';
 import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, RefreshCw, FileText, Image as ImageIcon, Sparkles, Camera } from 'lucide-react';
 import { formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
@@ -25,7 +26,7 @@ import GeminiExplanationPanel from './GeminiExplanationPanel';
 
 interface ProcessingListProps {
   pages: ScannedPage[];
-  onApplyFigure: (pageId: string, figure: ExtractedElement, image: string, bbox?: BoundingBox) => void;
+  onApplyFigure: (pageId: string, figure: ExtractedElement, image: string, bbox?: BoundingBox, extra?: FigureCrop[]) => void;
   onRemoveFigure: (pageId: string, figure: ExtractedElement) => void;
   onUpdateText: (id: string, newText: string) => void;
   onRetry: (id: string) => void;
@@ -347,7 +348,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                {includeImages && page.status === 'done' && page.elements?.filter(el => el.type === 'image').map(el =>
                  <ConverterFigure key={el.id} element={el} pageImage={page.imageUrl}
                    remove={() => onRemoveFigure(page.id, el)}
-                   apply={(image, box) => onApplyFigure(page.id, el, image, box)} />)}
+                   apply={(image, box, extra) => onApplyFigure(page.id, el, image, box, extra)} />)}
                {editingId === page.id ? (
                    <textarea
                      value={editText}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Sparkles, History, Settings, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge } from 'lucide-react';
+import { Sparkles, History, Settings, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge, Coins } from 'lucide-react';
 import { formatPlanTokens } from '../services/apiClient';
 import { UserStatusContext } from '../App';
 import { checkUserGeminiAuth } from '../services/userGeminiService';
@@ -128,7 +128,6 @@ const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              <UsageIndicator />
               <div className="toolbar-divider mx-1 hidden sm:block" />
 
               <button
@@ -163,6 +162,8 @@ const Navbar: React.FC<NavbarProps> = ({
                 <Settings />
               </button>
 
+              {/* Token balance sits right beside the profile */}
+              <UsageIndicator />
               <LoginButton />
             </div>
           </div>
@@ -217,10 +218,12 @@ function UsageIndicator() {
     const low = tokens > 0 && left / tokens <= 0.2;
     const days = expiresAt ? Math.ceil((Date.parse(expiresAt) - Date.now()) / 86400000) : null;
     return (
-      <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-ink-3 px-2 py-1 rounded-lg bg-surface-2 border border-line"
+      <div className="flex items-center gap-1.5 h-8 text-[11px] text-ink-2 px-2 rounded-lg bg-surface-2 border border-line whitespace-nowrap"
         title={`${name} plan: ${formatPlanTokens(used)} of ${formatPlanTokens(tokens)} tokens used${expiresAt ? `, valid till ${new Date(expiresAt).toLocaleDateString()}` : ''}`}>
-        <Gauge size={13} className={low ? 'text-orange-400' : 'text-ink-3'} />
-        <span className={low ? 'text-orange-400 font-bold' : ''}>{formatPlanTokens(left)} tokens left</span>
+        <Coins size={13} className={low ? 'text-orange-400' : 'text-accent'} />
+        <span className={low ? 'text-orange-400 font-bold' : 'font-bold'}>
+          {formatPlanTokens(left)}<span className="hidden md:inline font-medium"> tokens left</span>
+        </span>
         {days != null && days <= 7 && <span className="text-orange-400 font-bold">· {Math.max(days, 0)}d</span>}
       </div>
     );

@@ -5,6 +5,7 @@ import { saveQuestions } from './questionSheet.js';
 import { uploadDriveFigure } from './driveFigures.js';
 import { resolveClaudeModel } from './claudeModelSelection.js';
 import { pageChatPrompt } from '../services/pageChat.js';
+import { designChatPrompt, type DesignChatTurn } from '../services/designChat.js';
 import { isBlockedModel, safeDirectModel, type ClaudeModel } from '../services/claudeModels.js';
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
@@ -2749,6 +2750,39 @@ app.post('/api/mocktest-page-chat', requireUser, usageMiddleware('mocktest-page-
     res.json(safeParseAiJsonObject(raw));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Page chat failed.' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/design-chat — Design Studio: the AI answers with design operations
+// (theme / block styles / pagination), never with a rewritten document.
+// ---------------------------------------------------------------------------
+app.post('/api/design-chat', requireUser, usageMiddleware('design-chat'), async (req, res) => {
+  const { outline, theme, layout, history, request, scopePageId, claudeModel, geminiModel } = req.body || {};
+  const outlineSize = Array.isArray(outline) ? JSON.stringify(outline).length : 0;
+  if (!outlineSize || typeof request !== 'string' || !request.trim() || !theme || typeof theme !== 'object'
+      || (layout !== 'document' && layout !== 'slides'))
+    return res.status(400).json({ error: 'Invalid design chat request.' });
+  if (outlineSize > 300_000)
+    return res.status(413).json({ error: 'This document is too large to send at once. Choose "This page only" and try again.' });
+  try {
+    const turns: DesignChatTurn[] = (Array.isArray(history) ? history : []).slice(-12)
+      .filter((t: any) => t && typeof t.text === 'string' && (t.role === 'user' || t.role === 'assistant'))
+      .map((t: any) => ({ role: t.role, text: t.text.slice(0, 600) }));
+    const prompt = designChatPrompt({
+      outline, theme, layout, history: turns, request: request.trim().slice(0, 2000),
+      scopePageId: typeof scopePageId === 'string' ? scopePageId.slice(0, 20) : undefined,
+    });
+    const raw = await runAIAction(client => callGeminiWithFallback(client, getPrimaryModel(), getFallbackModel(),
+      [{ text: prompt }], { claudeModel, geminiModel, temperature: 0.3, maxOutputTokens: 4096, responseMimeType: 'application/json' }, 'design-chat'),
+      getUserKey(req), undefined, geminiModel ? 'gemini' : claudeModel ? 'claude' : undefined);
+    const parsed = safeParseAiJsonObject(raw);
+    res.json({
+      reply: typeof parsed.reply === 'string' ? parsed.reply.slice(0, 1000) : '',
+      ops: Array.isArray(parsed.ops) ? parsed.ops.slice(0, 60) : [],
+    });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Design chat failed.' });
   }
 });
 

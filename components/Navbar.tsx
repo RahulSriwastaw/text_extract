@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext } from 'react';
-import { Sparkles, History, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge, Coins } from 'lucide-react';
+import { Sparkles, History, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge, Coins, Palette } from 'lucide-react';
 import { formatPlanTokens } from '../services/apiClient';
 import { UserStatusContext } from '../App';
 import { subscribeToExtensionStatus, pingStudyAiExtension, BridgeStatus } from '../services/studyAiBridgeService';
@@ -8,13 +8,14 @@ import AiHistoryDrawer from './AiHistoryDrawer';
 import MocktestStudioModal from './MocktestStudioModal';
 import LoginButton from './LoginButton';
 
-type NavTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
+type NavTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher' | 'design-studio';
 
 const NAV_TABS: { id: NavTool; label: string; short: string; Icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'tools', label: 'All tools', short: 'Tools', Icon: LayoutGrid },
   { id: 'text-converter', label: 'Text / DOCX', short: 'Text', Icon: FileText },
   { id: 'mcq-extractor', label: 'MCQ extractor', short: 'MCQs', Icon: FileSpreadsheet },
   { id: 'qa-stitcher', label: 'Page stitcher', short: 'Stitch', Icon: Split },
+  { id: 'design-studio', label: 'Design studio', short: 'Design', Icon: Palette },
 ];
 
 interface NavbarProps {

@@ -8,6 +8,7 @@ import ToolsPage from './components/ToolsPage';
 import LoginPage from './components/LoginPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
+import type { DesignInput } from './components/DesignStudio';
 import { useCurrentUser, signOutUser } from './services/authService';
 import { apiFetchJson, PLAN_CHANGED_EVENT, formatPlanTokens } from './services/apiClient';
 import { Sparkles, Ban, AlertTriangle, MessageCircle } from 'lucide-react';
@@ -40,7 +41,9 @@ export const useUserStatus = () => useContext(UserStatusContext);
 const UniversalCsvConverter = React.lazy(() => import('./components/UniversalCsvConverter'));
 const PdfSplitter = React.lazy(() => import('./components/PdfSplitter'));
 
-export type ActiveTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
+const DesignStudio = React.lazy(() => import('./components/DesignStudio'));
+
+export type ActiveTool = 'landing' | 'tools' | 'text-converter' | 'mcq-extractor' | 'qa-stitcher' | 'design-studio';
 
 function App() {
   if (window.location.pathname.replace(/\/$/, '') === '/csv-converter') {
@@ -68,6 +71,8 @@ function ExistingApp() {
   const [activeTool, setActiveTool] = useState<ActiveTool>('landing');
   const [isAdmin, setIsAdmin] = useState(false);
   const [preloadedPages, setPreloadedPages] = useState<string[]>([]);
+  // Extracted content handed from the Text tool to Design Studio
+  const [designInput, setDesignInput] = useState<DesignInput | null>(null);
   const [user, authLoading] = useCurrentUser();
   const [userStatus, setUserStatus] = useState<UserStatus | null>(null);
   const [statusCheck, setStatusCheck] = useState(0);
@@ -229,6 +234,7 @@ function ExistingApp() {
                 onStartTextConverter={() => setActiveTool('text-converter')}
                 onStartMcqExtractor={() => setActiveTool('mcq-extractor')}
                 onStartQaStitcher={() => setActiveTool('qa-stitcher')}
+                onStartDesignStudio={() => setActiveTool('design-studio')}
               />
             </motion.div>
           )}
@@ -244,7 +250,26 @@ function ExistingApp() {
               <PdfConverter key={user.uid} uid={user.uid}
                 initialImages={preloadedPages}
                 onClearInitialImages={() => setPreloadedPages([])}
+                onSendToDesign={(elements, title) => { setDesignInput({ elements, title }); setActiveTool('design-studio'); }}
               />
+            </motion.div>
+          )}
+
+          {activeTool === 'design-studio' && (
+            <motion.div
+              key="design-studio"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="pt-14"
+            >
+              <React.Suspense fallback={<div className="p-8 text-ink-2">Loading Design Studio…</div>}>
+                <DesignStudio
+                  input={designInput}
+                  onClearInput={() => setDesignInput(null)}
+                  onOpenTextTool={() => setActiveTool('text-converter')}
+                />
+              </React.Suspense>
             </motion.div>
           )}
 

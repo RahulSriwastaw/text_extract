@@ -37,13 +37,14 @@ export interface AiConversation {
 }
 
 const DB_NAME = 'user_gemini_educational_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORES = {
   SETTINGS: 'ai_settings',
   CONVERSATIONS: 'ai_conversations',
   EXTRACTED_PAGES: 'extracted_pages',
-  MOCKTEST_SETS: 'mocktest_sets'
+  MOCKTEST_SETS: 'mocktest_sets',
+  DESIGN_DOCS: 'design_docs'
 };
 
 function openDb(): Promise<IDBDatabase> {
@@ -75,6 +76,10 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORES.MOCKTEST_SETS)) {
         const mockStore = db.createObjectStore(STORES.MOCKTEST_SETS, { keyPath: 'id' });
         mockStore.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORES.DESIGN_DOCS)) {
+        db.createObjectStore(STORES.DESIGN_DOCS, { keyPath: 'id' });
       }
     };
 
@@ -337,6 +342,24 @@ export async function deleteExtractedDocument(id: string): Promise<void> {
     req.onerror = () => reject(req.error);
   });
 }
+
+// ----------------- DESIGN STUDIO DOCUMENTS (this device only, with images) -----------------
+
+/** Stored Design Studio document; the full shape is DesignDoc in services/designDoc.ts. */
+type StoredDesign = { id: string; title: string; updatedAt: number };
+
+function designStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest): Promise<T> {
+  return openDb().then(db => new Promise<T>((resolve, reject) => {
+    const req = run(db.transaction(STORES.DESIGN_DOCS, mode).objectStore(STORES.DESIGN_DOCS));
+    req.onsuccess = () => resolve(req.result as T);
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+export const saveDesignDoc = <T extends StoredDesign>(doc: T) => designStore<unknown>('readwrite', s => s.put(doc)).then(() => {});
+export const getDesignDocs = <T extends StoredDesign>() =>
+  designStore<T[]>('readonly', s => s.getAll()).then(docs => (docs || []).sort((a, b) => b.updatedAt - a.updatedAt));
+export const deleteDesignDoc = (id: string) => designStore<unknown>('readwrite', s => s.delete(id)).then(() => {});
 
 // ----------------- LOCAL MOCKTEST SETS (WITH FULL PAGES & IMAGES) -----------------
 

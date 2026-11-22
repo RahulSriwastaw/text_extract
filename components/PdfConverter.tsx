@@ -49,6 +49,8 @@ export interface PdfConverterProps {
   uid: string;
   initialImages?: string[];
   onClearInitialImages?: () => void;
+  /** Hand the ready, extracted content to Design Studio. */
+  onSendToDesign?: (elements: ExtractedElement[], title: string) => void;
 }
 
 /** Compact on/off chip for the output options row. */
@@ -71,7 +73,7 @@ const ToggleChip: React.FC<{ on: boolean; onClick: () => void; label: string; ti
   </button>
 );
 
-const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClearInitialImages }) => {
+const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClearInitialImages, onSendToDesign }) => {
   const [{ claudeModel, autoDownload, numberingStyle, isBilingual, includeImages, figureMode, optionArrangement, mcqMode, showMcqNumbers, showAnswers, refineMode, autoProofread, aiEngine, provider }, updateSetting, syncError] = useConverterSettings(uid);
   useEffect(() => { if (provider !== getStoredAiProvider()) setStoredAiProvider(provider); }, [provider]);
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
@@ -1504,6 +1506,17 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                                         {copySuccess ? <Check className="text-emerald-400" /> : <Copy />}
                                     </button>
                                     {bank && <DriveDocument key={uid + bank.documents} name={fileName || 'document'} disabled={!readyExport.pageCount} generate={()=>generateDocx(readyExport.elements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers, mcqMode)} />}
+                                    {onSendToDesign && (
+                                        <button
+                                            onClick={() => onSendToDesign(readyExport.elements, fileName || 'Document')}
+                                            disabled={!readyExport.pageCount}
+                                            title="Open this content in Design Studio to style it with AI and themes"
+                                            className="btn btn-secondary"
+                                        >
+                                            <Sparkles />
+                                            Design in Studio
+                                        </button>
+                                    )}
                                     <button
                                         onClick={downloadDocx}
                                         disabled={!readyExport.pageCount}

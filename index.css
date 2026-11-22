@@ -501,3 +501,13 @@ img[src^="data:image/svg+xml"] { min-width: 8rem; min-height: 3rem; }
   to { opacity: 1; transform: none; }
 }
 .animate-fadeIn { animation: fadeIn 0.15s ease-out; }
+
+/* Design Studio: Markdown inside a page block (the page sets font, size and colour) */
+.design-md p { margin: 0; }
+.design-md p + p { margin-top: 0.4em; }
+.design-md ul { list-style: disc; padding-left: 1.3em; }
+.design-md ol { list-style: decimal; padding-left: 1.3em; }
+.design-md table { border-collapse: collapse; width: 100%; margin: 4px 0; }
+.design-md th, .design-md td { border: 1px solid #6B7280; padding: 4px 8px; text-align: center; }
+.design-md th { background: #F3F4F6; font-weight: 700; }
+.design-md .katex-display { margin: 0.4em 0; }

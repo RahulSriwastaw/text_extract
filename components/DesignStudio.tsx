@@ -1,0 +1,351 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Undo2, Redo2, FileDown, Upload, FileText, Trash2, Palette, MessageSquare, ArrowLeft, Loader2,
+  Presentation, File as FileIcon, Scissors, Sparkles, AlertTriangle,
+} from 'lucide-react';
+import mammoth from 'mammoth';
+import type { ExtractedElement } from '../types';
+import {
+  type DesignDoc, type DesignOp, type Theme, type Layout,
+  PRESET_THEMES, applyDesignOps, autoPaginate, elementsToDesignDoc, htmlToDesignDoc, allBlocks,
+} from '../services/designDoc';
+import { generateDesignDocx } from '../services/designDocx';
+import { saveDesignDoc, getDesignDocs, deleteDesignDoc } from '../services/aiDbService';
+import DesignCanvas from './design/DesignCanvas';
+import DesignChat, { type ChatMessage } from './design/DesignChat';
+
+export interface DesignInput { elements: ExtractedElement[]; title: string }
+
+interface Props {
+  /** Content handed over from the Text tool ("Design in Studio"). */
+  input: DesignInput | null;
+  onClearInput: () => void;
+  onOpenTextTool: () => void;
+}
+
+const HISTORY_LIMIT = 40;
+
+const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) => {
+  const [doc, setDoc] = useState<DesignDoc | null>(null);
+  const [past, setPast] = useState<DesignDoc[]>([]);
+  const [future, setFuture] = useState<DesignDoc[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState<string>();
+  const [fill, setFill] = useState<Record<string, number>>({});
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [panel, setPanel] = useState<'chat' | 'design'>('chat');
+  const [saved, setSaved] = useState<DesignDoc[]>([]);
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState('');
+  const [pending, setPending] = useState<{ request: string; pageId?: string; key: number }>();
+  const [canvasWidth, setCanvasWidth] = useState(800);
+  const docRef = useRef<DesignDoc | null>(null);
+  docRef.current = doc;
+  const canvasBox = useRef<HTMLDivElement>(null);
+
+  const refreshSaved = useCallback(() => { getDesignDocs<DesignDoc>().then(setSaved).catch(() => setSaved([])); }, []);
+  useEffect(refreshSaved, [refreshSaved]);
+
+  const open = useCallback((next: DesignDoc) => {
+    setDoc(next); setPast([]); setFuture([]); setMessages([]); setFill({});
+    setSelectedPageId(next.pages[0]?.id); setNotice('');
+  }, []);
+
+  // Content arriving from the Text tool
+  useEffect(() => {
+    if (!input) return;
+    open(elementsToDesignDoc(input.elements, input.title));
+    onClearInput();
+  }, [input]);
+
+  /** Replace the document, remembering the previous one for Undo. */
+  const commit = useCallback((next: DesignDoc) => {
+    const current = docRef.current;
+    if (!current || next === current) return;
+    setPast(p => [...p.slice(-HISTORY_LIMIT + 1), current]);
+    setFuture([]);
+    setDoc(next);
+  }, []);
+
+  const applyOps = useCallback((ops: unknown[]) => {
+    const current = docRef.current;
+    if (!current) return { applied: 0, skipped: 0 };
+    const result = applyDesignOps(current, ops);
+    commit(result.doc);
+    return { applied: result.applied, skipped: result.skipped };
+  }, [commit]);
+
+  const undo = () => {
+    if (!doc || !past.length) return;
+    setFuture(f => [doc, ...f]); setDoc(past[past.length - 1]); setPast(p => p.slice(0, -1));
+  };
+  const redo = () => {
+    if (!doc || !future.length) return;
+    setPast(p => [...p, doc]); setDoc(future[0]); setFuture(f => f.slice(1));
+  };
+
+  // Autosave to this browser
+  useEffect(() => {
+    if (!doc) return;
+    const timer = setTimeout(() => { saveDesignDoc(doc).then(refreshSaved).catch(() => setNotice('Could not save in this browser.')); }, 800);
+    return () => clearTimeout(timer);
+  }, [doc]);
+
+  // Fit pages to the space between the side panels
+  useEffect(() => {
+    const el = canvasBox.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setCanvasWidth(el.clientWidth - 48));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [!!doc]);
+
+  const setLayout = (layout: Layout) => {
+    if (!doc || doc.layout === layout) return;
+    let next = applyDesignOps(doc, [{ op: 'setLayout', layout }]).doc;
+    if (layout === 'slides' && next.pages.length === 1) next = autoPaginate(next);   // free first split, the AI can refine it
+    commit(next);
+    setSelectedPageId(next.pages[0]?.id);
+  };
+
+  const setTheme = (patch: Partial<Theme>) => applyOps([{ op: 'setTheme', patch }] satisfies DesignOp[]);
+
+  const upload = async (file: File) => {
+    setBusy('Reading Word file…'); setNotice('');
+    try {
+      const { value } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+      const next = htmlToDesignDoc(value, file.name.replace(/\.docx$/i, ''));
+      if (!allBlocks(next).length) throw new Error('No text was found in this file.');
+      open(next);
+      setNotice('Word file loaded. Only the content is imported: the original colours, layout and Word equations are not.');
+    } catch (e: any) {
+      setNotice(e?.message || 'Could not read this Word file.');
+    } finally { setBusy(''); }
+  };
+
+  const download = async () => {
+    if (!doc) return;
+    setBusy('Building Word file…'); setNotice('');
+    try {
+      const blob = await generateDesignDocx(doc);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = (doc.title || 'design').replace(/[\\/:*?"<>|]+/g, ' ').trim() + '.docx';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e: any) {
+      setNotice('Could not build the Word file: ' + (e?.message || 'unknown error'));
+    } finally { setBusy(''); }
+  };
+
+  // ------------------------------------------------------------------ start screen
+  if (!doc) {
+    return (
+      <div className="app-container py-8 max-w-3xl">
+        <h1 className="text-2xl font-bold font-display text-ink mb-1">Design Studio</h1>
+        <p className="text-sm text-ink-3 mb-6">Turn extracted text into a designed Word document or PPT-style slides by chatting with AI.</p>
+
+        <div className="grid sm:grid-cols-2 gap-3 mb-8">
+          <button type="button" onClick={onOpenTextTool} className="glass-card p-5 text-left rounded-2xl border border-line hover:border-accent transition-colors">
+            <FileText className="w-6 h-6 text-accent mb-3" />
+            <p className="font-bold text-ink">Bring text from the Text tool</p>
+            <p className="text-xs text-ink-3 mt-1">Extract your pages there, then press "Design in Studio" next to Download DOCX.</p>
+          </button>
+          <label className="glass-card p-5 text-left rounded-2xl border border-line hover:border-accent transition-colors cursor-pointer">
+            <Upload className="w-6 h-6 text-accent mb-3" />
+            <p className="font-bold text-ink">Upload a Word file (.docx)</p>
+            <p className="text-xs text-ink-3 mt-1">Imports the content only. Original colours, layout and Word equations are not kept.</p>
+            <input type="file" accept=".docx" className="sr-only" disabled={!!busy}
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload(f); }} />
+          </label>
+        </div>
+
+        {busy && <p role="status" className="flex items-center gap-2 text-sm text-ink-2 mb-4"><Loader2 size={16} className="animate-spin" /> {busy}</p>}
+        {notice && <p role="alert" className="text-sm text-amber-300 mb-4">{notice}</p>}
+
+        <h2 className="text-sm font-bold text-ink mb-2">Saved designs on this device</h2>
+        {saved.length === 0 ? <p className="text-xs text-ink-3">Nothing saved yet. Designs save automatically in this browser.</p> : (
+          <ul className="space-y-2">
+            {saved.map(item => (
+              <li key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-line">
+                {item.layout === 'slides' ? <Presentation className="w-4 h-4 text-ink-3 shrink-0" /> : <FileIcon className="w-4 h-4 text-ink-3 shrink-0" />}
+                <button type="button" className="flex-1 min-w-0 text-left" onClick={() => open(item)}>
+                  <p className="text-sm font-semibold text-ink truncate">{item.title}</p>
+                  <p className="text-[11px] text-ink-3">{item.pages.length} {item.layout === 'slides' ? 'slides' : 'sections'} · {new Date(item.updatedAt).toLocaleString()}</p>
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={`Delete ${item.title}`} title="Delete"
+                  onClick={() => confirm(`Delete "${item.title}"? This cannot be undone.`) && deleteDesignDoc(item.id).then(refreshSaved)}>
+                  <Trash2 />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------------------ editor
+  const overflowing = doc.layout === 'slides' ? doc.pages.filter(p => (fill[p.id] || 0) > 100) : [];
+  const splitInTwo = (pageId: string) => {
+    const page = doc.pages.find(p => p.id === pageId);
+    if (!page || page.blocks.length < 2) return;
+    // Break near the middle, but never between a question and its options.
+    let at = Math.ceil(page.blocks.length / 2);
+    while (at < page.blocks.length - 1 && (page.blocks[at].type === 'option' || page.blocks[at].type === 'answer')) at++;
+    applyOps([{ op: 'paginate', pageId, breaks: [{ beforeBlockId: page.blocks[at].id }] }] satisfies DesignOp[]);
+  };
+
+  const field = 'w-full bg-surface-2 border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink';
+  const label = 'block text-[11px] font-bold text-ink-3 mb-1';
+  const choice = <T extends string | number>(value: T, current: T, onPick: () => void, text: string) => (
+    <button key={String(value)} type="button" className="seg-item" aria-pressed={value === current} onClick={onPick}>{text}</button>
+  );
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-3.5rem)]">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-line bg-surface/60">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDoc(null); refreshSaved(); }} title="Back to saved designs"><ArrowLeft /> Designs</button>
+        <input value={doc.title} onChange={e => setDoc({ ...doc, title: e.target.value, updatedAt: Date.now() })} aria-label="Design title"
+          className="bg-transparent border border-transparent hover:border-line focus:border-accent rounded-lg px-2 py-1 text-sm font-bold text-ink min-w-0 w-48 sm:w-64 outline-none" />
+        <div className="seg seg-sm" role="group" aria-label="Layout">
+          <button type="button" className="seg-item" aria-pressed={doc.layout === 'document'} onClick={() => setLayout('document')}><FileIcon /> Document</button>
+          <button type="button" className="seg-item" aria-pressed={doc.layout === 'slides'} onClick={() => setLayout('slides')}><Presentation /> Slides (PPT)</button>
+        </div>
+        <div className="flex-1" />
+        {busy && <span role="status" className="flex items-center gap-1.5 text-xs text-ink-3"><Loader2 size={13} className="animate-spin" /> {busy}</span>}
+        <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={undo} disabled={!past.length} aria-label="Undo" title="Undo"><Undo2 /></button>
+        <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={redo} disabled={!future.length} aria-label="Redo" title="Redo"><Redo2 /></button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={download} disabled={!!busy}><FileDown /> Download DOCX</button>
+      </div>
+
+      {notice && <p role="status" className="px-3 py-1.5 text-xs text-amber-300 bg-amber-500/10 border-b border-amber-500/20">{notice}</p>}
+      {overflowing.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs text-red-300 bg-red-500/10 border-b border-red-500/20">
+          <AlertTriangle size={14} />
+          <span>{overflowing.length} slide{overflowing.length === 1 ? ' has' : 's have'} more content than fits.</span>
+          <button type="button" className="btn btn-secondary btn-xs" onClick={() => overflowing.forEach(p => splitInTwo(p.id))}><Scissors /> Split in two (free)</button>
+          <button type="button" className="btn btn-secondary btn-xs"
+            onClick={() => { setPanel('chat'); setPending({ request: 'This slide has too much content. Split it into as many slides as needed so nothing overflows, keeping each question with its options.', pageId: overflowing[0].id, key: Date.now() }); }}>
+            <Sparkles /> Ask AI to split the first one
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-1 min-h-0">
+        {/* Page list */}
+        <nav className="hidden lg:block w-44 shrink-0 border-r border-line overflow-y-auto custom-scrollbar p-2 space-y-1" aria-label="Pages">
+          {doc.pages.map((page, i) => {
+            const percent = fill[page.id] || 0;
+            return (
+              <button key={page.id} type="button"
+                onClick={() => { setSelectedPageId(page.id); document.getElementById('design-page-' + page.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
+                className={`w-full text-left px-2.5 py-2 rounded-lg text-xs border ${page.id === selectedPageId ? 'bg-surface-3 border-accent text-ink' : 'border-transparent text-ink-3 hover:bg-surface-2 hover:text-ink'}`}>
+                <span className="font-bold">{doc.layout === 'slides' ? 'Slide' : 'Section'} {i + 1}</span>
+                {page.title && <span className="block truncate">{page.title}</span>}
+                <span className={`block text-[10px] ${doc.layout === 'slides' && percent > 100 ? 'text-red-400 font-bold' : ''}`}>
+                  {page.blocks.length} blocks{doc.layout === 'slides' && percent > 0 && ` · ${percent}%`}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Canvas */}
+        <div ref={canvasBox} className="flex-1 min-w-0 overflow-auto custom-scrollbar bg-[#0A0A0A] p-6">
+          <DesignCanvas doc={doc} width={canvasWidth} selectedPageId={selectedPageId} onSelectPage={setSelectedPageId}
+            onOps={ops => applyOps(ops)} onFill={setFill} />
+        </div>
+
+        {/* Side panel */}
+        <aside className="w-80 xl:w-96 shrink-0 border-l border-line flex flex-col min-h-0 bg-surface/40 max-md:hidden">
+          <div className="seg m-2" role="tablist" aria-label="Panel">
+            <button type="button" role="tab" className="seg-item flex-1" aria-selected={panel === 'chat'} onClick={() => setPanel('chat')}><MessageSquare /> AI chat</button>
+            <button type="button" role="tab" className="seg-item flex-1" aria-selected={panel === 'design'} onClick={() => setPanel('design')}><Palette /> Design</button>
+          </div>
+
+          <div className={panel === 'chat' ? 'flex-1 min-h-0' : 'hidden'}>
+            <DesignChat doc={doc} fill={fill} selectedPageId={selectedPageId} messages={messages} setMessages={setMessages}
+              applyOps={applyOps} restore={commit} pending={pending} />
+          </div>
+
+          {panel === 'design' && (
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3 space-y-4">
+              <div>
+                <p className={label}>Themes (free, no tokens)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {PRESET_THEMES.map(theme => (
+                    <button key={theme.name} type="button" onClick={() => setTheme(theme)} aria-pressed={doc.theme.name === theme.name}
+                      className={`p-2 rounded-lg border text-left ${doc.theme.name === theme.name ? 'border-accent bg-surface-3' : 'border-line hover:border-accent'}`}>
+                      <span className="flex gap-1 mb-1.5">
+                        {[theme.primary, theme.accent, theme.text].map((c, i) => <span key={i} className="w-4 h-4 rounded-full border border-white/20" style={{ background: c }} />)}
+                      </span>
+                      <span className="text-xs font-bold text-ink">{theme.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                {(['primary', 'accent', 'text', 'pageBackground'] as const).map(key => (
+                  <label key={key} className="text-[11px] font-bold text-ink-3">
+                    {{ primary: 'Main colour', accent: 'Accent colour', text: 'Text colour', pageBackground: 'Page background' }[key]}
+                    <input type="color" value={doc.theme[key]} onChange={e => setTheme({ [key]: e.target.value, name: 'Custom' })}
+                      className="block w-full h-8 mt-1 rounded-lg bg-surface-2 border border-line cursor-pointer" />
+                  </label>
+                ))}
+              </div>
+
+              <div>
+                <p className={label}>Font</p>
+                <div className="seg seg-sm w-full">
+                  {(['sans', 'serif', 'hindi'] as const).map(f => choice(f, doc.theme.font, () => setTheme({ font: f }), { sans: 'Sans', serif: 'Serif', hindi: 'Hindi' }[f]))}
+                </div>
+              </div>
+              <div>
+                <label className={label} htmlFor="design-size">Text size: {doc.theme.baseSize} pt</label>
+                <input id="design-size" type="range" min={9} max={18} value={doc.theme.baseSize} onChange={e => setTheme({ baseSize: Number(e.target.value) })} className="w-full" />
+              </div>
+              <div>
+                <p className={label}>Headings</p>
+                <div className="seg seg-sm w-full">
+                  {(['plain', 'bar', 'banner'] as const).map(h => choice(h, doc.theme.headingStyle, () => setTheme({ headingStyle: h }), { plain: 'Plain', bar: 'Side bar', banner: 'Banner' }[h]))}
+                </div>
+              </div>
+              <div>
+                <p className={label}>Questions</p>
+                <div className="seg seg-sm w-full">
+                  {(['plain', 'boxed', 'numbered-badge'] as const).map(q => choice(q, doc.theme.questionStyle, () => setTheme({ questionStyle: q }), { plain: 'Plain', boxed: 'Boxed', 'numbered-badge': 'Badge' }[q]))}
+                </div>
+              </div>
+              <div>
+                <p className={label}>Options per row</p>
+                <div className="seg seg-sm w-full">
+                  {([1, 2, 4] as const).map(n => choice(n, doc.theme.optionColumns, () => setTheme({ optionColumns: n }), String(n)))}
+                </div>
+              </div>
+              <div>
+                <label className={label} htmlFor="design-header">Header text</label>
+                <input id="design-header" className={field} value={doc.theme.header || ''} onChange={e => setTheme({ header: e.target.value })} placeholder="e.g. Class 10 · Science" />
+              </div>
+              <div>
+                <label className={label} htmlFor="design-footer">Footer text</label>
+                <input id="design-footer" className={field} value={doc.theme.footer || ''} onChange={e => setTheme({ footer: e.target.value })} placeholder="e.g. Institute name" />
+              </div>
+              <label className="flex items-center gap-2 text-xs text-ink-2">
+                <input type="checkbox" checked={doc.theme.showPageNumbers} onChange={e => setTheme({ showPageNumbers: e.target.checked })} /> Show page numbers
+              </label>
+              {doc.layout === 'slides' && (
+                <button type="button" className="btn btn-secondary btn-sm w-full" onClick={() => commit(autoPaginate(doc))}>
+                  <Scissors /> Re-split slides: one question per slide (free)
+                </button>
+              )}
+            </div>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+};
+
+export default DesignStudio;

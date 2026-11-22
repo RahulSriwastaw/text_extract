@@ -3,7 +3,7 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import { svgBlocksToMarkdown } from '../services/htmlLatex';
 
 /** remark-math only understands $…$ / $$…$$; convert \( \) and \[ \] and tidy common LaTeX glitches. */
-function normalizePreviewMath(text: string): string {
+export function normalizePreviewMath(text: string): string {
   if (!text) return text;
   return text
     .replace(/\\\[([\s\S]+?)\\\]/g, (_m, t) => `\n\n$$\n${t.trim()}\n$$\n\n`)

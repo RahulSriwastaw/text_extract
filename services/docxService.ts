@@ -980,7 +980,10 @@ function wrapAllLatexExpressions(text: string): string {
  * 4. Markdown Blockquote: > ...
  * Returns an array of Docx Children (TextRun, Math, etc.)
  */
-function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?: { isBlockquote?: boolean }): any[] {
+/** Text-run overrides for themed exports (Design Studio). Size is in half-points; color is hex without '#'. */
+export interface DocxRunStyle { font?: string; size?: number; color?: string; italics?: boolean }
+
+export function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?: { isBlockquote?: boolean }, runStyle?: DocxRunStyle): any[] {
     let content = fixDanglingMathOnLine(trimmed);
     content = cleanMixedMathText(content)
         .replace(/([\u0900-\u097F])(\$+)(?!\$)/g, '$1 $2')
@@ -1053,8 +1056,10 @@ function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?:
                         size: 22,
                         bold: isBold,
                         italics: isItalic,
-                        noProof: true
+                        noProof: true,
+                        ...runStyle,
                     };
+                    if (isItalic) runProps.italics = true;
                     if (lIdx > 0) {
                         runProps.break = 1;
                     }
@@ -1086,7 +1091,7 @@ function isTableTooComplex(tableLines: string[]): boolean {
     return false;
 }
 
-function createDocxTable(tableLines: string[]): any {
+export function createDocxTable(tableLines: string[]): any {
     const dataLines = tableLines.filter(line => !/^\|\s*[\-:]+\s*\|/.test(line) && !/^\|\s*[\-:]+/.test(line));
 
     const rows = dataLines.map((line, rowIndex) => {
@@ -1143,6 +1148,28 @@ const SUB_MAP: Record<string, string> = {
   '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
   '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉'
 };
+
+/** What kind of line this is (question, option, heading…). Shared by the plain DOCX export and Design Studio. */
+export function classifyLine(rawLine: string) {
+  const line = rawLine.trim();
+  const cleanLineText = line.replace(/\*\*/g, '').replace(/ \[\[MATH_BR\]\] /g, ' ');
+  return {
+    cleanLineText,
+    isHeader: /^(Section|Part|Khand|Unit|Q\.\s*Paper|Paper|Code|Set)\s+[\w\d]+/i.test(cleanLineText) && cleanLineText.length < 50,
+    isMetadata: /^(Subject|Time|Max\.?\s*Marks|Marks|Class|Date|Roll\s*No|Duration)\s*[:\-]/i.test(cleanLineText),
+    isInstruction: /^(Note|Instructions?|General\s*Instructions?)\s*[:\-]/i.test(cleanLineText),
+    isSeparator: /^(\(OR\)|OR|अथवा|Athava|[\/]\s*OR|OR\s*[\/]|\s)+$/i.test(cleanLineText.replace(/[^a-zA-Zऀ-ॿ\/]/g, '').trim()),
+    isFullEquation: /^\s*\$\$[\s\S]*?\$\$\s*$/.test(line),
+    isMainQuestion: /^#\s/i.test(cleanLineText) || /^(Q\.?\s*\d+|Prashn\s*\d+|Question\s*[:\-]?\s*\d+|प्रश्न\s*\d+|\d+|[\(\[]\d+[\)\]]|#\d+)[\.\)\-:]?\s/i.test(cleanLineText),
+    isSubQuestion: /^(\([ivxIVX]+\)|[ivxIVX]+\.|[ivxIVX]+[\)]|[\(\[]\w+[\)\]])\s/i.test(cleanLineText),
+    isOption: /^(\([a-zA-Z0-9]\)|[a-zA-Z0-9][\.\)]|[A-Z][\.\)])\s/.test(cleanLineText),
+    isAnswerLine: /^Answer\s*[:\-]\s*[A-Ea-e]/i.test(cleanLineText),
+    isTableRow: (line.startsWith('|') && line.endsWith('|')) || (line.startsWith('|') && line.split('|').length > 2),
+    isBlockquote: line.startsWith('>'),
+    isEnglishQuestion: /^(What|Which|Where|When|Who|Whom|Whose|Why|How|If|In\b|The\b|Find\b|Calculate\b|Evaluate\b|Simplify\b|Choose\b|Select\b|Speed\b|Consider\b|According\b|Directions?)\b/i.test(cleanLineText) || /\?\s*$/.test(cleanLineText),
+    isInstructionOrNote: /^(\*|Note|Instructions?|General\s*Instructions?)/i.test(cleanLineText),
+  };
+}
 
 export function formatChemicalReactions(text: string): string {
   if (!text) return text;

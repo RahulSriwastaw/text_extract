@@ -19,7 +19,7 @@ import {
   Check,
 } from 'lucide-react';
 
-type LaunchableTool = 'text-converter' | 'mcq-extractor' | 'qa-stitcher';
+type LaunchableTool = 'text-converter' | 'mcq-extractor' | 'qa-stitcher' | 'design-studio';
 
 interface LandingPageProps {
   onExploreTools: () => void;
@@ -59,6 +59,13 @@ const TOOLS: { id: LaunchableTool | 'csv' | 'pdf-splitter'; href?: string; icon:
     title: 'Page stitcher',
     desc: 'Crop and merge question and solution pages, or lay out several per sheet.',
     output: 'PDF',
+  },
+  {
+    id: 'design-studio',
+    icon: <Sparkles />,
+    title: 'Design studio',
+    desc: 'Chat with AI to restyle extracted text with colours, layouts and PPT-style slides.',
+    output: 'Designed DOCX',
   },
   {
     id: 'csv',

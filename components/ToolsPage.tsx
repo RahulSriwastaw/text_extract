@@ -14,12 +14,14 @@ import {
   LayoutGrid,
   FileSpreadsheet,
   Scissors,
+  Palette,
 } from 'lucide-react';
 
 interface ToolsPageProps {
   onStartTextConverter: () => void;
   onStartMcqExtractor: () => void;
   onStartQaStitcher: () => void;
+  onStartDesignStudio: () => void;
   onBack: () => void;
 }
 
@@ -40,9 +42,22 @@ type ToolCard = {
   title: string;
   desc: string;
   tags: { icon: React.ReactNode; label: string }[];
-} & ({ action: 'onStartTextConverter' | 'onStartMcqExtractor' | 'onStartQaStitcher'; href?: never } | { href: string; action?: never });
+} & ({ action: 'onStartTextConverter' | 'onStartMcqExtractor' | 'onStartQaStitcher' | 'onStartDesignStudio'; href?: never } | { href: string; action?: never });
 
 const TOOLS: ToolCard[] = [
+  {
+    id: 'design-studio',
+    icon: <Palette />,
+    badge: 'Designed DOCX',
+    title: 'Design studio',
+    desc: 'Chat with AI to restyle extracted text: colours, boxes, layouts and PPT-style slides, then download as Word.',
+    tags: [
+      { icon: <Zap />, label: 'AI design chat' },
+      { icon: <LayoutGrid />, label: 'Slides layout' },
+      { icon: <FileText />, label: 'Themes' },
+    ],
+    action: 'onStartDesignStudio',
+  },
   {
     id: 'mcq-extractor',
     icon: <Zap />,
@@ -112,9 +127,10 @@ const ToolsPage: React.FC<ToolsPageProps> = ({
   onStartTextConverter,
   onStartMcqExtractor,
   onStartQaStitcher,
+  onStartDesignStudio,
   onBack,
 }) => {
-  const actions = { onStartTextConverter, onStartMcqExtractor, onStartQaStitcher };
+  const actions = { onStartTextConverter, onStartMcqExtractor, onStartQaStitcher, onStartDesignStudio };
 
   const cardBody = (tool: ToolCard) => (
     <>

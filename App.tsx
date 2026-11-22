@@ -9,7 +9,7 @@ import LoginPage from './components/LoginPage';
 import Navbar from './components/Navbar';
 import AdminPanel from './components/AdminPanel';
 import { useCurrentUser, signOutUser } from './services/authService';
-import { apiFetchJson, PLAN_CHANGED_EVENT } from './services/apiClient';
+import { apiFetchJson, PLAN_CHANGED_EVENT, formatPlanTokens } from './services/apiClient';
 import { Sparkles, Ban, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -163,7 +163,7 @@ function ExistingApp() {
           <p className="text-ink-3 text-sm mb-4">{planLock.text}</p>
           {plan && (
             <p className="text-xs text-ink-3 mb-4">
-              {plan.name}: {plan.used.toLocaleString()} / {plan.tokens.toLocaleString()} tokens used
+              {plan.name}: {formatPlanTokens(plan.used)} / {formatPlanTokens(plan.tokens)} tokens used
               {plan.expiresAt && ` · valid till ${new Date(plan.expiresAt).toLocaleDateString()}`}
             </p>
           )}

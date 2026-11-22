@@ -13,6 +13,7 @@ import {
 import { useCurrentUser, signInWithGoogle } from '../services/authService';
 import * as api from '../services/adminApi';
 import { setAdminPassword, getAdminPassword, clearAdminPassword } from '../services/adminApi';
+import { TOKEN_UNIT, formatPlanTokens } from '../services/apiClient';
 
 type Tab = 'Overview' | 'Users' | 'Plans' | 'Reports' | 'Activity' | 'API Keys' | 'Settings' | 'Audit';
 
@@ -32,13 +33,8 @@ const PIE_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4
 const fmt = (n: number) => n?.toLocaleString?.() ?? '0';
 const fmtDate = (s: string) => s ? new Date(s).toLocaleString() : '-';
 const fmtTime = (ms: number) => ms > 0 ? new Date(ms).toLocaleTimeString() : 'Never';
-/** Compact token count: 1.5M, 320K, 950 */
-const fmtTok = (n: number) => {
-  n = Number(n) || 0;
-  if (n >= 1e6) return +(n / 1e6).toFixed(2) + 'M';
-  if (n >= 1e3) return +(n / 1e3).toFixed(1) + 'K';
-  return String(n);
-};
+/** Raw API tokens → plan tokens (1 plan token = 1,000 API tokens) */
+const fmtTok = formatPlanTokens;
 const daysLeft = (iso: string | null) => iso ? Math.ceil((Date.parse(iso) - Date.now()) / 86400000) : null;
 
 const PLAN_BADGE = {
@@ -706,7 +702,7 @@ const UserPlanCard = ({ uid, access, onChanged }: { uid: string; access: any; on
       {hasPlan ? (
         <div>
           <div className="flex justify-between text-xs mb-1">
-            <span className="font-mono">{fmt(p.plan_tokens_used)} / {fmt(p.plan_tokens!)} tokens</span>
+            <span className="font-mono">{fmtTok(p.plan_tokens_used)} / {fmtTok(p.plan_tokens!)} tokens</span>
             <span className="text-ink-3">{fmtTok(Math.max(0, p.plan_tokens! - p.plan_tokens_used))} left</span>
           </div>
           <div className="h-2 rounded-full bg-surface-2 overflow-hidden">
@@ -738,7 +734,7 @@ const UserPlanCard = ({ uid, access, onChanged }: { uid: string; access: any; on
         <>
           <div className="flex gap-2">
             <input value={tokens} onChange={e => setTokens(e.target.value)} type="number" min="1" placeholder="Extra tokens" aria-label="Extra tokens" className={input} />
-            <button disabled={busy || !(Number(tokens) > 0)} onClick={() => run({ add_tokens: Number(tokens) })} className={button}>Add tokens</button>
+            <button disabled={busy || !(Number(tokens) > 0)} onClick={() => run({ add_tokens: Math.round(Number(tokens) * TOKEN_UNIT) })} className={button}>Add tokens</button>
           </div>
           <div className="flex gap-2">
             <input value={days} onChange={e => setDays(e.target.value)} type="number" min="1" placeholder="Extra days" aria-label="Extra days" className={input} />
@@ -814,7 +810,10 @@ const PlansTab = () => {
       <div className="bg-surface rounded-2xl border border-line overflow-hidden">
         <div className="p-5 border-b border-line">
           <h3 className="text-sm font-bold flex items-center gap-2"><Coins size={16} className="text-accent" /> Plans</h3>
-          <p className="text-xs text-ink-3 mt-1">Tokens = input + output tokens spent on the server's API keys during the plan period. Editing a plan does not change plans already given to users.</p>
+          <p className="text-xs text-ink-3 mt-1">
+            1 token = 1,000 API tokens (input + output) spent on the server's API keys. One page costs roughly 8 tokens,
+            so 20 pages a day for 30 days is about 5,000 tokens. Editing a plan does not change plans already given to users.
+          </p>
         </div>
         <table className="w-full text-sm">
           <thead><tr className="bg-canvas text-xs text-ink-3 uppercase">
@@ -834,7 +833,7 @@ const PlansTab = () => {
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   <button disabled={busy} className="text-xs font-bold text-accent mr-3"
                     onClick={() => run(async () => {
-                      await api.updatePlan(p.id, { name: editing.name, token_limit: Number(editing.token_limit), duration_days: Number(editing.duration_days) });
+                      await api.updatePlan(p.id, { name: editing.name, token_limit: Math.round(Number(editing.token_limit) * TOKEN_UNIT), duration_days: Number(editing.duration_days) });
                       setEditing(null);
                     })}>Save</button>
                   <button className="text-xs text-ink-3" onClick={() => setEditing(null)}>Cancel</button>
@@ -843,12 +842,12 @@ const PlansTab = () => {
             ) : (
               <tr key={p.id} className={`border-t border-line ${p.is_active ? '' : 'opacity-50'}`}>
                 <td className="px-4 py-3 font-medium">{p.name}</td>
-                <td className="px-4 py-3 text-right font-mono">{fmt(p.token_limit)}</td>
+                <td className="px-4 py-3 text-right font-mono">{fmtTok(p.token_limit)}</td>
                 <td className="px-4 py-3 text-right font-mono">{p.duration_days}</td>
                 <td className="px-4 py-3 text-xs">{p.is_active ? <span className="text-green-400">Available</span> : <span className="text-ink-3">Hidden</span>}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button className="text-xs font-bold text-accent mr-3"
-                    onClick={() => setEditing({ id: p.id, name: p.name, token_limit: String(p.token_limit), duration_days: String(p.duration_days) })}>Edit</button>
+                    onClick={() => setEditing({ id: p.id, name: p.name, token_limit: String(p.token_limit / TOKEN_UNIT), duration_days: String(p.duration_days) })}>Edit</button>
                   <button disabled={busy} className="text-xs text-ink-3 hover:text-ink"
                     onClick={() => run(() => api.updatePlan(p.id, { is_active: !p.is_active }))}>{p.is_active ? 'Hide' : 'Show'}</button>
                 </td>
@@ -861,12 +860,12 @@ const PlansTab = () => {
           onSubmit={e => {
             e.preventDefault();
             run(async () => {
-              await api.createPlan({ name: draft.name, token_limit: Number(draft.token_limit), duration_days: Number(draft.duration_days) });
+              await api.createPlan({ name: draft.name, token_limit: Math.round(Number(draft.token_limit) * TOKEN_UNIT), duration_days: Number(draft.duration_days) });
               setDraft({ name: '', token_limit: '', duration_days: '30' });
             });
           }}>
           <input required className={input + ' flex-1 min-w-40'} placeholder="New plan name" aria-label="New plan name" value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} />
-          <input required className={input + ' w-40'} type="number" min="1" placeholder="Tokens (e.g. 1000000)" aria-label="Tokens" value={draft.token_limit} onChange={e => setDraft({ ...draft, token_limit: e.target.value })} />
+          <input required className={input + ' w-40'} type="number" min="1" placeholder="Tokens (e.g. 5000)" aria-label="Tokens" value={draft.token_limit} onChange={e => setDraft({ ...draft, token_limit: e.target.value })} />
           <input required className={input + ' w-28'} type="number" min="1" placeholder="Days" aria-label="Validity days" value={draft.duration_days} onChange={e => setDraft({ ...draft, duration_days: e.target.value })} />
           <button disabled={busy} className="px-4 py-2 bg-accent text-on-accent text-xs font-bold rounded-lg disabled:opacity-50">Add plan</button>
         </form>
@@ -950,9 +949,9 @@ const ReportsTab = () => {
                 <th className="px-4 py-3 text-right">Requests</th>
                 <th className="px-4 py-3 text-right">Errors</th>
                 <th className="px-4 py-3 text-right">Pages</th>
-                <th className="px-4 py-3 text-right">Input Tokens</th>
-                <th className="px-4 py-3 text-right">Output Tokens</th>
-                <th className="px-4 py-3 text-right">Total Tokens</th>
+                <th className="px-4 py-3 text-right">Input (API tokens)</th>
+                <th className="px-4 py-3 text-right">Output (API tokens)</th>
+                <th className="px-4 py-3 text-right">Plan Tokens</th>
               </tr></thead>
               <tbody>
                 {rows.map((r, i) => (
@@ -963,7 +962,7 @@ const ReportsTab = () => {
                     <td className="px-4 py-2 text-right font-mono">{fmt(r.pages)}</td>
                     <td className="px-4 py-2 text-right font-mono">{fmt(r.input_tokens)}</td>
                     <td className="px-4 py-2 text-right font-mono">{fmt(r.output_tokens)}</td>
-                    <td className="px-4 py-2 text-right font-mono font-bold">{fmt(r.total_tokens)}</td>
+                    <td className="px-4 py-2 text-right font-mono font-bold">{fmtTok(r.total_tokens)}</td>
                   </tr>
                 ))}
               </tbody>

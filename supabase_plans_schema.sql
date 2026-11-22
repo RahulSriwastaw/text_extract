@@ -32,12 +32,14 @@ INSERT INTO public.app_settings (key, value)
 VALUES ('plans_required', 'false'::jsonb)
 ON CONFLICT (key) DO NOTHING;
 
--- 4. Starter catalogue (only when no plan exists yet; edit freely in the admin panel)
+-- 4. Starter catalogue (only when no plan exists yet; edit freely in the admin panel).
+--    token_limit is stored in raw API tokens. The admin panel shows it 1000x smaller:
+--    5,000,000 here = 5,000 plan tokens = about 20 pages a day for 30 days.
 INSERT INTO public.plans (name, token_limit, duration_days)
 SELECT * FROM (VALUES
-  ('Starter',   500000::BIGINT, 30),
-  ('Standard', 2000000::BIGINT, 30),
-  ('Pro',     10000000::BIGINT, 30)
+  ('Basic',    2500000::BIGINT, 30),   -- 2,500 tokens  (~10 pages/day)
+  ('Teacher',  5000000::BIGINT, 30),   -- 5,000 tokens  (~20 pages/day)
+  ('Pro',     12000000::BIGINT, 30)    -- 12,000 tokens (~50 pages/day)
 ) AS seed(name, token_limit, duration_days)
 WHERE NOT EXISTS (SELECT 1 FROM public.plans);
 

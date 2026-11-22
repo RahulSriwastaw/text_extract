@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Sparkles, History, Settings, CheckCircle2, Zap, FileSpreadsheet, FileText, Split, LayoutGrid, Gauge } from 'lucide-react';
+import { formatPlanTokens } from '../services/apiClient';
 import { UserStatusContext } from '../App';
 import { checkUserGeminiAuth } from '../services/userGeminiService';
 import { subscribeToExtensionStatus, pingStudyAiExtension, BridgeStatus } from '../services/studyAiBridgeService';
@@ -213,14 +214,13 @@ function UsageIndicator() {
   if (status?.plan) {
     const { name, tokens, used, expiresAt } = status.plan;
     const left = Math.max(0, tokens - used);
-    const short = (n: number) => n >= 1e6 ? +(n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? +(n / 1e3).toFixed(1) + 'K' : String(n);
     const low = tokens > 0 && left / tokens <= 0.2;
     const days = expiresAt ? Math.ceil((Date.parse(expiresAt) - Date.now()) / 86400000) : null;
     return (
       <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-ink-3 px-2 py-1 rounded-lg bg-surface-2 border border-line"
-        title={`${name} plan: ${used.toLocaleString()} of ${tokens.toLocaleString()} tokens used${expiresAt ? `, valid till ${new Date(expiresAt).toLocaleDateString()}` : ''}`}>
+        title={`${name} plan: ${formatPlanTokens(used)} of ${formatPlanTokens(tokens)} tokens used${expiresAt ? `, valid till ${new Date(expiresAt).toLocaleDateString()}` : ''}`}>
         <Gauge size={13} className={low ? 'text-orange-400' : 'text-ink-3'} />
-        <span className={low ? 'text-orange-400 font-bold' : ''}>{short(left)} tokens left</span>
+        <span className={low ? 'text-orange-400 font-bold' : ''}>{formatPlanTokens(left)} tokens left</span>
         {days != null && days <= 7 && <span className="text-orange-400 font-bold">· {Math.max(days, 0)}d</span>}
       </div>
     );

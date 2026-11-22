@@ -45,6 +45,18 @@ export class ApiPlanError extends Error {
   }
 }
 
+/**
+ * Plan tokens shown in the UI are 1000x smaller than raw API tokens:
+ * 1 plan token = 1,000 API tokens (a page costs roughly 8 plan tokens).
+ * The database and the server keep counting raw API tokens.
+ */
+export const TOKEN_UNIT = 1000;
+/** Raw API tokens → plan tokens, formatted (whole numbers; one decimal below 10). */
+export function formatPlanTokens(raw: number): string {
+  const n = (Number(raw) || 0) / TOKEN_UNIT;
+  return n > 0 && n < 10 ? String(+n.toFixed(1)) : Math.round(n).toLocaleString();
+}
+
 /** Fired when the server refuses a request because of the plan, so the app can re-check /api/me. */
 export const PLAN_CHANGED_EVENT = 'plan-status-changed';
 

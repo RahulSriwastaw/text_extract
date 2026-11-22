@@ -7,11 +7,11 @@ import mammoth from 'mammoth';
 import type { ExtractedElement } from '../types';
 import {
   type DesignDoc, type DesignOp, type Theme, type Layout,
-  PRESET_THEMES, applyDesignOps, autoPaginate, elementsToDesignDoc, htmlToDesignDoc, allBlocks,
+  PRESET_THEMES, applyDesignOps, autoPaginate, elementsToDesignDoc, htmlToDesignDoc, allBlocks, planOverflowFix, plainText, FONTS, FONT_IDS, type FontId,
 } from '../services/designDoc';
 import { generateDesignDocx } from '../services/designDocx';
 import { saveDesignDoc, getDesignDocs, deleteDesignDoc } from '../services/aiDbService';
-import DesignCanvas from './design/DesignCanvas';
+import DesignCanvas, { measurePage } from './design/DesignCanvas';
 import DesignChat, { type ChatMessage } from './design/DesignChat';
 
 export interface DesignInput { elements: ExtractedElement[]; title: string }
@@ -24,6 +24,7 @@ interface Props {
 }
 
 const HISTORY_LIMIT = 40;
+const MAX_FIT_ROUNDS = 80;
 
 const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) => {
   const [doc, setDoc] = useState<DesignDoc | null>(null);
@@ -38,8 +39,9 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
   const [busy, setBusy] = useState('');
   const [pending, setPending] = useState<{ request: string; pageId?: string; key: number }>();
   const [canvasWidth, setCanvasWidth] = useState(800);
+  // The latest document. Updated in commit() too, because several changes can land before a render.
   const docRef = useRef<DesignDoc | null>(null);
-  docRef.current = doc;
+  useEffect(() => { docRef.current = doc; }, [doc]);
   const canvasBox = useRef<HTMLDivElement>(null);
 
   const refreshSaved = useCallback(() => { getDesignDocs<DesignDoc>().then(setSaved).catch(() => setSaved([])); }, []);
@@ -63,8 +65,42 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
     if (!current || next === current) return;
     setPast(p => [...p.slice(-HISTORY_LIMIT + 1), current]);
     setFuture([]);
+    docRef.current = next;          // several commits can happen before the next render
+    fitRounds.current = 0;          // a real change: the automatic overflow fix may run again
     setDoc(next);
   }, []);
+
+  // ---- Automatic overflow fix for slides (free, no AI) --------------------------------
+  // While any slide holds more than fits: move the extra blocks to a new slide, split a
+  // table/paragraph that is taller than a slide, and only then shrink that slide's text.
+  // Its changes are folded into the user's last action, so one Undo takes both back.
+  const [autoFit, setAutoFit] = useState(true);
+  const [fitting, setFitting] = useState(false);
+  const fitRounds = useRef(0);
+  useEffect(() => {
+    if (!doc || doc.layout !== 'slides' || !autoFit) { setFitting(false); return; }
+    const timer = setTimeout(() => {
+      const current = docRef.current;
+      if (!current || current.layout !== 'slides') return;
+      const ops: DesignOp[] = [];
+      for (const page of current.pages) {
+        const { bottoms, percent } = measurePage(current, page.id);
+        const fix = planOverflowFix(page, bottoms, percent);
+        if (!fix) continue;
+        ops.push(fix.kind === 'break' ? { op: 'paginate', pageId: page.id, breaks: [{ beforeBlockId: fix.beforeBlockId }] }
+          : fix.kind === 'split' ? { op: 'splitBlock', id: fix.blockId }
+          : { op: 'setPage', pageId: page.id, scale: fix.scale });
+      }
+      if (!ops.length || fitRounds.current >= MAX_FIT_ROUNDS) { setFitting(false); return; }
+      fitRounds.current++;
+      const next = applyDesignOps(current, ops).doc;
+      if (next === current) { setFitting(false); return; }
+      setFitting(true);
+      docRef.current = next;
+      setDoc(next);                 // no history entry: part of the action that caused it
+    }, 220);                        // after the canvas has rendered and measured the change
+    return () => clearTimeout(timer);
+  }, [doc, autoFit, canvasWidth]);
 
   const applyOps = useCallback((ops: unknown[]) => {
     const current = docRef.current;
@@ -74,12 +110,15 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
     return { applied: result.applied, skipped: result.skipped };
   }, [commit]);
 
+  // Undo/redo restore a document exactly as it was, so the automatic fix stays out of the way.
   const undo = () => {
     if (!doc || !past.length) return;
+    fitRounds.current = MAX_FIT_ROUNDS;
     setFuture(f => [doc, ...f]); setDoc(past[past.length - 1]); setPast(p => p.slice(0, -1));
   };
   const redo = () => {
     if (!doc || !future.length) return;
+    fitRounds.current = MAX_FIT_ROUNDS;
     setPast(p => [...p, doc]); setDoc(future[0]); setFuture(f => f.slice(1));
   };
 
@@ -186,14 +225,7 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
 
   // ------------------------------------------------------------------ editor
   const overflowing = doc.layout === 'slides' ? doc.pages.filter(p => (fill[p.id] || 0) > 100) : [];
-  const splitInTwo = (pageId: string) => {
-    const page = doc.pages.find(p => p.id === pageId);
-    if (!page || page.blocks.length < 2) return;
-    // Break near the middle, but never between a question and its options.
-    let at = Math.ceil(page.blocks.length / 2);
-    while (at < page.blocks.length - 1 && (page.blocks[at].type === 'option' || page.blocks[at].type === 'answer')) at++;
-    applyOps([{ op: 'paginate', pageId, breaks: [{ beforeBlockId: page.blocks[at].id }] }] satisfies DesignOp[]);
-  };
+  const fixNow = () => { fitRounds.current = 0; setAutoFit(true); setDoc({ ...doc }); };   // re-run the automatic fix
 
   const field = 'w-full bg-surface-2 border border-line rounded-lg px-2.5 py-1.5 text-xs text-ink';
   const label = 'block text-[11px] font-bold text-ink-3 mb-1';
@@ -212,23 +244,25 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
           <button type="button" className="seg-item" aria-pressed={doc.layout === 'document'} onClick={() => setLayout('document')}><FileIcon /> Document</button>
           <button type="button" className="seg-item" aria-pressed={doc.layout === 'slides'} onClick={() => setLayout('slides')}><Presentation /> Slides (PPT)</button>
         </div>
+        {doc.layout === 'slides' && (
+          <label className="flex items-center gap-1.5 text-xs text-ink-2" title="Automatically moves extra content to new slides, splits long tables and paragraphs, and shrinks text only when needed. Free.">
+            <input type="checkbox" checked={autoFit} onChange={e => { fitRounds.current = 0; setAutoFit(e.target.checked); }} /> Auto-fit slides
+          </label>
+        )}
         <div className="flex-1" />
-        {busy && <span role="status" className="flex items-center gap-1.5 text-xs text-ink-3"><Loader2 size={13} className="animate-spin" /> {busy}</span>}
+        {fitting && <span role="status" className="flex items-center gap-1.5 text-xs text-ink-3"><Loader2 size={13} className="animate-spin" /> Fitting slides…</span>}
+        {busy &&<span role="status" className="flex items-center gap-1.5 text-xs text-ink-3"><Loader2 size={13} className="animate-spin" /> {busy}</span>}
         <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={undo} disabled={!past.length} aria-label="Undo" title="Undo"><Undo2 /></button>
         <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={redo} disabled={!future.length} aria-label="Redo" title="Redo"><Redo2 /></button>
         <button type="button" className="btn btn-primary btn-sm" onClick={download} disabled={!!busy}><FileDown /> Download DOCX</button>
       </div>
 
       {notice && <p role="status" className="px-3 py-1.5 text-xs text-amber-300 bg-amber-500/10 border-b border-amber-500/20">{notice}</p>}
-      {overflowing.length > 0 && (
+      {overflowing.length > 0 && !fitting && (
         <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs text-red-300 bg-red-500/10 border-b border-red-500/20">
           <AlertTriangle size={14} />
           <span>{overflowing.length} slide{overflowing.length === 1 ? ' has' : 's have'} more content than fits.</span>
-          <button type="button" className="btn btn-secondary btn-xs" onClick={() => overflowing.forEach(p => splitInTwo(p.id))}><Scissors /> Split in two (free)</button>
-          <button type="button" className="btn btn-secondary btn-xs"
-            onClick={() => { setPanel('chat'); setPending({ request: 'This slide has too much content. Split it into as many slides as needed so nothing overflows, keeping each question with its options.', pageId: overflowing[0].id, key: Date.now() }); }}>
-            <Sparkles /> Ask AI to split the first one
-          </button>
+          <button type="button" className="btn btn-secondary btn-xs" onClick={fixNow}><Scissors /> Fix overflow now (free)</button>
         </div>
       )}
 
@@ -242,7 +276,7 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
                 onClick={() => { setSelectedPageId(page.id); document.getElementById('design-page-' + page.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
                 className={`w-full text-left px-2.5 py-2 rounded-lg text-xs border ${page.id === selectedPageId ? 'bg-surface-3 border-accent text-ink' : 'border-transparent text-ink-3 hover:bg-surface-2 hover:text-ink'}`}>
                 <span className="font-bold">{doc.layout === 'slides' ? 'Slide' : 'Section'} {i + 1}</span>
-                {page.title && <span className="block truncate">{page.title}</span>}
+                {(page.title || page.blocks[0]?.type === 'heading') && <span className="block truncate">{plainText(page.title || page.blocks[0].text || '')}</span>}
                 <span className={`block text-[10px] ${doc.layout === 'slides' && percent > 100 ? 'text-red-400 font-bold' : ''}`}>
                   {page.blocks.length} blocks{doc.layout === 'slides' && percent > 0 && ` · ${percent}%`}
                 </span>
@@ -265,7 +299,7 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
           </div>
 
           <div className={panel === 'chat' ? 'flex-1 min-h-0' : 'hidden'}>
-            <DesignChat doc={doc} fill={fill} selectedPageId={selectedPageId} messages={messages} setMessages={setMessages}
+            <DesignChat doc={doc} getDoc={() => docRef.current} fill={fill} selectedPageId={selectedPageId} messages={messages} setMessages={setMessages}
               applyOps={applyOps} restore={commit} pending={pending} />
           </div>
 
@@ -297,10 +331,10 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
               </div>
 
               <div>
-                <p className={label}>Font</p>
-                <div className="seg seg-sm w-full">
-                  {(['sans', 'serif', 'hindi'] as const).map(f => choice(f, doc.theme.font, () => setTheme({ font: f }), { sans: 'Sans', serif: 'Serif', hindi: 'Hindi' }[f]))}
-                </div>
+                <label className={label} htmlFor="design-font">Font style</label>
+                <select id="design-font" className="select w-full text-xs" value={doc.theme.font} onChange={e => setTheme({ font: e.target.value as FontId })}>
+                  {FONT_IDS.map(id => <option key={id} value={id} style={{ fontFamily: FONTS[id].css }}>{FONTS[id].label}</option>)}
+                </select>
               </div>
               <div>
                 <label className={label} htmlFor="design-size">Text size: {doc.theme.baseSize} pt</label>

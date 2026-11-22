@@ -8,14 +8,10 @@ import { normalizePreviewMath } from '../ProcessingList';
 import { resolveStyle } from '../../services/designDocx';
 import {
   type DesignDoc, type DesignBlock, type DesignPage, type DesignOp, type Theme,
-  PAGE_SIZE, displayText, questionNumbers, wordCount,
+  PAGE_SIZE, displayText, questionNumbers, wordCount, emphasisToLinks, FONTS, FONT_IDS,
 } from '../../services/designDoc';
 
-const FONT_STACK: Record<Theme['font'], string> = {
-  sans: 'Arial, "Noto Sans Devanagari", sans-serif',
-  serif: '"Times New Roman", "Noto Serif Devanagari", serif',
-  hindi: '"Nirmala UI", "Noto Sans Devanagari", Mangal, sans-serif',
-};
+const FONT_STACK = Object.fromEntries(FONT_IDS.map(id => [id, FONTS[id].css])) as Record<Theme['font'], string>;
 const PT = 96 / 72;   // pt → CSS px
 
 interface CanvasProps {
@@ -29,20 +25,28 @@ interface CanvasProps {
   onFill: (fill: Record<string, number>) => void;
 }
 
+const markdownComponents = {
+  a: ({ href, children }: { href?: string; children?: React.ReactNode }) =>
+    href === '#hl' ? <mark>{children}</mark>
+    : href === '#hlb' ? <mark><strong>{children}</strong></mark>
+    : href === '#b' ? <strong>{children}</strong>
+    : <span>{children}</span>,   // real links are not clickable on a page preview
+};
+
 const Markdown = React.memo(({ text }: { text: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>
-    {normalizePreviewMath(text)}
+  <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
+    {emphasisToLinks(normalizePreviewMath(text))}
   </ReactMarkdown>
 ));
 
-function BlockView({ block, doc, number, onOps, isFirst, isLast, previousId, nextId }: {
+function BlockView({ block, doc, number, onOps, isFirst, isLast, previousId, nextId, pageScale = 1 }: {
   block: DesignBlock; doc: DesignDoc; number?: number; onOps: (ops: DesignOp[]) => void;
-  isFirst: boolean; isLast: boolean; previousId?: string; nextId?: string;
+  isFirst: boolean; isLast: boolean; previousId?: string; nextId?: string; pageScale?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const { theme } = doc;
-  const st = resolveStyle(theme, block, doc.layout);
+  const st = resolveStyle(theme, block, doc.layout, pageScale);
 
   const thin = `1px solid ${st.borderColor}`, none = '0 solid transparent';
   const style: React.CSSProperties = {
@@ -95,7 +99,7 @@ function BlockView({ block, doc, number, onOps, isFirst, isLast, previousId, nex
 
   const tool = 'p-1 rounded hover:bg-black/10 disabled:opacity-30';
   return (
-    <div className="design-block group relative" style={{ margin: block.type === 'heading' ? '10px 0 6px' : '4px 0' }}>
+    <div className="design-block group relative" data-block-id={block.id} style={{ margin: block.type === 'heading' ? '10px 0 6px' : '4px 0' }}>
       <div style={style}>{body}</div>
       <div className="design-block-tools absolute -top-3 right-0 hidden group-hover:flex group-focus-within:flex items-center gap-0.5 px-1 py-0.5 rounded-md shadow"
         style={{ background: '#111827', color: '#fff', zIndex: 2 }}>
@@ -142,7 +146,7 @@ function PageView({ page, index, doc, scale, selected, onSelect, onOps, onMeasur
   const rendered: React.ReactNode[] = [];
   const blocks = page.blocks;
   const view = (block: DesignBlock, i: number) => (
-    <BlockView key={block.id} doc={doc} number={numbers[block.id]} onOps={onOps} block={block}
+    <BlockView key={block.id} doc={doc} number={numbers[block.id]} onOps={onOps} block={block} pageScale={page.scale}
       isFirst={i === 0} isLast={i === blocks.length - 1} previousId={blocks[i - 1]?.id} nextId={blocks[i + 1]?.id} />
   );
   for (let i = 0; i < blocks.length; i++) {
@@ -173,8 +177,8 @@ function PageView({ page, index, doc, scale, selected, onSelect, onOps, onMeasur
           fontFamily: FONT_STACK[theme.font], color: theme.text,
         }}>
           {theme.header && <div style={{ fontSize: 11, color: '#6B7280', textAlign: 'center', marginTop: -30, marginBottom: 14 }}>{theme.header}</div>}
-          <div ref={inner}>
-            {page.title && <BlockView doc={doc} onOps={ops => onOps(ops.map(o => o.op === 'updateBlock' ? { op: 'setPage', pageId: page.id, title: o.text || '' } : o))}
+          <div ref={inner} data-design-inner={page.id}>
+            {page.title && <BlockView doc={doc} pageScale={page.scale} onOps={ops => onOps(ops.map(o => o.op === 'updateBlock' ? { op: 'setPage', pageId: page.id, title: o.text || '' } : o))}
               block={{ id: 'title-' + page.id, type: 'heading', level: 1, text: page.title }} isFirst isLast />}
             {rendered}
             {!blocks.length && <p style={{ color: '#9CA3AF', fontSize: 14 }}>Empty page</p>}
@@ -207,7 +211,26 @@ function PageView({ page, index, doc, scale, selected, onSelect, onOps, onMeasur
   );
 }
 
-const DesignCanvas: React.FC<CanvasProps> = ({ doc, width, selectedPageId, onSelectPage, onOps, onFill }) => {
+/**
+ * Where each block of a rendered slide ends, as a fraction of the usable slide height
+ * (above 1 = runs off the slide). Read from the DOM; used by the automatic overflow fix.
+ */
+export function measurePage(doc: DesignDoc, pageId: string): { bottoms: Record<string, number>; percent: number } {
+  const inner = document.querySelector<HTMLElement>(`[data-design-inner="${pageId}"]`);
+  if (!inner) return { bottoms: {}, percent: 0 };
+  const size = PAGE_SIZE[doc.layout];
+  const box = inner.getBoundingClientRect();
+  // getBoundingClientRect is in screen px; scale it back with the element's own layout height.
+  const ratio = inner.scrollHeight / Math.max(1, box.height);
+  const usable = size.height - size.padding * 2;
+  const bottoms: Record<string, number> = {};
+  for (const el of Array.from(inner.querySelectorAll<HTMLElement>('[data-block-id]'))) {
+    bottoms[el.dataset.blockId!] = (el.getBoundingClientRect().bottom - box.top) * ratio / usable;
+  }
+  return { bottoms, percent: Math.round(inner.scrollHeight / usable * 100) };
+}
+
+const DesignCanvas: React.FC<CanvasProps> =({ doc, width, selectedPageId, onSelectPage, onOps, onFill }) => {
   const size = PAGE_SIZE[doc.layout];
   const scale = Math.min(1, Math.max(0.3, width / size.width));
   const fill = useRef<Record<string, number>>({});

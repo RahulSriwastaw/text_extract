@@ -12,10 +12,10 @@ import {
 import { parseLineToChildren, createDocxTable, type DocxRunStyle } from './docxService';
 import {
   type DesignDoc, type DesignBlock, type Theme, type BlockStyle, type Layout,
-  SIZE_SCALE, HEADING_SCALE, PAGE_SIZE, LAYOUT_TEXT_SCALE, tint, questionNumbers, displayText,
+  SIZE_SCALE, HEADING_SCALE, PAGE_SIZE, LAYOUT_TEXT_SCALE, tint, questionNumbers, displayText, stripHighlight, balanceStars, FONT_IDS, FONTS as FONT_LIST,
 } from './designDoc';
 
-const FONTS: Record<Theme['font'], string> = { sans: 'Arial', serif: 'Times New Roman', hindi: 'Nirmala UI' };
+const FONTS = Object.fromEntries(FONT_IDS.map(id => [id, FONT_LIST[id].docx])) as Record<Theme['font'], string>;
 const hex = (c: string) => c.replace('#', '');
 const PX_TO_TWIP = 15;
 const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
@@ -28,9 +28,9 @@ export interface ResolvedStyle extends Required<Pick<BlockStyle, 'color' | 'alig
 }
 
 /** Theme defaults per block type + the block's own overrides. Shared with the canvas so both look the same. */
-export function resolveStyle(theme: Theme, block: DesignBlock, layout: Layout = 'document'): ResolvedStyle {
+export function resolveStyle(theme: Theme, block: DesignBlock, layout: Layout = 'document', pageScale = 1): ResolvedStyle {
   const s = block.style || {};
-  const base = theme.baseSize * LAYOUT_TEXT_SCALE[layout];
+  const base = theme.baseSize * LAYOUT_TEXT_SCALE[layout] * pageScale;
   const out: ResolvedStyle = {
     color: theme.text, align: 'left', bold: false, italic: false, border: 'none', borderColor: theme.primary,
     sizePt: base,
@@ -88,8 +88,20 @@ export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
   const children: (Paragraph | Table)[] = [];
   let breakPending = false;          // the next paragraph starts a new page
 
+  let pageScale = 1;                 // per-slide text shrink (page.scale)
+  const HIGHLIGHT = { type: ShadingType.CLEAR, fill: 'FDE68A', color: 'auto' };
+
+  /** Text → runs. ==highlight== and ==**bold highlight**== become shaded runs; the rest keeps bold/italic/math. */
+  const runs = (text: string, bold: boolean, run: DocxRunStyle): any[] =>
+    text.split(/(==[^=\n]+==)/g).filter(Boolean).flatMap(part => {
+      const both = part.match(/^==\s*\*\*([^=*\n]+)\*\*\s*==$/), marked = part.match(/^==([^=\n]+)==$/);
+      if (both) return parseLineToChildren(both[1], true, undefined, { ...run, shading: HIGHLIGHT });
+      if (marked) return parseLineToChildren(balanceStars(marked[1]), bold, undefined, { ...run, shading: HIGHLIGHT });
+      return parseLineToChildren(balanceStars(part).replace(/==/g, ''), bold, undefined, run);
+    });
+
   const paragraph = (block: DesignBlock, text: string, extra: Record<string, any> = {}) => {
-    const st = resolveStyle(theme, block, doc.layout);
+    const st = resolveStyle(theme, block, doc.layout, pageScale);
     const run: DocxRunStyle = { font: FONTS[theme.font], size: Math.round(st.sizePt * 2), color: hex(st.color), ...(st.italic && { italics: true }) };
     const line = (color: string, size: number) => ({ style: BorderStyle.SINGLE, size, color: hex(color), space: 6 });
     const border =
@@ -98,7 +110,7 @@ export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
       : st.border === 'underline' ? { bottom: line(st.borderColor, 12) }
       : undefined;
     const p = new Paragraph({
-      children: parseLineToChildren(text, st.bold, undefined, run) as any[],
+      children: runs(text, st.bold, run),
       alignment: ALIGN[st.align],
       spacing: { before: block.type === 'heading' ? 200 : 80, after: block.type === 'heading' ? 140 : 80, line: 300 },
       ...(border && { border }),
@@ -118,6 +130,7 @@ export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
 
   for (const [pageIndex, designPage] of doc.pages.entries()) {
     breakPending = pageIndex > 0;
+    pageScale = designPage.scale || 1;
     if (designPage.title) {
       children.push(paragraph({ id: 'title', type: 'heading', level: 1 }, designPage.title));
     }
@@ -164,7 +177,10 @@ export async function generateDesignDocx(doc: DesignDoc): Promise<Blob> {
         }
         case 'table':
           flushBreak();
-          children.push(createDocxTable((block.text || '').split('\n').filter(Boolean)));
+          children.push(createDocxTable(stripHighlight(block.text || '').split('\n').filter(Boolean), {
+            font: FONTS[theme.font], color: hex(theme.text),
+            size: Math.round(resolveStyle(theme, block, doc.layout, pageScale).sizePt * 2),
+          }));
           children.push(new Paragraph({ children: [], spacing: { before: 0, after: 80 } }));
           break;
         case 'divider':

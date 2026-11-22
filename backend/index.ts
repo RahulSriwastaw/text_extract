@@ -2753,12 +2753,21 @@ app.post('/api/mocktest-page-chat', requireUser, usageMiddleware('mocktest-page-
   }
 });
 
+/** Every complete {"op": ...} object found in a (possibly cut-off) AI reply. */
+function salvageDesignOps(raw: string): unknown[] {
+  const ops: unknown[] = [];
+  for (const match of raw.matchAll(/\{\s*"op"\s*:\s*"\w+"(?:[^{}\[\]]|\[[^\]]*\]|\{[^{}]*\})*\}/g)) {
+    try { ops.push(JSON.parse(match[0])); } catch { /* incomplete: skip */ }
+  }
+  return ops;
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/design-chat — Design Studio: the AI answers with design operations
 // (theme / block styles / pagination), never with a rewritten document.
 // ---------------------------------------------------------------------------
 app.post('/api/design-chat', requireUser, usageMiddleware('design-chat'), async (req, res) => {
-  const { outline, theme, layout, history, request, scopePageId, claudeModel, geminiModel } = req.body || {};
+  const { outline, theme, layout, history, request, scopePageId, fullText, part, claudeModel, geminiModel } = req.body || {};
   const outlineSize = Array.isArray(outline) ? JSON.stringify(outline).length : 0;
   if (!outlineSize || typeof request !== 'string' || !request.trim() || !theme || typeof theme !== 'object'
       || (layout !== 'document' && layout !== 'slides'))
@@ -2772,14 +2781,20 @@ app.post('/api/design-chat', requireUser, usageMiddleware('design-chat'), async 
     const prompt = designChatPrompt({
       outline, theme, layout, history: turns, request: request.trim().slice(0, 2000),
       scopePageId: typeof scopePageId === 'string' ? scopePageId.slice(0, 20) : undefined,
+      fullText: fullText === true,
+      part: typeof part === 'string' && /^\d{1,3} of \d{1,3}$/.test(part) ? part : undefined,
     });
     const raw = await runAIAction(client => callGeminiWithFallback(client, getPrimaryModel(), getFallbackModel(),
-      [{ text: prompt }], { claudeModel, geminiModel, temperature: 0.3, maxOutputTokens: 4096, responseMimeType: 'application/json' }, 'design-chat'),
+      [{ text: prompt }], { claudeModel, geminiModel, temperature: 0.3, maxOutputTokens: 8192, responseMimeType: 'application/json' }, 'design-chat'),
       getUserKey(req), undefined, geminiModel ? 'gemini' : claudeModel ? 'claude' : undefined);
     const parsed = safeParseAiJsonObject(raw);
+    // A reply cut off at the token limit is not valid JSON: keep every operation that arrived complete.
+    const complete = Array.isArray(parsed.ops);
+    const ops = complete ? parsed.ops : salvageDesignOps(String(raw || ''));
     res.json({
       reply: typeof parsed.reply === 'string' ? parsed.reply.slice(0, 1000) : '',
-      ops: Array.isArray(parsed.ops) ? parsed.ops.slice(0, 60) : [],
+      ops: ops.slice(0, 150),
+      ...(!complete && { truncated: true }),
     });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Design chat failed.' });

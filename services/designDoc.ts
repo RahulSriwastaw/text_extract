@@ -44,12 +44,37 @@ export interface DesignPage {
   id: string;
   title?: string;
   background?: string;
+  /** Text size multiplier for this page only (0.55–1): the last resort when one block cannot fit a slide. */
+  scale?: number;
   blocks: DesignBlock[];
 }
 
+export const MIN_PAGE_SCALE = 0.55;
+
+/**
+ * Font choices. `docx` is the font name written into the Word file (all ship with Windows/Office);
+ * `css` is the on-screen stack, ending in a Devanagari-capable fallback.
+ */
+export const FONTS = {
+  sans: { label: 'Arial', docx: 'Arial', css: 'Arial, "Noto Sans Devanagari", "Nirmala UI", sans-serif' },
+  serif: { label: 'Times New Roman', docx: 'Times New Roman', css: '"Times New Roman", "Noto Serif Devanagari", Kokila, serif' },
+  hindi: { label: 'Nirmala UI (Hindi)', docx: 'Nirmala UI', css: '"Nirmala UI", "Noto Sans Devanagari", Mangal, sans-serif' },
+  mangal: { label: 'Mangal (Hindi)', docx: 'Mangal', css: 'Mangal, "Noto Sans Devanagari", "Nirmala UI", sans-serif' },
+  kokila: { label: 'Kokila (Hindi, book style)', docx: 'Kokila', css: 'Kokila, "Noto Serif Devanagari", "Nirmala UI", serif' },
+  aparajita: { label: 'Aparajita (Hindi, classic)', docx: 'Aparajita', css: 'Aparajita, "Noto Serif Devanagari", "Nirmala UI", serif' },
+  utsaah: { label: 'Utsaah (Hindi, modern)', docx: 'Utsaah', css: 'Utsaah, "Noto Sans Devanagari", "Nirmala UI", sans-serif' },
+  calibri: { label: 'Calibri', docx: 'Calibri', css: 'Calibri, "Noto Sans Devanagari", "Nirmala UI", sans-serif' },
+  cambria: { label: 'Cambria', docx: 'Cambria', css: 'Cambria, "Noto Serif Devanagari", "Nirmala UI", serif' },
+  georgia: { label: 'Georgia', docx: 'Georgia', css: 'Georgia, "Noto Serif Devanagari", "Nirmala UI", serif' },
+  verdana: { label: 'Verdana', docx: 'Verdana', css: 'Verdana, "Noto Sans Devanagari", "Nirmala UI", sans-serif' },
+  comic: { label: 'Comic Sans (friendly)', docx: 'Comic Sans MS', css: '"Comic Sans MS", "Noto Sans Devanagari", "Nirmala UI", cursive' },
+} as const;
+export type FontId = keyof typeof FONTS;
+export const FONT_IDS = Object.keys(FONTS) as FontId[];
+
 export interface Theme {
   name: string;
-  font: 'sans' | 'serif' | 'hindi';
+  font: FontId;
   baseSize: number;        // pt, 9–18
   primary: string;
   accent: string;
@@ -201,8 +226,10 @@ export function htmlToDesignDoc(html: string, title: string): DesignDoc {
     const inner = Array.from(node.childNodes).map(inline).join('');
     const tag = node.tagName;
     if (tag === 'BR') return '\n';
-    if ((tag === 'STRONG' || tag === 'B') && inner.trim()) return `**${inner.trim()}**`;
-    if ((tag === 'EM' || tag === 'I') && inner.trim()) return `*${inner.trim()}*`;
+    // Bold/italic only around real words: Markdown cannot close "**" after a lone bullet or symbol.
+    const hasWord = /[\p{L}\p{N}]/u.test(inner);
+    if ((tag === 'STRONG' || tag === 'B') && hasWord) return `**${inner.trim()}**`;
+    if ((tag === 'EM' || tag === 'I') && hasWord) return `*${inner.trim()}*`;
     return inner;
   };
   const addImages = (node: Element) => {
@@ -219,7 +246,8 @@ export function htmlToDesignDoc(html: string, title: string): DesignDoc {
     const tag = node.tagName;
     const heading = tag.match(/^H([1-6])$/);
     if (heading) {
-      const text = inline(node).trim();
+      // Stray Markdown "#" marks typed into a Word heading would show up as text.
+      const text = inline(node).replace(/\s*#{1,6}\s*/g, ' – ').replace(/^ – | – $/g, '').trim();
       if (text) blocks.push({ id: newId(doc, 'b'), type: 'heading', text, level: Math.min(3, Number(heading[1])) as 1 | 2 | 3 });
     } else if (tag === 'UL' || tag === 'OL') {
       const items = Array.from(node.children).map((li, i) => (tag === 'OL' ? `${i + 1})` : '-') + ' ' + inline(li).trim());
@@ -232,8 +260,11 @@ export function htmlToDesignDoc(html: string, title: string): DesignDoc {
         blocks.push({ id: newId(doc, 'b'), type: 'table', text: [rows[0], '|' + ' --- |'.repeat(columns), ...rows.slice(1)].join('\n') });
       }
     } else {
-      const text = inline(node).trim();
-      if (text) blocks.push(...textToBlocks(doc, text));
+      // A typed bullet ("• text") becomes a real list item; neighbours join into one list.
+      const text = inline(node).trim().replace(/^[•●▪◦‣·]\s*/, '- ');
+      const previous = blocks[blocks.length - 1];
+      if (text.startsWith('- ') && previous?.type === 'list') previous.text += '\n' + text;
+      else if (text) blocks.push(...textToBlocks(doc, text));
       addImages(node);
     }
   }
@@ -246,7 +277,7 @@ export function htmlToDesignDoc(html: string, title: string): DesignDoc {
 // ---------------------------------------------------------------------------
 export const allBlocks = (doc: DesignDoc) => doc.pages.flatMap(p => p.blocks);
 export const wordCount = (page: DesignPage) =>
-  page.blocks.reduce((n, b) => n + (b.text ? b.text.split(/\s+/).filter(Boolean).length : 0), 0);
+  page.blocks.reduce((n, b) => n + (b.text ? b.text.replace(/[|*=#-]+/g, ' ').split(/\s+/).filter(Boolean).length : 0), 0);
 
 /** Question number for every question block, in reading order (used for badges and the '# ' style). */
 export function questionNumbers(doc: DesignDoc): Record<string, number> {
@@ -268,18 +299,24 @@ export const PAGE_SIZE: Record<Layout, { width: number; height: number; padding:
 
 /**
  * The compact view of the document sent to the AI: ids, types, styles and the
- * start of each text. Full text only for the page in scope. Never image data.
+ * start of each text. Never image data.
+ *  - pageIds: only these pages (default: all)
+ *  - blockIds: only these blocks (one part of a long document)
+ *  - fullText: send whole texts, for requests that must read the content
+ *    (highlight key terms, bold important words). Costs more tokens.
  */
-export function outlineForAi(doc: DesignDoc, scopePageId?: string, fill: Record<string, number> = {}) {
+export function outlineForAi(doc: DesignDoc, options: { pageIds?: string[]; blockIds?: string[]; fullText?: boolean; fill?: Record<string, number> } = {}) {
+  const { pageIds, fullText = false, fill = {} } = options;
+  const wanted = options.blockIds && new Set(options.blockIds);
   return doc.pages
-    .filter(page => !scopePageId || page.id === scopePageId)
+    .filter(page => (!pageIds || pageIds.includes(page.id)) && (!wanted || page.blocks.some(b => wanted.has(b.id))))
     .map(page => ({
       id: page.id,
       ...(page.title && { title: page.title }),
       ...(fill[page.id] != null && { fillPercent: Math.round(fill[page.id]) }),
-      blocks: page.blocks.map(b => {
+      blocks: page.blocks.filter(b => !wanted || wanted.has(b.id)).map(b => {
         const text = b.text || '';
-        const limit = scopePageId ? 1200 : 160;
+        const limit = fullText ? 4000 : 160;
         return {
           id: b.id, type: b.type,
           ...(b.level && { level: b.level }),
@@ -288,6 +325,149 @@ export function outlineForAi(doc: DesignDoc, scopePageId?: string, fill: Record<
         };
       }),
     }));
+}
+
+/**
+ * Groups of consecutive block ids whose full text fits one AI request. A long document
+ * is sent in several requests so every block's whole text can be read, and each reply
+ * stays small enough for the server's time limit.
+ */
+export function fullTextChunks(doc: DesignDoc, maxChars = 2200): string[][] {
+  const chunks: string[][] = [];
+  let size = 0;
+  for (const block of allBlocks(doc)) {
+    const chars = (block.text?.length || 0) + 40;
+    if (!chunks.length || (size + chars > maxChars && chunks[chunks.length - 1].length)) { chunks.push([]); size = 0; }
+    chunks[chunks.length - 1].push(block.id);
+    size += chars;
+  }
+  return chunks;
+}
+
+// ---------------------------------------------------------------------------
+// Inline emphasis:  **bold**  and  ==highlight==  inside a block's text
+// ---------------------------------------------------------------------------
+export type EmphasisMark = 'bold' | 'highlight' | 'both';
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Wrap every occurrence of each phrase in the text. Math ($…$), existing marks and
+ * table separators are left alone, so the content itself never changes.
+ */
+export function emphasizeText(text: string, phrases: string[], mark: EmphasisMark): { text: string; count: number } {
+  // Bold goes INSIDE the highlight: Markdown refuses to close "**" when a letter follows punctuation,
+  // which happens all the time in Hindi ("==परिवर्तन==ों").
+  const [open, close] = mark === 'bold' ? ['**', '**'] : mark === 'highlight' ? ['==', '=='] : ['==**', '**=='];
+  let count = 0;
+  // Split out the spans that must not be touched; only plain segments are searched.
+  const protectedSpan = /(\$\$[\s\S]*?\$\$|\$[^$\n]+\$|==[^=\n]+==|\*\*[^*\n]+\*\*)/g;
+  const wanted = [...new Set(phrases.map(p => p.trim()).filter(p => p.length >= 2 && p.length <= 200))].sort((a, b) => b.length - a.length);
+  if (!wanted.length) return { text, count };
+  // A match always runs to the end of its word. Marking only part of a Hindi word ("परिवर्तन" in
+  // "परिवर्तनों") would cut the vowel sign off its consonant and break the rendering.
+  const pattern = new RegExp(`(?:${wanted.map(escapeRegExp).join('|')})[\\p{L}\\p{M}]*`, 'gu');
+  const out = text.split(protectedSpan).map((part, i) =>
+    i % 2 === 1 ? part : part.replace(pattern, match => { count++; return open + match + close; })
+  ).join('');
+  return { text: out, count };
+}
+
+/**
+ * For the on-screen preview: **bold** and ==highlight== become Markdown links to
+ * "#b" / "#hl" / "#hlb" (bold highlight), which the canvas draws as <strong>/<mark>.
+ * Markdown's own "**" refuses to close next to punctuation or right before a letter
+ * (very common in Hindi: "**•**कागज", "**परिवर्तन**ों"), and then the stars show up as
+ * text. Links always parse. Any star or "==" left without a partner is dropped, so a
+ * stray marker can never appear on a page. Math ($…$) is left untouched.
+ */
+export function emphasisToLinks(text: string): string {
+  const link = (inner: string, target: string) => inner.trim() ? `[${inner.replace(/([\[\]])/g, '\\$1')}](#${target})` : inner;
+  return text.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+\$)/g).map((part, i) => {
+    if (i % 2 === 1) return part;
+    return part
+      .replace(/==([^=\n]+)==/g, (_m, inner: string) => {
+        const plain = inner.replace(/\*\*/g, '');
+        return link(plain, /^\s*\*\*[^*]+\*\*\s*$/.test(inner) ? 'hlb' : 'hl');
+      })
+      .replace(/\*\*([^*\n]+)\*\*/g, (_m, inner: string) => link(inner, 'b'))
+      .replace(/\*\*|==/g, '');
+  }).join('');
+}
+
+/** Drops any "**" that has no partner, so the Word export never prints a stray star. */
+export const balanceStars = (text: string) =>
+  text.replace(/\*\*([^*\n]+)\*\*/g, '\u0001$1\u0002').replace(/\*\*/g, '').replace(/[\u0001\u0002]/g, '**');
+
+/** Text without any bold / highlight markers (labels, word counts). */
+export const plainText = (text: string) => text.replace(/\*\*|==/g, '');
+
+/** Text with the ==highlight== markers removed (for word counts and plain exports). */
+export const stripHighlight = (text: string) => text.replace(/==([^=\n]+)==/g, '$1');
+
+// ---------------------------------------------------------------------------
+// Splitting one block in two (when a single block is taller than a slide)
+// ---------------------------------------------------------------------------
+/** Two halves of a block's text, or null when it cannot be split sensibly. */
+export function splitBlockText(block: DesignBlock): [string, string] | null {
+  const text = block.text || '';
+  if (block.type === 'table') {
+    const lines = text.split('\n').filter(Boolean);
+    const isSeparator = (l: string) => /^\|\s*[-:]+/.test(l);
+    const header = lines.length > 1 && isSeparator(lines[1]) ? lines.slice(0, 2) : [];
+    const rows = lines.slice(header.length).filter(l => !isSeparator(l));
+    if (rows.length < 2) return null;
+    const half = Math.ceil(rows.length / 2);
+    return [[...header, ...rows.slice(0, half)].join('\n'), [...header, ...rows.slice(half)].join('\n')];   // header repeats
+  }
+  if (block.type === 'image' || block.type === 'divider' || block.type === 'heading') return null;
+  const halves = (parts: string[], joiner: string): [string, string] | null => {
+    if (parts.length < 2) return null;
+    const total = parts.join(joiner).length;
+    let at = 1, run = parts[0].length;
+    while (at < parts.length - 1 && run + parts[at].length / 2 < total / 2) run += parts[at++].length + joiner.length;
+    return [parts.slice(0, at).join(joiner), parts.slice(at).join(joiner)];
+  };
+  return halves(text.split('\n').filter(l => l.trim()), '\n')
+    || halves((text.match(/[^।.?!]+[।.?!]+["')\]]*\s*|[^।.?!]+$/g) || []).map(s => s.trim()).filter(Boolean), ' ');
+}
+
+/**
+ * What to do about one overflowing slide, given where each block ends
+ * (bottoms[blockId] = fraction of the slide height; above 1 means it runs off the slide).
+ * Tried in order: move later blocks to a new slide, split one oversized block, shrink the text.
+ */
+export type OverflowFix =
+  | { kind: 'break'; beforeBlockId: string }
+  | { kind: 'split'; blockId: string }
+  | { kind: 'scale'; scale: number }
+  | null;
+
+export function planOverflowFix(page: DesignPage, bottoms: Record<string, number>, percent: number): OverflowFix {
+  const { blocks } = page;
+  if (!blocks.length || percent <= 100) return null;
+  // First block that does not fully fit
+  let k = blocks.findIndex(b => (bottoms[b.id] ?? 0) > 1);
+  if (k < 0) k = blocks.length - 1;
+
+  if (k > 0) {
+    // Keep a question together with its options/answer: break before the question when that is possible.
+    let at = k;
+    if (blocks[at].type === 'option' || blocks[at].type === 'answer') {
+      let q = at;
+      while (q > 0 && (blocks[q].type === 'option' || blocks[q].type === 'answer' || blocks[q].type === 'image')) q--;
+      if (q > 0 && blocks[q].type === 'question') at = q;
+    }
+    // Never leave a heading alone at the bottom of a slide.
+    if (at > 1 && blocks[at - 1].type === 'heading') at--;
+    return { kind: 'break', beforeBlockId: blocks[at].id };
+  }
+
+  // The very first block is already too tall.
+  if (splitBlockText(blocks[0])) return { kind: 'split', blockId: blocks[0].id };
+  if (blocks.length > 1) return { kind: 'break', beforeBlockId: blocks[1].id };
+  const current = page.scale || 1;
+  const scale = Math.max(MIN_PAGE_SCALE, Math.floor(current * (100 / percent) * 0.97 * 100) / 100);
+  return scale < current ? { kind: 'scale', scale } : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +482,9 @@ export type DesignOp =
   | { op: 'moveBlock'; id: string; afterId?: string; pageId?: string }
   | { op: 'setLayout'; layout: Layout }
   | { op: 'paginate'; pageId?: string; breaks: { beforeBlockId: string; title?: string }[] }
-  | { op: 'setPage'; pageId: string; title?: string; background?: string };
+  | { op: 'setPage'; pageId: string; title?: string; background?: string; scale?: number }
+  | { op: 'emphasize'; id: string; phrases: string[]; mark?: EmphasisMark }
+  | { op: 'splitBlock'; id: string };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const color = (v: unknown): string | undefined => {
@@ -338,7 +520,7 @@ export function sanitizeThemePatch(input: unknown): Partial<Theme> {
     const c = color(s[key]);
     if (c) out[key] = c;
   }
-  const font = oneOf(s.font, ['sans', 'serif', 'hindi'] as const);
+  const font = oneOf(s.font, FONT_IDS);
   if (font) out.font = font;
   const headingStyle = oneOf(s.headingStyle, ['plain', 'bar', 'banner'] as const);
   if (headingStyle) out.headingStyle = headingStyle;
@@ -365,7 +547,9 @@ function locate(pages: DesignPage[], blockId: string) {
 
 /** Split blocks into pages wherever a break names a block. */
 function paginateBlocks(doc: DesignDoc, blocks: DesignBlock[], breaks: { beforeBlockId: string; title?: string }[], firstPage: DesignPage): DesignPage[] {
-  const titles = new Map(breaks.map(b => [b.beforeBlockId, b.title]));
+  // A slide that opens with a heading already has its title: a second one would repeat it.
+  const headings = new Set(blocks.filter(b => b.type === 'heading').map(b => b.id));
+  const titles = new Map(breaks.map(b => [b.beforeBlockId, headings.has(b.beforeBlockId) ? undefined : b.title]));
   const pages: DesignPage[] = [];
   for (const block of blocks) {
     const startsPage = titles.has(block.id);
@@ -502,8 +686,34 @@ export function applyDesignOps(doc: DesignDoc, ops: unknown): { doc: DesignDoc; 
         const page = next.pages.find(p => p.id === o.pageId);
         if (!page) break;
         const title = text(o.title, 120), background = color(o.background);
-        if (title !== undefined) { page.title = title || undefined; ok = true; }
+        if (title !== undefined && (!title || page.blocks[0]?.type !== 'heading')) { page.title = title || undefined; ok = true; }
         if (background) { page.background = background; ok = true; }
+        if (Number.isFinite(Number(o.scale)) && o.scale != null) {
+          const scale = Math.min(1, Math.max(MIN_PAGE_SCALE, Number(o.scale)));
+          page.scale = scale < 1 ? scale : undefined; ok = true;
+        }
+        break;
+      }
+      case 'emphasize': {
+        const found = locate(next.pages, String(o.id));
+        const mark = oneOf(o.mark, ['bold', 'highlight', 'both'] as const) || 'bold';
+        if (!found || !Array.isArray(o.phrases)) break;
+        const block = found.page.blocks[found.index];
+        if (!block.text || block.type === 'image') break;
+        const result = emphasizeText(block.text, o.phrases.filter((p: unknown) => typeof p === 'string'), mark);
+        if (result.count) { block.text = result.text; ok = true; }
+        break;
+      }
+      case 'splitBlock': {
+        const found = locate(next.pages, String(o.id));
+        if (!found) break;
+        const block = found.page.blocks[found.index];
+        const halves = splitBlockText(block);
+        if (!halves) break;
+        block.text = halves[0];
+        // The second half goes right after the first; the next overflow pass moves it to its own slide.
+        found.page.blocks.splice(found.index + 1, 0, { ...block, id: newId(next, 'b'), text: halves[1], style: block.style && { ...block.style } });
+        ok = true;
         break;
       }
     }

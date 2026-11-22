@@ -981,7 +981,7 @@ function wrapAllLatexExpressions(text: string): string {
  * Returns an array of Docx Children (TextRun, Math, etc.)
  */
 /** Text-run overrides for themed exports (Design Studio). Size is in half-points; color is hex without '#'. */
-export interface DocxRunStyle { font?: string; size?: number; color?: string; italics?: boolean }
+export interface DocxRunStyle { font?: string; size?: number; color?: string; italics?: boolean; shading?: { type: any; fill: string; color: string } }
 
 export function parseLineToChildren(trimmed: string, forceBold: boolean = false, meta?: { isBlockquote?: boolean }, runStyle?: DocxRunStyle): any[] {
     let content = fixDanglingMathOnLine(trimmed);
@@ -1091,7 +1091,7 @@ function isTableTooComplex(tableLines: string[]): boolean {
     return false;
 }
 
-export function createDocxTable(tableLines: string[]): any {
+export function createDocxTable(tableLines: string[], runStyle?: DocxRunStyle): any {
     const dataLines = tableLines.filter(line => !/^\|\s*[\-:]+\s*\|/.test(line) && !/^\|\s*[\-:]+/.test(line));
 
     const rows = dataLines.map((line, rowIndex) => {
@@ -1107,7 +1107,7 @@ export function createDocxTable(tableLines: string[]): any {
                 // Parse text inside cells (handles Bold & Math)
                 return new TableCell({
                     children: [new Paragraph({ 
-                        children: parseLineToChildren(cellText.trim(), isHeader) as any[],
+                        children: parseLineToChildren(cellText.trim(), isHeader, undefined, runStyle) as any[],
                         alignment: AlignmentType.CENTER
                     })],
                     width: {

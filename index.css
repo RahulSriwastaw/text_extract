@@ -511,3 +511,4 @@ img[src^="data:image/svg+xml"] { min-width: 8rem; min-height: 3rem; }
 .design-md th, .design-md td { border: 1px solid #6B7280; padding: 4px 8px; text-align: center; }
 .design-md th { background: #F3F4F6; font-weight: 700; }
 .design-md .katex-display { margin: 0.4em 0; }
+.design-md mark { background: #FDE68A; color: inherit; padding: 0 0.15em; border-radius: 0.15em; }

@@ -18,6 +18,7 @@ import { applyConverterFigure, prepareConverterFigures, removeConverterFigure, t
 import type { FigureMode, BoundingBox } from '../types';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
+import { EXTRACT_TEMPLATES, EXTRACT_TEMPLATE_IDS, type ExtractTemplateId } from '../services/extractTemplates';
 import { generateDocx, formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 import { convertElementsToMockTestItems } from '../services/mocktestService';
 import GeminiConnectModal from './GeminiConnectModal';
@@ -74,7 +75,17 @@ const ToggleChip: React.FC<{ on: boolean; onClick: () => void; label: string; ti
 );
 
 const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClearInitialImages, onSendToDesign }) => {
-  const [{ claudeModel, autoDownload, numberingStyle, isBilingual, includeImages, figureMode, optionArrangement, mcqMode, showMcqNumbers, showAnswers, refineMode, autoProofread, aiEngine, provider }, updateSetting, syncError] = useConverterSettings(uid);
+  const [{ claudeModel, autoDownload, numberingStyle, isBilingual, includeImages, figureMode, optionArrangement, mcqMode, showMcqNumbers, showAnswers, refineMode, autoProofread, aiEngine, provider, extractTemplate }, updateSetting, syncError] = useConverterSettings(uid);
+  /** A template is a prompt block plus the settings that go with it; the settings stay editable afterwards. */
+  const chooseTemplate = (id: ExtractTemplateId) => {
+    updateSetting('extractTemplate', id);
+    if (id === 'board-exam') {
+      updateSetting('mcqMode', false);                          // whole page in reading order: headings and instructions too, printed numbers kept
+      updateSetting('showAnswers', false);
+      updateSetting('numberingStyle', NumberingStyle.NUMBER_DOT);
+      updateSetting('optionArrangement', OptionArrangement.GRID);
+    }
+  };
   useEffect(() => { if (provider !== getStoredAiProvider()) setStoredAiProvider(provider); }, [provider]);
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [pages, setPages] = useState<ScannedPage[]>([]);
@@ -533,7 +544,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
             includeImages,
             optionArrangement,
             showMcqNumbers,
-            autoProofread, figureMode
+            autoProofread, figureMode, extractTemplate
           );
           // Register a controller so this one page can be stopped without ending the whole run.
           pageAborters.current.get(page.id)?.abort();
@@ -689,7 +700,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                   showAnswers,
                   showMcqNumbers,
                   autoProofread,
-                  optionArrangement, 0, pageAborter.signal, figureMode, claudeModel
+                  optionArrangement, 0, pageAborter.signal, figureMode, claudeModel, extractTemplate
                 );
                 if (pageAborter.signal.aborted) return;
 
@@ -804,7 +815,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
           includeImages,
           optionArrangement,
           showMcqNumbers,
-          autoProofread, figureMode
+          autoProofread, figureMode, extractTemplate
         );
         const pageMarker = `---STUDY_AI_COMPLETE_P${page.pageNumber}_${generateId()}---`;
         setPages(prev => prev.map(p => p.id === id ? { ...p, expectedMarker: pageMarker } : p));
@@ -865,7 +876,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
         showAnswers,
         showMcqNumbers,
         autoProofread,
-        optionArrangement, 0, aborter.signal, figureMode, claudeModel
+        optionArrangement, 0, aborter.signal, figureMode, claudeModel, extractTemplate
       );
       if (aborter.signal.aborted) return;
       
@@ -1602,6 +1613,15 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                             <option value={OptionArrangement.VERTICAL}>Options: vertical</option>
                             <option value={OptionArrangement.HORIZONTAL}>Options: inline</option>
                             <option value={OptionArrangement.GRID}>Options: 2×2 grid</option>
+                        </select>
+                        <select
+                            value={extractTemplate}
+                            onChange={(e) => chooseTemplate(e.target.value as ExtractTemplateId)}
+                            className="select select-sm w-auto"
+                            aria-label="Output template"
+                            title={EXTRACT_TEMPLATES[extractTemplate]?.hint || 'Make the AI write the text in one fixed layout'}
+                        >
+                            {EXTRACT_TEMPLATE_IDS.map(id => <option key={id} value={id}>Template: {EXTRACT_TEMPLATES[id].label}</option>)}
                         </select>
                    </div>
                 </div>

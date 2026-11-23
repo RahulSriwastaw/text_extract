@@ -152,10 +152,15 @@ export interface Theme {
   text: string;
   pageBackground: string;
   headingStyle: 'plain' | 'bar' | 'banner';
-  questionStyle: 'plain' | 'boxed' | 'numbered-badge';
+  /** `hanging` is the printed exam paper: the number stands in the margin, the question, its options and its translation line up beside it. */
+  questionStyle: 'plain' | 'boxed' | 'numbered-badge' | 'hanging';
   optionColumns: 1 | 2 | 4;
   header?: string;
+  /** Second running header text, at the right edge (exam papers: set code left, subject code right). */
+  headerRight?: string;
   footer?: string;
+  /** `exam`: header and footer codes in boxes at the left, "Page 4 of 24" at the right, a rule above the footer. */
+  runningStyle?: 'plain' | 'exam';
   showPageNumbers: boolean;
   /** Per-element overrides ("all H2 are green"), on top of the look the theme gives each element. */
   styles?: Partial<Record<StyleKey, BlockStyle>>;
@@ -228,6 +233,12 @@ export const PRESET_THEMES: Theme[] = [
   { ...baseTheme, name: 'Kids', primary: '#EA580C', accent: '#16A34A', pageBackground: '#FFFBEB', headingStyle: 'banner', questionStyle: 'numbered-badge', optionColumns: 2, font: 'comic', decoration: 'frame', highlight: 'orange' },
   { ...baseTheme, name: 'Pastel', primary: '#BE185D', accent: '#7C3AED', pageBackground: '#FDF2F8', headingStyle: 'bar', questionStyle: 'boxed', font: 'utsaah', baseSize: 14, highlight: 'purple' },
   { ...baseTheme, name: 'Exam Paper', font: 'serif', primary: '#000000', accent: '#000000', headingStyle: 'plain', questionStyle: 'plain', optionColumns: 4 },
+  // A printed board paper: numbers in the margin, options two per row, centred section headings, boxed page codes.
+  {
+    ...baseTheme, name: 'Board Exam', font: 'georgia', text: '#000000', primary: '#000000', accent: '#000000', headingStyle: 'plain',
+    questionStyle: 'hanging', optionColumns: 2, runningStyle: 'exam', spacing: 'compact',
+    styles: { h1: { align: 'center', size: 'sm' }, h2: { align: 'center', size: 'sm' }, h3: { align: 'center' } },
+  },
 ];
 
 export const SIZE_SCALE: Record<NonNullable<BlockStyle['size']>, number> = { sm: 0.85, md: 1, lg: 1.25, xl: 1.6 };
@@ -292,6 +303,7 @@ export function resolveStyle(theme: Theme, block: Pick<DesignBlock, 'type' | 'le
     out.sizePt = 8.5 * (layout === 'slides' ? 1.25 : 1);
     out.color = mix(text, fill, 0.4);
     out.align = 'center';
+    if (theme.runningStyle === 'exam') { out.sizePt = base * 0.9; out.color = text; out.bold = true; }   // printed codes, as dark as the paper's text
   } else switch (block.type) {
     case 'heading':
       out.bold = true;
@@ -302,7 +314,7 @@ export function resolveStyle(theme: Theme, block: Pick<DesignBlock, 'type' | 'le
       if (theme.headingStyle === 'bar') out.border = 'left-bar';
       break;
     case 'question':
-      out.bold = true;
+      out.bold = theme.questionStyle !== 'hanging';             // a printed paper sets its questions in plain type
       if (theme.questionStyle === 'boxed') { out.border = 'box'; out.background = mix(theme.primary, fill, 0.9); }
       if (theme.questionStyle === 'numbered-badge') out.color = legible(theme.primary, fill, 3);
       break;
@@ -407,9 +419,28 @@ export function splitOptionText(text: string): string[] | null {
   return parts.every(p => p && even(p, '**') && even(p, '==') && even(p, '$')) ? parts : null;
 }
 
-/** How many option blocks still hold several options in one line. */
+/**
+ * A table that is really a question's options laid out in a grid, as Word files (and this app's
+ * own Word export) hold them: "| (A) फ्रांस (B) जर्मनी | (C) तुर्की (D) यूनान |  |  |".
+ * Returns one text per option, or null for a real table. Every filled cell must hold options, and
+ * the labels must run A, B, C… from the first of a series, so a "match the columns" table is left alone.
+ */
+export function optionsFromTable(text: string): string[] | null {
+  const cells = text.split('\n').filter(line => line.trim() && !/^\|\s*[-:]+/.test(line.trim()))
+    .flatMap(line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|'))
+    .map(cell => cell.trim().replace(/^\*\*([^*]+)\*\*$/, '$1').trim()).filter(Boolean);
+  if (!cells.length) return null;
+  const options = cells.flatMap(cell => splitOptionText(cell) || [cell]);
+  const labels = options.map(option => option.match(/^([(\[]?)([A-Za-z]{1,3}|\d|[क-ह])([)\].])/));
+  if (options.length < 2 || labels.some(l => !l)) return null;
+  const series = OPTION_SEQUENCES.find(s => s[0] === labels[0]![2]);
+  const same = labels.every((l, i) => l![1] === labels[0]![1] && l![3] === labels[0]![3] && series?.[i] === l![2]);
+  return same ? options : null;
+}
+
+/** How many blocks still hold several options together: one line with "(A) … (B) …", or a table of options. */
 export const combinedOptionCount = (doc: DesignDoc): number =>
-  allBlocks(doc).filter(b => b.type === 'option' && splitOptionText(b.text || '')).length;
+  allBlocks(doc).filter(b => (b.type === 'option' && splitOptionText(b.text || '')) || (b.type === 'table' && optionsFromTable(b.text || ''))).length;
 
 /** Split Markdown text into typed blocks (question, option, heading, table…). */
 export function textToBlocks(doc: { nextId: number }, text: string): DesignBlock[] {
@@ -526,7 +557,10 @@ export function htmlToDesignDoc(html: string, title: string): DesignDoc {
     } else if (tag === 'TABLE') {
       const rows = Array.from(node.querySelectorAll('tr')).map(tr =>
         '| ' + Array.from(tr.children).map(cell => inline(cell).replace(/\s+/g, ' ').replace(/\|/g, '/').trim()).join(' | ') + ' |');
-      if (rows.length) {
+      const options = rows.length ? optionsFromTable(rows.join('\n')) : null;
+      if (options) {
+        for (const option of options) blocks.push({ id: newId(doc, 'b'), type: 'option', text: option });   // a grid of options, not a table
+      } else if (rows.length) {
         const columns = rows[0].split('|').length - 2;
         blocks.push({ id: newId(doc, 'b'), type: 'table', text: [rows[0], '|' + ' --- |'.repeat(columns), ...rows.slice(1)].join('\n') });
       }
@@ -580,6 +614,46 @@ export function questionNumbers(doc: DesignDoc): Record<string, number> {
   for (const b of allBlocks(doc)) if (b.type === 'question') out[b.id] = ++n;
   return out;
 }
+
+const QUESTION_PREFIX = /^(#|Q\.?\s*\d+[.):-]?|\d+[.)])\s+/i;
+
+/** A question's own number ("Q12." → "12.") and the text after it. '# ' takes the running number. */
+export function questionParts(block: Pick<DesignBlock, 'text'>, questionNumber?: number): { label: string; text: string } {
+  const text = block.text || '';
+  const m = text.match(QUESTION_PREFIX);
+  if (!m) return { label: '', text };
+  const digits = m[1].match(/\d+/)?.[0] || (questionNumber ? String(questionNumber) : '');
+  return { label: digits ? digits + '.' : '', text: text.slice(m[0].length) };
+}
+
+/** "(A) France" → label "(A)", text "France". */
+export function optionParts(text: string): { label: string; text: string } {
+  const m = text.match(/^\s*([(\[]?(?:[A-Za-z]{1,3}|\d|[क-ह])[)\].])\s+/);
+  return m ? { label: m[1], text: text.slice(m[0].length) } : { label: '', text };
+}
+
+/**
+ * For the `hanging` question style: which blocks belong to a question and so line up beside its
+ * number. A question owns its options, answer and figure, plus the ONE paragraph that follows it or
+ * its options: the same question in the second language, with that paragraph's own options.
+ * Anything else (a heading, a second paragraph: section instructions) ends the group.
+ */
+export function hangingRoles(blocks: DesignBlock[]): Record<string, 'question' | 'member'> {
+  const roles: Record<string, 'question' | 'member'> = {};
+  let open = false, translated = false;
+  blocks.forEach((block, i) => {
+    const previous = blocks[i - 1]?.type;
+    if (block.type === 'question') { open = true; translated = false; roles[block.id] = 'question'; }
+    else if (!open) return;
+    else if (block.type === 'option' || block.type === 'answer' || block.type === 'image') roles[block.id] = 'member';
+    else if (block.type === 'paragraph' && !translated && (previous === 'question' || previous === 'option')) { translated = true; roles[block.id] = 'member'; }
+    else open = false;
+  });
+  return roles;
+}
+
+/** Width of the margin column that holds a hanging question number, in em of the body text. */
+export const HANGING_GUTTER_EM = 2.6;
 
 /** Text as shown: the '# ' question marker of the HASH numbering style becomes a real number. */
 export const displayText = (block: DesignBlock, questionNumber?: number): string =>
@@ -910,13 +984,15 @@ export function sanitizeThemePatch(input: unknown): Partial<Theme> {
   if (font) out.font = font;
   const headingStyle = oneOf(s.headingStyle, ['plain', 'bar', 'banner'] as const);
   if (headingStyle) out.headingStyle = headingStyle;
-  const questionStyle = oneOf(s.questionStyle, ['plain', 'boxed', 'numbered-badge'] as const);
+  const questionStyle = oneOf(s.questionStyle, ['plain', 'boxed', 'numbered-badge', 'hanging'] as const);
   if (questionStyle) out.questionStyle = questionStyle;
+  const runningStyle = oneOf(s.runningStyle, ['plain', 'exam'] as const);
+  if (runningStyle) out.runningStyle = runningStyle;
   const optionColumns = oneOf(Number(s.optionColumns), [1, 2, 4] as const);
   if (optionColumns) out.optionColumns = optionColumns;
   if (Number.isFinite(Number(s.baseSize)) && s.baseSize != null) out.baseSize = Math.min(18, Math.max(9, Math.round(Number(s.baseSize))));
   if (typeof s.showPageNumbers === 'boolean') out.showPageNumbers = s.showPageNumbers;
-  for (const key of ['name', 'header', 'footer'] as const) {
+  for (const key of ['name', 'header', 'headerRight', 'footer'] as const) {
     const t = text(s[key], 120);
     if (t !== undefined) out[key] = t;
   }
@@ -993,6 +1069,36 @@ export function autoPaginate(doc: DesignDoc, maxBlocks = 6): DesignDoc {
     count++;
   });
   return applyDesignOps(doc, [{ op: 'paginate', breaks }]).doc;
+}
+
+/**
+ * One click to a printed board paper, no AI: the "Board Exam" theme, options two per row, and the
+ * page furniture that a scan or Word file leaves between the questions put back where it belongs.
+ * A short line repeated on most pages is that furniture: "[ 111 ]" goes to the header's right,
+ * the set code "A" to the header box, a code such as "10/41/012★" to the footer box, and
+ * "Page 4 of 24" lines are dropped (the footer counts pages itself).
+ */
+export function examPaperOps(doc: DesignDoc): DesignOp[] {
+  const lines = new Map<string, DesignBlock[]>();
+  const remove: string[] = [];
+  for (const block of allBlocks(doc)) {
+    if (block.type !== 'paragraph') continue;
+    const line = plainText(block.text || '').trim();
+    if (/^Page\s+\d+\s+of\s+\d+$/i.test(line)) remove.push(block.id);
+    else if (line && line.length <= 16) lines.set(line, [...(lines.get(line) || []), block]);
+  }
+  const running: Partial<Theme> = {};
+  for (const [line, blocks] of lines) {
+    if (blocks.length < 4) continue;
+    if (/^\[.*\]$/.test(line) && !running.headerRight) { running.headerRight = line; remove.push(...blocks.map(b => b.id)); }
+    else if (/^[A-Z]$/.test(line) && !running.header) { running.header = line; remove.push(...blocks.slice(1).map(b => b.id)); }   // the first is the set code on the cover
+    else if (/\d/.test(line) && /[/★*-]/.test(line) && !running.footer) { running.footer = line; remove.push(...blocks.map(b => b.id)); }
+  }
+  return [
+    { op: 'setTheme', patch: { ...PRESET_THEMES.find(t => t.name === 'Board Exam')!, ...running } },
+    ...remove.map(id => ({ op: 'removeBlock' as const, id })),
+    { op: 'setOptionsLayout', columns: 2 },
+  ];
 }
 
 /**
@@ -1306,10 +1412,12 @@ export function applyDesignOps(doc: DesignDoc, ops: unknown): { doc: DesignDoc; 
           if (o.op === 'splitOptions' && o.pageId && page.id !== o.pageId) continue;
           for (let i = 0; i < page.blocks.length; i++) {
             const block = page.blocks[i];
-            if (block.type !== 'option' || (ids && !ids.has(block.id))) continue;
-            const parts = splitOptionText(block.text || '');
+            if ((block.type !== 'option' && block.type !== 'table') || (ids && !ids.has(block.id))) continue;
+            // A table of options (from a Word file) becomes plain option blocks; its table look is dropped.
+            const parts = block.type === 'table' ? optionsFromTable(block.text || '') : splitOptionText(block.text || '');
             if (!parts) continue;
-            page.blocks.splice(i, 1, ...parts.map((part, k) => ({ ...block, id: k ? newId(next, 'b') : block.id, text: part, style: block.style && { ...block.style } })));
+            const style = block.type === 'option' && block.style;
+            page.blocks.splice(i, 1, ...parts.map((part, k): DesignBlock => ({ id: k ? newId(next, 'b') : block.id, type: 'option', text: part, ...(style && { style: { ...style } }) })));
             i += parts.length - 1;
             ok = true;
           }

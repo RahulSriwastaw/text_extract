@@ -4,6 +4,7 @@ import { doc, getFirestore, onSnapshot, setDoc } from 'firebase/firestore';
 import { NumberingStyle, OptionArrangement } from '../types';
 import type { AiProvider } from './studyAiBridgeService';
 import type { DifficultyLevel, FigureMode } from '../types';
+import type { ExtractTemplateId } from './extractTemplates';
 
 const defaults = {
   claudeModel: defaultClaudeModel as DirectModel,
@@ -11,6 +12,7 @@ const defaults = {
   includeImages: false, figureMode: 'crop' as FigureMode, optionArrangement: OptionArrangement.VERTICAL, mcqMode: false,
   showMcqNumbers: true, showAnswers: true, refineMode: false, autoProofread: false,
   aiEngine: 'extension' as 'extension' | 'api', provider: 'claude' as AiProvider,
+  extractTemplate: 'none' as ExtractTemplateId,
 };
 const mcqDefaults = {
   claudeModel: defaultClaudeModel as DirectModel,

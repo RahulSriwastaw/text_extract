@@ -9,6 +9,7 @@ import {
   type DesignDoc, type DesignBlock, type DesignPage, type DesignOp, type StyleKey, type StyleContext, type HighlighterId, type PageLayout,
   PAGE_SIZE, FONTS, HIGHLIGHTERS, HIGHLIGHTER_IDS, IMAGE_WIDTH, SPACING, PAGE_LAYOUTS,
   displayText, questionNumbers, wordCount, emphasisToLinks, resolveStyle, pageFill, calloutInfo, styleKey, mix, legible, optionColumnsOf,
+  questionParts, optionParts, hangingRoles, HANGING_GUTTER_EM,
 } from '../../services/designDoc';
 
 const PT = 96 / 72;   // pt → CSS px
@@ -57,9 +58,13 @@ interface BlockViewProps {
   /** Present mode: keep the space but hide the content (answers before they are revealed). */
   hidden?: boolean;
   spanColumns?: boolean;
+  /** Exam-paper questions: `question` shows its number in the margin, `member` lines up beside it, `cell` is an option inside an already indented grid. */
+  hang?: 'question' | 'member' | 'cell';
+  /** Width of that margin column, px. */
+  gutter?: number;
 }
 
-function BlockView({ block, doc, page, number, actions, previousId, nextId, isTitle, hidden, spanColumns }: BlockViewProps) {
+function BlockView({ block, doc, page, number, actions, previousId, nextId, isTitle, hidden, spanColumns, hang, gutter = 0 }: BlockViewProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const { theme } = doc;
@@ -81,7 +86,7 @@ function BlockView({ block, doc, page, number, actions, previousId, nextId, isTi
     borderRight: st.border === 'box' ? thin : none,
     borderLeft: st.border === 'box' ? thin : st.border === 'left-bar' ? `4px solid ${st.borderColor}` : none,
     borderBottom: st.border === 'box' ? thin : st.border === 'underline' ? `2px solid ${st.borderColor}` : none,
-    marginLeft: block.type === 'option' && optionColumnsOf(theme) === 1 ? 24 : undefined,
+    marginLeft: hang ? (hang === 'member' ? gutter : undefined) : block.type === 'option' && optionColumnsOf(theme) === 1 ? 24 : undefined,
   };
 
   let body: React.ReactNode;
@@ -93,7 +98,11 @@ function BlockView({ block, doc, page, number, actions, previousId, nextId, isTi
     body = <hr style={{ border: 0, borderTop: `2px solid ${st.borderColor}`, margin: '6px 0' }} />;
   } else {
     const badge = block.type === 'question' && theme.questionStyle === 'numbered-badge' && number;
-    const shown = badge ? (block.text || '').replace(/^(#|Q\.?\s*\d+[.):-]?|\d+[.)])\s+/i, '') : displayText(block, number);
+    // Exam paper: the question number, or the option's "(A)", stands in its own column and the text wraps beside it.
+    const lead = hang === 'question' ? { ...questionParts(block, number), width: gutter as number | string }
+      : hang && block.type === 'option' ? { ...optionParts(block.text || ''), width: '2.4em' as number | string } : null;
+    const shown = badge ? (block.text || '').replace(/^(#|Q\.?\s*\d+[.):-]?|\d+[.)])\s+/i, '')
+      : lead?.label ? lead.text : displayText(block, number);
     const info = block.type === 'callout' ? calloutInfo(block, theme) : null;
     const tableVars = block.type === 'table' ? {
       '--design-table-border': mix(st.color, fill, 0.45),
@@ -107,7 +116,8 @@ function BlockView({ block, doc, page, number, actions, previousId, nextId, isTi
             <span aria-hidden="true">{info.icon} </span>{info.label}
           </div>
         )}
-        <div className="design-md" style={{ ...tableVars, ...(badge ? { display: 'flex', gap: 8, alignItems: 'flex-start' } : {}) }}>
+        <div className="design-md" style={{ ...tableVars, ...(badge ? { display: 'flex', gap: 8, alignItems: 'flex-start' } : lead?.label ? { display: 'flex', alignItems: 'baseline' } : {}) }}>
+          {lead?.label && !badge && <span style={{ flex: 'none', width: lead.width, whiteSpace: 'nowrap' }}>{lead.label}</span>}
           {badge && <span style={{ flex: 'none', minWidth: '1.7em', height: '1.7em', borderRadius: '1em', background: theme.primary, color: legible('#FFFFFF', theme.primary, 3), fontSize: '0.8em', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{number}</span>}
           <div style={{ minWidth: 0, flex: 1 }}>
             {shown.trim() ? <Markdown text={shown} /> : actions && <span style={{ opacity: 0.45, fontWeight: 400 }}>Click the pencil and type here…</span>}
@@ -198,9 +208,12 @@ export function SlideFace({ doc, page, index, scale, actions, hideAnswers, selec
     fontWeight: st.bold ? 700 : 400, fontStyle: st.italic ? 'italic' : 'normal', fontFamily: FONTS[st.font].css, pointerEvents: 'none',
   });
 
-  const view = (block: DesignBlock, i: number) => (
+  const roles = theme.questionStyle === 'hanging' ? hangingRoles(blocks) : {};
+  const gutter = Math.round(resolveStyle(theme, { type: 'paragraph' }, { layout: doc.layout, pageScale: page.scale }).sizePt * PT * HANGING_GUTTER_EM);
+  const view = (block: DesignBlock, i: number, inGrid = false) => (
     <BlockView key={block.id} doc={doc} page={page} number={numbers[block.id]} actions={actions} block={block}
-      previousId={blocks[i - 1]?.id} nextId={blocks[i + 1]?.id}
+      previousId={blocks[i - 1]?.id} nextId={blocks[i + 1]?.id} gutter={gutter}
+      hang={roles[block.id] && inGrid ? 'cell' : roles[block.id]}
       hidden={hideAnswers && block.type === 'answer'} spanColumns={twoColumn && i === 0 && block.type === 'heading'} />
   );
   // Group consecutive options into a grid when the theme asks for columns.
@@ -211,13 +224,15 @@ export function SlideFace({ doc, page, index, scale, actions, hideAnswers, selec
       const start = i;
       while (i + 1 < blocks.length && blocks[i + 1].type === 'option') i++;
       rendered.push(
-        <div key={'grid' + blocks[start].id} style={{ display: 'grid', gridTemplateColumns: `repeat(${optionColumns}, minmax(0, 1fr))`, columnGap: 16, breakInside: 'avoid' }}>
-          {blocks.slice(start, i + 1).map((b, k) => view(b, start + k))}
+        <div key={'grid' + blocks[start].id} style={{ display: 'grid', gridTemplateColumns: `repeat(${optionColumns}, minmax(0, 1fr))`, columnGap: 16, breakInside: 'avoid', marginLeft: roles[blocks[start].id] ? gutter : undefined }}>
+          {blocks.slice(start, i + 1).map((b, k) => view(b, start + k, true))}
         </div>
       );
     } else rendered.push(view(blocks[i], i));
   }
 
+  const exam = theme.runningStyle === 'exam';
+  const codeBox = (color: string): React.CSSProperties => ({ border: `1.5px solid ${color}`, padding: '0 6px', lineHeight: 1.35 });
   const decoration = theme.decoration || 'none';
   const band: React.CSSProperties = { position: 'absolute', background: theme.primary, pointerEvents: 'none' };
   return (
@@ -237,7 +252,12 @@ export function SlideFace({ doc, page, index, scale, actions, hideAnswers, selec
         {decoration === 'bottom-bar' && <div style={{ ...band, bottom: 0, left: 0, right: 0, height: 16 }} />}
         {decoration === 'left-bar' && <div style={{ ...band, top: 0, bottom: 0, left: 0, width: 16 }} />}
         {decoration === 'frame' && <div style={{ position: 'absolute', inset: 14, border: `4px solid ${legible(theme.primary, fill, 1.6)}`, borderRadius: 4, pointerEvents: 'none' }} />}
-        {theme.header && <div style={{ ...running(headerStyle), top: 20 }}>{theme.header}</div>}
+        {exam ? (theme.header || theme.headerRight) && (
+          <div style={{ ...running(headerStyle), top: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {theme.header ? <span style={codeBox(headerStyle.color)}>{theme.header}</span> : <span />}
+            <span>{theme.headerRight}</span>
+          </div>
+        ) : theme.header && <div style={{ ...running(headerStyle), top: 20 }}>{theme.header}</div>}
 
         <div data-design-inner={page.id} style={twoColumn ? { columnCount: 2, columnGap: 40 } : undefined}>
           {page.title && <BlockView doc={doc} page={page} actions={actions} isTitle spanColumns={twoColumn}
@@ -245,7 +265,12 @@ export function SlideFace({ doc, page, index, scale, actions, hideAnswers, selec
           {rendered}
         </div>
 
-        {(theme.footer || theme.showPageNumbers) && (
+        {exam ? (theme.footer || theme.showPageNumbers) && (
+          <div style={{ ...running(footerStyle), bottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1.5px solid ${footerStyle.color}`, paddingTop: 3 }}>
+            {theme.footer ? <span style={codeBox(footerStyle.color)}>{theme.footer}</span> : <span />}
+            {theme.showPageNumbers && <span>Page {index + 1} of {doc.pages.length}</span>}
+          </div>
+        ) : (theme.footer || theme.showPageNumbers) && (
           <div style={{ ...running(footerStyle), bottom: 14 }}>
             {[theme.footer, theme.showPageNumbers ? String(index + 1) : ''].filter(Boolean).join('   ·   ')}
           </div>

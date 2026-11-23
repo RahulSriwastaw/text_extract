@@ -1,3 +1,5 @@
+import type { MasterContext } from './services/masterQuestionBank';
+
 export enum NumberingStyle {
   Q_DOT = 'Q_DOT',           // Q1.
   HASH = 'HASH',             // #1.
@@ -84,6 +86,8 @@ export interface MocktestHistoryItem {
   questionCount: number;
   questions: MockTestMcqItem[];
   pages?: any[];
+  /** Exam, year and source the teacher entered for this set, so its Master CSV can be exported later. */
+  masterContext?: MasterContext;
 }
 
 export type QuestionType = 'MCQ' | 'MSQ' | 'NAT';
@@ -132,6 +136,19 @@ export interface MockTestMcqItem {
   passage_en?: string;
   pageNumber?: number;
   pageId?: string;
+  // Master Question Bank fields (see services/masterQuestionBank.ts). The extractor fills these;
+  // fields that only the master merge step can know are left out here and exported empty.
+  chapter_name?: string;
+  sub_topic?: string;
+  exam_category?: string;
+  exam?: string;
+  year?: string;
+  source_status?: string;
+  exam_tags?: string;
+  question_id?: string;
+  source_id?: string;
+  source_row?: string | number;
+  source_file?: string;
 }
 
 export interface McqFigure extends ExtractedElement {

@@ -17,7 +17,8 @@ import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
 import type { FigureMode } from '../types.js';
-import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT, mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
+import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT, MCQ_BILINGUAL_LINES, mcqFigureInstruction, CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from '../services/figurePrompt.js';
+import { MASTER_FIELD_PROMPT_RULES, MASTER_FIELD_JSON_EXAMPLE } from '../services/masterQuestionBank.js';
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'node:crypto';
@@ -2484,11 +2485,13 @@ ${HTML_LATEX_FORMAT_RULES}
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and options) MUST contain ONLY the original Hindi text.
    - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
+   - ${MCQ_BILINGUAL_LINES}
 4. Comprehensive Solutions: Provide a detailed, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete intermediate calculation or factual background) so any level of student can understand easily. NEVER write "Option A is correct" (options shuffle dynamically).
 5. Answer: Correct option single letter ("A", "B", "C", or "D").
 6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
    - If questions are based on a Passage, Comprehension text, Directions, or गद्यांश / काव्यांश (e.g. "SET - 34 [Q. 164. to Q. 168.]", "Directions (439-443)", "गद्यांश को पढ़कर..."):
      Use the shared context fields below for the directions and data. Each question has its own stem and options.
+7. ${MASTER_FIELD_PROMPT_RULES}
 
 Output ONLY a valid JSON array of objects:
 [
@@ -2509,7 +2512,7 @@ Output ONLY a valid JSON array of objects:
     "solution_en": "...",
     "subject": "General",
     "difficulty_level": "medium",
-    "source_question_reference": "Q.1"
+    "source_question_reference": "Q.1"${MASTER_FIELD_JSON_EXAMPLE}
   }
 ]`;
     }
@@ -3131,6 +3134,8 @@ Respond with ONLY a strict JSON object:
     "solution_en": "...",
     "subject": "Current Affairs | Mathematics | Reasoning | General Science | Polity | History | Geography | English | Hindi",
     "subject_level": "RRB Level 01 Stage I 2025",
+    "chapter_name": "chapter of the question, e.g. Percentage, Modern History",
+    "sub_topic": "type or sub-topic inside the chapter, e.g. Successive discount",
     "difficulty_level": "${difficulty}",
     "source_pages": "${targetPageNumber}",
     "source_question_reference": "Q.${nextQuestionNumber} (Added)",
@@ -3190,6 +3195,8 @@ Respond with ONLY a strict JSON object:
       test_date: '',
       subject: (rawItem.subject || 'Current Affairs').trim(),
       subject_level: rawItem.subject_level || '',
+      chapter_name: String(rawItem.chapter_name || '').trim(),
+      sub_topic: String(rawItem.sub_topic || '').trim(),
       figure_notes: rawItem.figure_notes || '',
       correction_notes: rawItem.correction_notes || 'Added via AI Quick Add / Paste',
       source_pdf: '',

@@ -39,7 +39,8 @@ import {
   getMocktestSetFromDb
 } from '../services/aiDbService';
 import { HistoryItem, MocktestHistoryItem } from '../types';
-import { downloadMockTestCsv } from '../services/mocktestService';
+import { downloadMockTestCsv, buildMasterBankRows, downloadMasterBankCsv } from '../services/mocktestService';
+import { masterSourceResolver } from '../services/masterQuestionBank';
 
 interface AiHistoryDrawerProps {
   isOpen: boolean;
@@ -220,6 +221,14 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
   const handleDownloadMocktestCsv = (item: MocktestHistoryItem, e: React.MouseEvent) => {
     e.stopPropagation();
     downloadMockTestCsv(item.questions, item.setName || 'Mocktest_Export');
+  };
+
+  // The 68-field CSV for the Master Question Bank, with the exam details saved together with the set.
+  const handleDownloadMasterBankCsv = (item: MocktestHistoryItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const rows = buildMasterBankRows(item.questions, item.masterContext, masterSourceResolver(item.pages));
+    const safeName = (item.setName || 'Mocktest_Export').replace(/[\\/:*?"<>|]+/g, '_').trim().replace(/\.csv$/i, '') || 'Mocktest_Export';
+    downloadMasterBankCsv(rows, `${safeName}_master_bank.csv`);
   };
 
   const handleCopyText = (item: HistoryItem, e: React.MouseEvent) => {
@@ -531,14 +540,6 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                             <span>Load Set</span>
                           </button>
                           <button
-                            onClick={(e) => handleDownloadMocktestCsv(item, e)}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-bold transition-all"
-                            title="Download standard 34-column CSV"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>CSV</span>
-                          </button>
-                          <button
                             onClick={(e) => handleDeleteMocktest(item.id, e)}
                             className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all"
                             title="Delete mock test"
@@ -546,6 +547,25 @@ const AiHistoryDrawer: React.FC<AiHistoryDrawerProps> = ({
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          onClick={(e) => handleDownloadMocktestCsv(item, e)}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-bold transition-all"
+                          title="Download the 34-field CSV for the main app"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Main app CSV (34)</span>
+                        </button>
+                        <button
+                          onClick={(e) => handleDownloadMasterBankCsv(item, e)}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-slate-200 rounded-lg text-xs font-bold transition-all"
+                          title="Download the 68-field CSV for the Master Question Bank"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Master QB CSV (68)</span>
+                        </button>
                       </div>
 
                       <div className="flex items-center justify-between text-[11px] text-slate-500 border-t border-white/[0.04] pt-2">

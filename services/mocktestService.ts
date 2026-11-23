@@ -1,4 +1,5 @@
-import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT } from './figurePrompt';
+import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT, MCQ_BILINGUAL_LINES } from './figurePrompt';
+import { fixBilingualOptions } from './bilingualOptions';
 import { directModelFields, type DirectModel } from './claudeModels';
 import { readMcqFigures } from './mcqFigures';
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
@@ -11,6 +12,10 @@ export type { MockTestMcqItem };
 
 import { MOCKTEST_CSV_HEADERS } from './mcqColumns';
 export { MOCKTEST_CSV_HEADERS };
+import {
+  buildMasterRow, MASTER_QB_HEADERS, MASTER_FIELD_PROMPT_RULES, MASTER_FIELD_JSON_EXAMPLE,
+  type MasterContext, type MasterRow, type MasterSource,
+} from './masterQuestionBank';
 
 export const STANDARD_SUBJECTS = [
   'Current Affairs',
@@ -773,7 +778,8 @@ export function autoRecoverItemOptionsFromStem(item: MockTestMcqItem): MockTestM
  */
 export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
   // First, auto-recover trailing options from stem if options are blank:
-  const recovered = autoRecoverItemOptionsFromStem(item);
+  // Then split "English / Hindi" option lines the AI copied whole into one language, and drop "(a)" labels.
+  const recovered = fixBilingualOptions(autoRecoverItemOptionsFromStem(item));
 
   const qHi = ensureHtmlParagraph(cleanMocktestText(recovered.question_hi));
   const qEn = ensureHtmlParagraph(cleanMocktestText(recovered.question_en));
@@ -1015,6 +1021,40 @@ export function serializeMockTestToCsv(
 
   // UTF-8 BOM (\uFEFF) ensures Excel & portals open Hindi Devanagari & math flawlessly
   return '\uFEFF' + [headerLine, ...lines].join('\n');
+}
+
+/**
+ * The 68-field Master Question Bank rows (see services/masterQuestionBank.ts) for every question,
+ * with the same text cleaning as the portal CSV. `sourceFor` supplies the source file / page when a
+ * question does not carry them itself.
+ */
+export function buildMasterBankRows(
+  items: MockTestMcqItem[],
+  context: MasterContext = {},
+  sourceFor?: (item: MockTestMcqItem) => MasterSource
+): MasterRow[] {
+  return items.map((rawItem, index) => {
+    const item = standardizeItemHtmlAndMathJax(rawItem, true);
+    return buildMasterRow({ ...item, question_r: item.question_r || index + 1 }, context, sourceFor?.(rawItem));
+  });
+}
+
+/** Master Question Bank CSV: 68 columns in the guide's order, RFC 4180, UTF-8 with BOM. */
+export function serializeMasterBankCsv(rows: MasterRow[]): string {
+  const lines = rows.map(row => MASTER_QB_HEADERS.map(field => escapeCsvField(row[field])).join(','));
+  return '﻿' + [MASTER_QB_HEADERS.join(','), ...lines].join('\n');
+}
+
+export function downloadMasterBankCsv(rows: MasterRow[], fileName: string = 'master_question_bank.csv'): void {
+  const blob = new Blob([serializeMasterBankCsv(rows)], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', fileName.endsWith('.csv') ? fileName : `${fileName}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -1866,6 +1906,7 @@ ${HTML_LATEX_FORMAT_RULES}
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both question_hi and question_en (and their options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण, मुहावरे आदि): DO NOT translate into English! Both question_hi and question_en (and their options) MUST contain ONLY the original Hindi text.
    - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi (_hi) and English (_en). If document has only one, translate the counterpart.
+   - ${MCQ_BILINGUAL_LINES}
 4. COMPREHENSIVE SOLUTION: Provide an in-depth, step-by-step pedagogical explanation (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. NO EXAM BOILERPLATE: Strip exam dates, shifts, and book publisher watermarks.
 6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
@@ -1873,14 +1914,15 @@ ${HTML_LATEX_FORMAT_RULES}
      YOU MUST PREPEND THE COMPLETE PASSAGE TEXT TO EVERY SINGLE QUESTION BELONGING TO THAT SET in both question_hi and question_en, separated by "\\n---\\n" (e.g., "[Full Passage Text]\\n---\\n[Question Text]").
    - NEVER attach the passage only once or only to the first question! Every question belonging to that passage set (e.g. Q.164, Q.165, Q.166, Q.167, Q.168) MUST have the complete passage text attached so each question is fully self-contained.
 
+${MASTER_FIELD_PROMPT_RULES}
+
 TARGET JSON FIELDS FOR EACH OBJECT:
 question_r, question_hi, option1_hi, option2_hi, option3_hi, option4_hi, option5_hi, solution_hi,
 question_en, option1_en, option2_en, option3_en, option4_en, option5_en, solution_en,
-answer (e.g. "A"), set_name ("${setName}"), difficulty_level ("Medium"),
-test_date (""), test_time (""),
+answer (e.g. "A"), set_name ("${setName}"), difficulty_level ("medium"),
 subject (pure academic subject like "Mathematics", "Reasoning", "Physics", "Chemistry", "History", "Geography", "Polity"),
-subject_level (""), figure_notes (""), correction_notes (""), source_pdf (""), source_pages ("${pageNumber || '1'}"), source_question_reference ("Q.1"),
-latex_check ("checked"), html_check ("checked"), answer_check ("checked"), solution_check ("checked"), hash_figure (""), manually_review ("checked"), duplicate_statistics ("Unique within this shift; duplicate check completed.")
+chapter_name, sub_topic, subject_level, exam_category, exam, year, test_date, test_time, exam_tags,
+figure_notes, correction_notes, manually_review, source_pdf (""), source_pages ("${pageNumber || '1'}"), source_question_reference ("Q.1")
 
 Respond ONLY with the JSON array inside \`\`\`json ... \`\`\`.`;
 }
@@ -2340,6 +2382,10 @@ function tryRepairAndParseSingleObject(str: string): any | null {
  * Parse raw text / JSON response from any AI provider (Gemini, DeepSeek, ChatGPT, Claude)
  * into a complete, valid MockTestMcqItem[] with all 18 fields fully populated.
  */
+/** A text value from AI JSON: arrays (e.g. exam tags) are joined with "; ", numbers become text. */
+const masterText = (value: unknown): string =>
+  (Array.isArray(value) ? value.join('; ') : String(value ?? '')).trim();
+
 export function parseAiOutputToMockTestItems(
   rawText: string,
   setName: string = 'Mock Test Paper',
@@ -2647,7 +2693,15 @@ export function parseAiOutputToMockTestItems(
             hash_figure: obj.hash_figure || '',
             manually_review: obj.manually_review || 'checked',
             passage_hi: obj.passage_hi || '',
-            passage_en: obj.passage_en || ''
+            passage_en: obj.passage_en || '',
+            // Master Question Bank fields the AI reads from the page (see services/masterQuestionBank.ts)
+            chapter_name: masterText(obj.chapter_name || obj.chapter),
+            sub_topic: masterText(obj.sub_topic || obj.subtopic),
+            exam_category: masterText(obj.exam_category),
+            exam: masterText(obj.exam),
+            year: masterText(obj.year),
+            exam_tags: masterText(obj.exam_tags),
+            source_status: masterText(obj.source_status)
           });
         });
       return parsed.some(obj => Object.hasOwn(obj, 'passage_id')) ? items.map((item, index) => {
@@ -2704,9 +2758,11 @@ ${HTML_LATEX_FORMAT_RULES}
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original Hindi text.
    - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
+   - ${MCQ_BILINGUAL_LINES}
 4. Comprehensive Solutions: Provide an in-depth, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. Correct Answer: Single letter "A", "B", "C", or "D".
 ${MCQ_SHARED_CONTEXT}
+6. ${MASTER_FIELD_PROMPT_RULES}
 
 Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields for each question:
 [
@@ -2730,7 +2786,7 @@ Output ONLY a JSON array inside \`\`\`json ... \`\`\` block with these fields fo
     "solution_en": "...",
     "subject": "General",
     "difficulty_level": "medium",
-    "source_question_reference": "Q.1"
+    "source_question_reference": "Q.1"${MASTER_FIELD_JSON_EXAMPLE}
   }
 ]
 

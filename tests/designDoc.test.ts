@@ -4,7 +4,7 @@ import {
   elementsToDesignDoc, applyDesignOps, outlineForAi, autoPaginate, allBlocks, sanitizeStyle, tint, PRESET_THEMES,
   emphasizeText, stripHighlight, splitBlockText, planOverflowFix, fullTextChunks, emphasisToLinks, balanceStars, plainText,
   resolveStyle, styleKey, elementCounts, contrast, readableOn, highlightSegments, markSelection, unemphasizeText, calloutInfo, HIGHLIGHTERS, optionColumnsOf, splitOptionText, combinedOptionCount, optionsFromTable,
-  questionParts, optionParts, hangingRoles, examPaperOps,
+  questionParts, optionParts, hangingRoles, examPaperOps, oneBlockPerLine,
 } from '../services/designDoc.ts';
 import type { ExtractedElement } from '../types.ts';
 
@@ -384,6 +384,18 @@ describe('element styles (all H2, all questions…)', () => {
     assert.equal(roleOf('एक निर्देश।'), undefined);                                 // a second paragraph ends the question
     assert.equal(roleOf('दूसरा निर्देश।'), undefined);
     assert.equal(resolveStyle(doc.theme, { type: 'question' }).bold, false);
+  });
+
+  it('template text: one block per line, so an option does not swallow the English question below it', () => {
+    const text = '1. यूरोप का मरीज?\n(A) फ्रांस\n(B) यूनान\nWho was the sick man of Europe ?\n(A) France\n(B) Greece\n| a | b |\n| --- | --- |\n- one\n- two';
+    const joined = elementsToDesignDoc([{ type: 'text', content: text } as ExtractedElement], 't');
+    assert.ok(allBlocks(joined).some(b => b.text === '(B) यूनान\nWho was the sick man of Europe ?'));          // the problem
+    const doc = elementsToDesignDoc([{ type: 'text', content: oneBlockPerLine(text) } as ExtractedElement], 't');
+    assert.deepEqual(allBlocks(doc).map(b => [b.type, b.text]), [
+      ['question', '1. यूरोप का मरीज?'], ['option', '(A) फ्रांस'], ['option', '(B) यूनान'],
+      ['paragraph', 'Who was the sick man of Europe ?'], ['option', '(A) France'], ['option', '(B) Greece'],
+      ['table', '| a | b |\n| --- | --- |'], ['list', '- one\n- two'],
+    ]);
   });
 
   it('counts elements by kind and relabels a block', () => {

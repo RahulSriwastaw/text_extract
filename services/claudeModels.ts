@@ -6,12 +6,7 @@ export type ClaudeModel = typeof claudeModels[number];
 export const defaultClaudeModel: ClaudeModel = 'Sonnet 5.5';
 
 export type DirectModel = ClaudeModel | `gemini:${string}` | `anthropic:${string}`;
-/** Opus and Fable burn too many tokens: hidden in the UI and refused by the server. */
-export const isBlockedModel = (model?: string) => /opus|fable/i.test(model || '');
-/** Swaps a blocked (or previously saved) Opus/Fable selection for the default model. */
-export function safeDirectModel<T extends string | undefined>(model: T): T | ClaudeModel {
-  return isBlockedModel(model) ? defaultClaudeModel : model;
-}
+// Which models users may actually pick is decided by the admin: see services/modelAccess.ts.
 /** Human-readable provider + model for status text, e.g. "Gemini gemini-2.5-flash" or "Claude Opus 5.5". */
 export function directModelLabel(model?: DirectModel) {
   if (!model) return 'AI model';

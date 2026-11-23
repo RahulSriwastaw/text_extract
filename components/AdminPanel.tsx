@@ -14,13 +14,15 @@ import { useCurrentUser, signInWithGoogle } from '../services/authService';
 import * as api from '../services/adminApi';
 import { setAdminPassword, getAdminPassword, clearAdminPassword } from '../services/adminApi';
 import { TOKEN_UNIT, formatPlanTokens } from '../services/apiClient';
+import { MODEL_PROVIDERS, type ModelProvider } from '../services/modelAccess';
 
-type Tab = 'Overview' | 'Users' | 'Plans' | 'Reports' | 'Activity' | 'API Keys' | 'Settings' | 'Audit';
+type Tab = 'Overview' | 'Users' | 'Plans' | 'Models' | 'Reports' | 'Activity' | 'API Keys' | 'Settings' | 'Audit';
 
 const TABS: { name: Tab; icon: any }[] = [
   { name: 'Overview', icon: BarChart3 },
   { name: 'Users', icon: Users },
   { name: 'Plans', icon: Coins },
+  { name: 'Models', icon: Cpu },
   { name: 'Reports', icon: FileText },
   { name: 'Activity', icon: Activity },
   { name: 'API Keys', icon: Key },
@@ -233,6 +235,7 @@ const AdminPanel = () => {
           {activeTab === 'Overview' && <OverviewTab />}
           {activeTab === 'Users' && <UsersTab />}
           {activeTab === 'Plans' && <PlansTab />}
+          {activeTab === 'Models' && <ModelsTab />}
           {activeTab === 'Reports' && <ReportsTab />}
           {activeTab === 'Activity' && <ActivityTab />}
           {activeTab === 'API Keys' && <ApiKeysTab />}
@@ -895,6 +898,157 @@ const PlansTab = () => {
           <input required className={input + ' w-28'} type="number" min="1" placeholder="Days" aria-label="Validity days" value={draft.duration_days} onChange={e => setDraft({ ...draft, duration_days: e.target.value })} />
           <button disabled={busy} className="px-4 py-2 bg-accent text-on-accent text-xs font-bold rounded-lg disabled:opacity-50">Add plan</button>
         </form>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Models Tab — which AI models users may pick
+// ---------------------------------------------------------------------------
+const PROVIDER_NAME: Record<ModelProvider, string> = { claude: 'Claude (Anthropic)', gemini: 'Gemini (Google)' };
+type ModelChoice = Record<ModelProvider, { enabled: Set<string>; default?: string }>;
+
+export const ModelsTab = () => {
+  const [catalog, setCatalog] = useState<api.AdminModelCatalog | null>(null);
+  const [choice, setChoice] = useState<ModelChoice | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.fetchAdminModels();
+      setCatalog(data);
+      setChoice({
+        claude: { enabled: new Set(data.providers.claude.models.filter(m => m.enabled && !m.unsupported).map(m => m.id)), default: data.providers.claude.default },
+        gemini: { enabled: new Set(data.providers.gemini.models.filter(m => m.enabled && !m.unsupported).map(m => m.id)), default: data.providers.gemini.default },
+      });
+      setDirty(false); setError('');
+    } catch (e: any) { setError(e.message || 'Could not load the model list.'); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!catalog || !choice) {
+    return error ? <p role="alert" className="text-red-400 text-sm">{error}</p>
+      : <div className="flex justify-center py-20"><RefreshCw className="w-6 h-6 animate-spin text-ink-3" /></div>;
+  }
+
+  /** Change one provider's choice; its default always stays one of the active models. */
+  const change = (provider: ModelProvider, edit: (enabled: Set<string>) => string | undefined | void) => {
+    const enabled = new Set(choice[provider].enabled);
+    const wanted = edit(enabled) || choice[provider].default;
+    // If the default was switched off, a cheaper active model takes over before a costly one.
+    const active = catalog.providers[provider].models.filter(m => enabled.has(m.id));
+    const fallback = (active.find(m => !m.costly) || active[0])?.id;
+    setChoice({ ...choice, [provider]: { enabled, default: wanted && enabled.has(wanted) ? wanted : fallback } });
+    setDirty(true); setSaved('');
+  };
+  const total = choice.claude.enabled.size + choice.gemini.enabled.size;
+
+  const save = async (reset = false) => {
+    setBusy(true); setError(''); setSaved('');
+    try {
+      const order = (p: ModelProvider) => catalog.providers[p].models.map(m => m.id).filter(id => choice[p].enabled.has(id));
+      await api.saveAdminModels(reset ? { reset: true } : {
+        claude: order('claude'), gemini: order('gemini'), defaultClaude: choice.claude.default, defaultGemini: choice.gemini.default,
+      });
+      await load();
+      setSaved(reset ? 'Back to the built-in rule.' : 'Saved. Users see the new list within a minute.');
+    } catch (e: any) { setError(e.message || 'Could not save.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="max-w-4xl space-y-6">
+      <div className="bg-surface p-6 rounded-2xl border border-line">
+        <h3 className="text-sm font-bold">Models users can choose</h3>
+        <p className="text-xs text-ink-3 mt-1 max-w-2xl">
+          Every model your server's API keys can reach is listed here. Only the ones you switch on appear in the users' model list,
+          and the server refuses to run any other model. The default model is preselected for users and is used by features that have no model picker.
+        </p>
+        <p className={`text-xs mt-2 ${catalog.configured ? 'text-green-400' : 'text-amber-400'}`}>
+          {catalog.configured
+            ? 'Your saved choice is in force.'
+            : 'You have not saved a choice yet: the built-in rule is in force (every model except Opus and Fable).'}
+        </p>
+      </div>
+
+      {error && <p role="alert" className="text-red-400 text-sm">{error}</p>}
+
+      {MODEL_PROVIDERS.map(provider => {
+        const info = catalog.providers[provider];
+        const { enabled } = choice[provider];
+        const usable = info.models.filter(m => !m.unsupported);
+        return (
+          <div key={provider} className="bg-surface rounded-2xl border border-line overflow-hidden">
+            <div className="p-5 border-b border-line flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold flex items-center gap-2"><Cpu size={16} className="text-accent" /> {PROVIDER_NAME[provider]}</h3>
+                <p className="text-xs text-ink-3 mt-0.5">{enabled.size} of {usable.length} active</p>
+              </div>
+              {usable.length > 0 && (
+                <div className="flex gap-2">
+                  <button type="button" className="px-3 py-1.5 text-xs bg-surface-2 border border-line rounded-lg hover:border-accent"
+                    onClick={() => change(provider, set => { usable.filter(m => !m.costly).forEach(m => set.add(m.id)); })}>All except costly</button>
+                  <button type="button" className="px-3 py-1.5 text-xs bg-surface-2 border border-line rounded-lg hover:border-accent"
+                    onClick={() => change(provider, set => set.clear())}>All off</button>
+                </div>
+              )}
+            </div>
+            {info.error ? <p role="alert" className="p-5 text-sm text-amber-400">{info.error}</p> : (
+              <table className="w-full text-sm">
+                <thead><tr className="bg-canvas text-xs text-ink-3 uppercase">
+                  <th className="px-4 py-3 text-left w-20">Active</th>
+                  <th className="px-4 py-3 text-left">Model</th>
+                  <th className="px-4 py-3 text-left">Model ID</th>
+                  <th className="px-4 py-3 text-left w-24">Default</th>
+                </tr></thead>
+                <tbody>
+                  {info.models.map(m => {
+                    const on = enabled.has(m.id);
+                    return (
+                      <tr key={m.id} className={`border-t border-line ${m.unsupported ? 'opacity-45' : 'hover:bg-surface-2/50'}`}>
+                        <td className="px-4 py-2.5">
+                          <input type="checkbox" checked={on} disabled={m.unsupported} aria-label={`${m.name} active`}
+                            onChange={e => change(provider, set => { e.target.checked ? set.add(m.id) : set.delete(m.id); })} />
+                        </td>
+                        <td className="px-4 py-2.5 font-medium">
+                          {m.name}
+                          {m.costly && <span className="ml-2 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-orange-500/15 text-orange-400" title="Costs several times more per token than Sonnet or Haiku">High cost</span>}
+                          {m.unsupported && <span className="ml-2 text-[10px] text-ink-3 uppercase">Cannot extract text</span>}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-ink-3">{m.id}</td>
+                        <td className="px-4 py-2.5">
+                          <input type="radio" name={`default-${provider}`} checked={choice[provider].default === m.id} disabled={!on}
+                            aria-label={`${m.name} is the default`} onChange={() => change(provider, () => m.id)} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {info.models.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-center text-ink-3">No models returned by this provider.</td></tr>}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={() => save()} disabled={busy || !dirty || total === 0}
+          className="px-4 py-2 bg-accent text-on-accent text-xs font-bold rounded-lg disabled:opacity-50">
+          {busy ? 'Saving…' : `Save: ${total} model${total === 1 ? '' : 's'} active`}
+        </button>
+        {dirty && <button type="button" onClick={load} disabled={busy} className="px-3 py-2 text-xs text-ink-3 hover:text-ink">Discard changes</button>}
+        {catalog.configured && (
+          <button type="button" disabled={busy} className="px-3 py-2 text-xs text-ink-3 hover:text-ink"
+            onClick={() => confirm('Go back to the built-in rule (every model except Opus and Fable)?') && save(true)}>
+            Back to the built-in rule
+          </button>
+        )}
+        {total === 0 && <span className="text-xs text-amber-400">Keep at least one model active.</span>}
+        {saved && <span role="status" className="text-xs text-green-400">{saved}</span>}
       </div>
     </div>
   );

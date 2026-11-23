@@ -6,7 +6,12 @@ import { uploadDriveFigure } from './driveFigures.js';
 import { resolveClaudeModel } from './claudeModelSelection.js';
 import { pageChatPrompt } from '../services/pageChat.js';
 import { designChatPrompt, type DesignChatTurn } from '../services/designChat.js';
-import { isBlockedModel, safeDirectModel, type ClaudeModel } from '../services/claudeModels.js';
+import type { ClaudeModel } from '../services/claudeModels.js';
+import {
+  MODEL_PROVIDERS, defaultModel, isCostlyModel, isModelAllowed, resolveAllowedModel, sanitizeModelAccess, visibleModels,
+  type ModelAccess, type ModelProvider,
+} from '../services/modelAccess.js';
+import { getModelAccess, saveModelAccess } from './modelAccess.js';
 import express from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { NumberingStyle, OptionArrangement } from '../types.js';
@@ -325,38 +330,113 @@ const getAllKeys = (userKeyInput?: string): string[] => {
   return getActiveKeyPool(userKeyInput).keys;
 };
 
-app.get('/api/models/:provider', async (req, res) => {
-  const provider = req.params.provider;
-  if (provider !== 'claude' && provider !== 'gemini') return res.sendStatus(404);
-  const { keys } = getActiveKeyPool(getUserKey(req), provider);
+// ---------------------------------------------------------------------------
+// Models: every model the server's API keys can reach, and which of them users may pick
+// ---------------------------------------------------------------------------
+interface CatalogModel { id: string; name: string; /** cannot do text extraction (audio, image-only…) */ disabled: boolean }
+const catalogCache = new Map<ModelProvider, { at: number; models: CatalogModel[] }>();
+const CATALOG_TTL_MS = 5 * 60_000;
+
+/** The provider's full model list, read with the server's own keys. Cached for five minutes. */
+async function fetchModelCatalog(provider: ModelProvider): Promise<{ models: CatalogModel[]; error?: string }> {
+  const hit = catalogCache.get(provider);
+  if (hit && Date.now() - hit.at < CATALOG_TTL_MS) return { models: hit.models };
+  const { keys } = getActiveKeyPool('', provider);
+  if (!keys.length) return { models: [], error: `No ${provider === 'gemini' ? 'Gemini' : 'Claude'} API key is configured on the server.` };
   const google = provider === 'gemini';
   for (const key of keys) {
     try {
       const url = new URL(google ? 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000' : 'https://api.anthropic.com/v1/models?limit=100');
       const headers: Record<string, string> = google ? { 'x-goog-api-key': key } : { 'x-api-key': key, 'anthropic-version': '2023-06-01' };
-      const models = [];
+      const models: CatalogModel[] = [];
       while (true) {
         const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
         if (!response.ok) {
-          if ([401, 403, 429].includes(response.status)) break;
-          return res.status(503).json({ error: 'Provider catalog unavailable' });
+          if ([401, 403, 429].includes(response.status)) break;          // try the next key
+          return { models: [], error: 'The provider did not return its model list. Try again in a minute.' };
         }
         const page = await response.json();
         for (const m of google ? page.models : page.data) {
           const id = google ? m.name.replace(/^models\//, '') : m.id;
-          // Hide expensive models (opus, fable) and unsupported Gemini models
-          if (isBlockedModel(id)) continue;
           const disabled = google && (!m.supportedGenerationMethods?.includes('generateContent') || /tts|native-audio|image-generation|image-preview|robotics|computer-use/i.test(id));
           models.push({ id, name: google ? m.displayName : m.display_name, disabled });
         }
         const token = google ? page.nextPageToken : page.has_more && page.last_id;
         const param = google ? 'pageToken' : 'after_id';
-        if (!token || token === url.searchParams.get(param)) return res.set('Cache-Control', 'no-store').json({ models });
+        if (!token || token === url.searchParams.get(param)) {
+          catalogCache.set(provider, { at: Date.now(), models });
+          return { models };
+        }
         url.searchParams.set(param, token);
       }
-    } catch { break; }
+    } catch { /* network error or timeout: try the next key */ }
   }
-  return res.status(503).json({ error: 'Model list unavailable. Check the provider API key.' });
+  return { models: [], error: 'Model list unavailable. Check the provider API key.' };
+}
+
+/** What a user may pick for one provider, and which model is preselected. */
+async function userModels(provider: ModelProvider, access: ModelAccess | null) {
+  const { models, error } = await fetchModelCatalog(provider);
+  const visible = visibleModels(access, provider, models);
+  const usable = visible.filter(m => !m.disabled);
+  const serverDefault = provider === 'claude' ? getPrimaryModel() : process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const preferred = defaultModel(access, provider) || serverDefault;
+  return { models: visible, error, default: usable.find(m => m.id === preferred)?.id || usable[0]?.id };
+}
+
+// The model picker: both providers, only the models the admin has switched on.
+app.get('/api/models', async (_req, res) => {
+  const access = await getModelAccess();
+  const [claude, gemini] = await Promise.all([userModels('claude', access), userModels('gemini', access)]);
+  if (claude.error && gemini.error) return res.status(503).json({ error: claude.error });
+  res.set('Cache-Control', 'no-store').json({
+    claude: claude.models, gemini: gemini.models,
+    defaults: { claude: claude.default, gemini: gemini.default },
+  });
+});
+
+// Older clients ask per provider.
+app.get('/api/models/:provider', async (req, res) => {
+  const provider = req.params.provider;
+  if (provider !== 'claude' && provider !== 'gemini') return res.sendStatus(404);
+  const { models, error } = await userModels(provider, await getModelAccess());
+  if (error) return res.status(503).json({ error });
+  res.set('Cache-Control', 'no-store').json({ models });
+});
+
+// Admin: every model with its on/off state.
+app.get('/api/admin/models', requireAdmin, async (_req, res) => {
+  const access = await getModelAccess();
+  const providers = Object.fromEntries(await Promise.all(MODEL_PROVIDERS.map(async provider => {
+    const { models, error } = await fetchModelCatalog(provider);
+    return [provider, {
+      error,
+      default: (await userModels(provider, access)).default,       // what users are given today, also before the first save
+      models: models.map(m => ({ id: m.id, name: m.name, unsupported: m.disabled, costly: isCostlyModel(m.id), enabled: isModelAllowed(access, provider, m.id) })),
+    }];
+  })));
+  res.set('Cache-Control', 'no-store').json({ configured: !!access, providers });
+});
+
+// Admin: save which models users get. { reset: true } goes back to the built-in rule.
+app.put('/api/admin/models', requireAdmin, async (req, res) => {
+  try {
+    const admin: VerifiedUser = (res.locals as any).admin;
+    const access = req.body?.reset === true ? null : sanitizeModelAccess(req.body);
+    if (req.body?.reset !== true) {
+      if (!access) return res.status(400).json({ error: 'Send the list of active models.' });
+      if (!access.claude.length && !access.gemini.length) return res.status(400).json({ error: 'Keep at least one model active, otherwise no AI feature can run.' });
+    }
+    await saveModelAccess(access);
+    if (adminDb) {
+      await adminDb.from('admin_audit').insert({
+        admin_uid: admin.uid, admin_email: admin.email, action: access ? 'set_model_access' : 'reset_model_access', details: access,
+      });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Could not save the model list.' });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -870,17 +950,30 @@ export const callAIWithFallback = async (
 
   if (isClaude) {
     const claudeKey = client?.apiKey || client?.key || process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY || '';
-    // Opus/Fable are blocked server-side too: old clients and saved settings get the default model.
-    const selected = safeDirectModel(config.claudeModel);
-    const modelsToTry = selected ? [/^anthropic:claude-[a-z0-9.-]+$/.test(selected)
-      ? selected.slice(10) : await resolveClaudeModel(selected, claudeKey, config.abortSignal)] : [
+    // Only models the admin has switched on may run. Anything else (an old client, a saved
+    // setting, a made-up id) is replaced by the default active model.
+    const selected = typeof config.claudeModel === 'string' ? config.claudeModel : '';
+    const requestedId = !selected ? undefined
+      : /^anthropic:claude-[a-z0-9.-]+$/.test(selected) ? selected.slice(10)
+      : await resolveClaudeModel(selected as ClaudeModel, claudeKey, config.abortSignal).catch(() => 'unknown-model');
+    const access = await getModelAccess();
+    const choice = resolveAllowedModel(access, 'claude', requestedId);
+    if (choice.blocked) throw new Error('No Claude model is switched on. Choose another AI model.');
+    const serverChain = [
       primaryModel || getPrimaryModel(),
       fallbackModel || getFallbackModel(),
       'claude-sonnet-5-5',
       'claude-haiku-5-5',
       'claude-sonnet-4-6',
       'claude-haiku-4-5-20251001'
-    ].filter((m, i, arr) => m && arr.indexOf(m) === i);
+    ];
+    // The chosen model goes first. The rest are only reached when it does not exist or is
+    // unavailable (see the loop below): the admin's other active models, cheaper families
+    // first, or the server's own list while the admin has not chosen yet.
+    const spare = access
+      ? access.claude.filter(m => m !== choice.model).sort((a, b) => Number(isCostlyModel(a)) - Number(isCostlyModel(b))).slice(0, 3)
+      : serverChain;
+    const modelsToTry = (choice.model ? [choice.model, ...spare] : serverChain).filter((m, i, arr) => m && arr.indexOf(m) === i);
 
     let lastErr: any = null;
     for (const modelToUse of modelsToTry) {
@@ -914,8 +1007,12 @@ export const callAIWithFallback = async (
 
   if (config.claudeModel) throw new Error('The selected Claude model requires an Anthropic API key.');
   // Google Gemini Fallback
-  const { geminiModel, claudeModel: ignoredClaude, ...generationConfig } = config;
-  if (geminiModel && !/^[a-zA-Z0-9._-]+$/.test(geminiModel)) throw new Error('Invalid Gemini model ID.');
+  const { geminiModel: requestedGemini, claudeModel: ignoredClaude, ...generationConfig } = config;
+  if (requestedGemini && !/^[a-zA-Z0-9._-]+$/.test(requestedGemini)) throw new Error('Invalid Gemini model ID.');
+  // Same rule as for Claude: only a model the admin has switched on may run.
+  const geminiChoice = resolveAllowedModel(await getModelAccess(), 'gemini', requestedGemini || undefined);
+  if (geminiChoice.blocked) throw new Error('No Gemini model is switched on. Choose another AI model.');
+  const geminiModel = geminiChoice.model;
   const modelsToTry = geminiModel ? [geminiModel] : [
     process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash',

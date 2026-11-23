@@ -5,6 +5,7 @@
  * Admin password is stored in sessionStorage and sent as X-Admin-Password header.
  */
 import { apiFetch, apiFetchJson } from './apiClient';
+import type { ModelAccess, ModelProvider } from './modelAccess';
 
 // ---------------------------------------------------------------------------
 // Admin password session management
@@ -217,7 +218,25 @@ export const updatePlan = (id: number, body: Partial<Omit<Plan, 'id'>>) =>
 export const setUserPlan = (uid: string, body: { plan_id?: number; add_tokens?: number; extend_days?: number; remove?: true }) =>
   postJson(`/api/admin/users/${encodeURIComponent(uid)}/plan`, body);
 
-export const fetchReports =(params: { from?: string; to?: string; groupBy?: string; format?: string } = {}) => {
+// ---- Models: which AI models users may pick -------------------------------------------
+export interface AdminModel {
+  id: string;
+  name: string;
+  /** Cannot do text extraction (audio, image-only…): never offered to users. */
+  unsupported: boolean;
+  /** Opus / Fable families: several times the cost per token. */
+  costly: boolean;
+  enabled: boolean;
+}
+export interface AdminModelCatalog {
+  /** false = the admin has not saved a choice yet; the built-in rule (everything except Opus/Fable) is in force. */
+  configured: boolean;
+  providers: Record<ModelProvider, { models: AdminModel[]; default?: string; error?: string }>;
+}
+export const fetchAdminModels = () => adminFetchJson<AdminModelCatalog>('/api/admin/models');
+export const saveAdminModels = (body: ModelAccess | { reset: true }) => postJson('/api/admin/models', body, 'PUT');
+
+export const fetchReports = (params: { from?: string; to?: string; groupBy?: string; format?: string } = {}) => {
   const q = new URLSearchParams();
   if (params.from) q.set('from', params.from);
   if (params.to) q.set('to', params.to);

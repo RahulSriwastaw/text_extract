@@ -6,6 +6,7 @@ import { uploadDriveFigure } from './driveFigures.js';
 import { resolveClaudeModel } from './claudeModelSelection.js';
 import { pageChatPrompt } from '../services/pageChat.js';
 import { designChatPrompt, type DesignChatTurn } from '../services/designChat.js';
+import { extractTemplateInstruction } from '../services/extractTemplates.js';
 import type { ClaudeModel } from '../services/claudeModels.js';
 import {
   MODEL_PROVIDERS, defaultModel, isCostlyModel, isModelAllowed, resolveAllowedModel, sanitizeModelAccess, visibleModels,
@@ -1640,9 +1641,12 @@ const extractLayoutWithRetry = async (
   optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
   signal?: AbortSignal,
   figureMode: FigureMode = 'crop',
-  claudeModel?: ClaudeModel, geminiModel?: string
+  claudeModel?: ClaudeModel, geminiModel?: string,
+  /** Output template id (services/extractTemplates.ts); unknown ids and 'none' add nothing. */
+  extractTemplate?: unknown
 ): Promise<any> => {
   const inlineImage = readInlineImage(base64Image);
+  const templateInstruction = extractTemplateInstruction(extractTemplate);
 
   // 1. Question Numbering Feature Connection
   let numberingInstruction = '';
@@ -1775,6 +1779,7 @@ ${mcqInstruction}
 ${answerInstruction}
 ${refineInstruction}
 ${proofreadInstruction}
+${templateInstruction}
 
 **CRITICAL RULE: COMPLETE EXTRACTION**:
 - You MUST read the ENTIRE page from top to bottom.
@@ -2034,7 +2039,7 @@ app.post('/api/extract', requireUser, usageMiddleware('extract'), async (req, re
       autoProofread,
       optionArrangement,
       controller.signal,
-      req.body.figureMode === 'svg' ? 'svg' : 'crop', req.body.claudeModel, req.body.geminiModel
+      req.body.figureMode === 'svg' ? 'svg' : 'crop', req.body.claudeModel, req.body.geminiModel, req.body.extractTemplate
     );
     if (controller.signal.aborted) return;
     res.json({ elements });

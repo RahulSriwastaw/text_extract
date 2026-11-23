@@ -8,6 +8,7 @@
 import { ExtractedElement, NumberingStyle, OptionArrangement } from '../types';
 import type { FigureMode } from '../types';
 import { CONTENT_FIGURE_INSTRUCTION, SVG_FIGURE_INSTRUCTION } from './figurePrompt';
+import { extractTemplateInstruction } from './extractTemplates';
 import { HTML_LATEX_FORMAT_RULES, safeParseAiJsonObject } from './textCleanService';
 
 export const PAGE_SOURCE = 'tf-study-ai';
@@ -367,8 +368,12 @@ export function buildBridgePrompt(
   optionArrangement: OptionArrangement = OptionArrangement.VERTICAL,
   showMcqNumbers = true,
   autoProofread = false,
-  figureMode: FigureMode = 'crop'
+  figureMode: FigureMode = 'crop',
+  /** Output template (services/extractTemplates.ts); 'none' changes nothing. */
+  template: string = 'none'
 ): string {
+  const templateRules = extractTemplateInstruction(template);
+  const templateInstruction = templateRules ? `\n${templateRules}\n` : '';
   // 1. Question Numbering Feature Connection
   let numInstruction = '';
   if (!showMcqNumbers) {
@@ -461,7 +466,7 @@ ${optArrangementInstruction}
 9. ${proofreadInstruction}
 10. ${mathInstruction}
 11. ${imageInstruction}
-
+${templateInstruction}
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of objects inside \`\`\`json ... \`\`\` code block:
 [
@@ -505,7 +510,7 @@ CRITICAL RULES & SPECIFICATIONS:
 7. ${proofreadInstruction}
 8. ${mathInstruction}
 9. ${imageInstruction}
-
+${templateInstruction}
 OUTPUT FORMAT:
 Return ONLY a valid JSON array of objects inside \`\`\`json ... \`\`\` code block:
 [

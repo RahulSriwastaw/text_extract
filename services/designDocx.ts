@@ -12,13 +12,14 @@
 import {
   Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, ImageRun, Table, TableRow, TableCell,
   WidthType, Header, Footer, PageNumber, PageOrientation, ShadingType, HeightRule, VerticalAlign,
-  PageBorderOffsetFrom, PageBorderDisplay, LineRuleType,
+  PageBorderOffsetFrom, PageBorderDisplay, LineRuleType, Tab, TabStopType,
 } from 'docx';
 import { parseLineToChildren, type DocxRunStyle } from './docxService';
 import {
   type DesignDoc, type DesignBlock, type DesignPage, type StyleContext, type ResolvedStyle,
   FONTS, PAGE_SIZE, SPACING, IMAGE_WIDTH, HIGHLIGHT_TEXT,
   resolveStyle, pageFill, calloutInfo, mix, legible, questionNumbers, displayText, balanceStars, highlightSegments, plainText, optionColumnsOf,
+  questionParts, optionParts, hangingRoles, HANGING_GUTTER_EM,
 } from './designDoc';
 
 export interface DesignDocxOptions {
@@ -86,6 +87,16 @@ export async function generateDesignDocx(doc: DesignDoc, options: DesignDocxOpti
     return new Paragraph({ children: runs(text, st.bold, runStyle(st)), ...paragraphProps(st, block.type === 'heading'), ...extra });
   };
 
+  /** A label in its own column ("12." or "(A)") and the text wrapping beside it; `left` and `hang` in twips. */
+  const hanging = (block: Pick<DesignBlock, 'type' | 'level' | 'variant' | 'style'>, label: string, text: string, ctx: StyleContext, left: number, hang: number) => {
+    const st = resolveStyle(theme, block, ctx);
+    return new Paragraph({
+      children: [new TextRun({ children: [label, new Tab()], ...(runStyle(st) as any), bold: st.bold }), ...runs(text, st.bold, runStyle(st))],
+      ...paragraphProps(st, false),
+      indent: { left: left + hang, hanging: hang }, tabStops: [{ type: TabStopType.LEFT, position: left + hang }],
+    });
+  };
+
   /** A Markdown table, in the theme's colours. */
   const table = (block: DesignBlock, ctx: StyleContext, fill: string): Table => {
     const st = resolveStyle(theme, block, ctx);
@@ -114,8 +125,18 @@ export async function generateDesignDocx(doc: DesignDoc, options: DesignDocxOpti
   /** One slide's blocks → Word content. `width` is the px width they may use (half in a column). */
   const renderBlocks = async (blocks: DesignBlock[], ctx: StyleContext, fill: string, width: number): Promise<Child[]> => {
     const out: Child[] = [];
+    const roles = theme.questionStyle === 'hanging' ? hangingRoles(blocks) : {};
+    const bodyPt = resolveStyle(theme, { type: 'paragraph' }, ctx).sizePt;
+    const gutter = Math.round(bodyPt * 20 * HANGING_GUTTER_EM), optionLabel = Math.round(bodyPt * 20 * 2.4);   // twips
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
+
+      const role = roles[block.id];
+      /** An option of an exam-paper question: "(A)", a tab, then the text wrapping beside the label. */
+      const hangingOption = (option: DesignBlock, left: number) => {
+        const parts = optionParts(option.text || '');
+        return parts.label ? hanging(option, parts.label, parts.text, ctx, left, optionLabel) : paragraph(option, displayText(option), ctx, { indent: { left } });
+      };
 
       if (block.type === 'option' && optionColumnsOf(theme) > 1) {
         // Consecutive options share one borderless grid.
@@ -129,13 +150,24 @@ export async function generateDesignDocx(doc: DesignDoc, options: DesignDocxOpti
             children: Array.from({ length: columns }, (_, c) => group[r + c]).map(option => new TableCell({
               width: { size: 100 / columns, type: WidthType.PERCENTAGE },
               borders: NO_BORDERS,
-              children: [option ? paragraph(option, displayText(option), ctx) : new Paragraph({ children: [] })],
+              children: [!option ? new Paragraph({ children: [] }) : role ? hangingOption(option, 0) : paragraph(option, displayText(option), ctx)],
             })),
           }));
         }
-        out.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE }, borders: { ...NO_BORDERS, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER } }));
+        out.push(new Table({
+          rows, borders: { ...NO_BORDERS, insideHorizontal: NO_BORDER, insideVertical: NO_BORDER },
+          // Under a hanging question number the grid starts where the question text starts.
+          ...(role ? { width: { size: Math.round(width * PX_TO_TWIP) - gutter, type: WidthType.DXA }, indent: { size: gutter, type: WidthType.DXA } }
+            : { width: { size: 100, type: WidthType.PERCENTAGE } }),
+        }));
         continue;
       }
+      if (role === 'question') {
+        const parts = questionParts(block, numbers[block.id]);
+        if (parts.label) { out.push(hanging(block, parts.label, parts.text, ctx, 0, gutter)); continue; }
+      }
+      if (role === 'member' && block.type === 'option') { out.push(hangingOption(block, gutter)); continue; }
+      if (role === 'member' && block.type !== 'image') { out.push(paragraph(block, displayText(block, numbers[block.id]), ctx, { indent: { left: gutter } })); continue; }
 
       switch (block.type) {
         case 'image': {
@@ -278,6 +310,22 @@ export async function generateDesignDocx(doc: DesignDoc, options: DesignDocxOpti
       ],
     });
   };
+  /** Exam paper: a boxed code at the left, the other text (or "Page 4 of 24") at the right edge. */
+  const examRunning = (key: 'header' | 'footer') => {
+    const st = resolveStyle(theme, { type: 'paragraph' }, { layout: doc.layout, key });
+    const run = { font: FONTS[st.font].docx, size: Math.round(st.sizePt * 2), color: hex(st.color), bold: st.bold, italics: st.italic };
+    const boxed = key === 'header' ? theme.header : theme.footer;
+    const right = key === 'header' ? [theme.headerRight || ''] : theme.showPageNumbers ? ['Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES] : [];
+    return new Paragraph({
+      tabStops: [{ type: TabStopType.RIGHT, position: usableWidth * PX_TO_TWIP }],
+      ...(key === 'footer' && { border: { top: { style: BorderStyle.SINGLE, size: 12, color: hex(st.color), space: 4 } } }),
+      children: [
+        ...(boxed ? [new TextRun({ text: ` ${boxed} `, ...run, border: { style: BorderStyle.SINGLE, size: 8, color: hex(st.color), space: 1 } })] : []),
+        new TextRun({ children: [new Tab(), ...right], ...run }),
+      ],
+    });
+  };
+  const exam = theme.runningStyle === 'exam';
   const margin = size.padding * PX_TO_TWIP;
   const bar = { style: BorderStyle.SINGLE, size: 96, color: hex(theme.primary), space: 0 };       // 12 pt, the widest Word allows
   const frame = { style: BorderStyle.SINGLE, size: 24, color: hex(theme.primary), space: 14 };
@@ -303,8 +351,8 @@ export async function generateDesignDocx(doc: DesignDoc, options: DesignDocxOpti
           ...(borders && { borders }),
         },
       },
-      ...(theme.header && { headers: { default: new Header({ children: [running('header', theme.header, false)] }) } }),
-      ...((theme.footer || theme.showPageNumbers) && { footers: { default: new Footer({ children: [running('footer', theme.footer, theme.showPageNumbers)] }) } }),
+      ...((theme.header || (exam && theme.headerRight)) && { headers: { default: new Header({ children: [exam ? examRunning('header') : running('header', theme.header, false)] }) } }),
+      ...((theme.footer || theme.showPageNumbers) && { footers: { default: new Footer({ children: [exam ? examRunning('footer') : running('footer', theme.footer, theme.showPageNumbers)] }) } }),
       children,
     }],
   });

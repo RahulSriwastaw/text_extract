@@ -4,6 +4,7 @@ import {
   elementsToDesignDoc, applyDesignOps, outlineForAi, autoPaginate, allBlocks, sanitizeStyle, tint, PRESET_THEMES,
   emphasizeText, stripHighlight, splitBlockText, planOverflowFix, fullTextChunks, emphasisToLinks, balanceStars, plainText,
   resolveStyle, styleKey, elementCounts, contrast, readableOn, highlightSegments, markSelection, unemphasizeText, calloutInfo, HIGHLIGHTERS, optionColumnsOf, splitOptionText, combinedOptionCount, optionsFromTable,
+  questionParts, optionParts, hangingRoles, examPaperOps,
 } from '../services/designDoc.ts';
 import type { ExtractedElement } from '../types.ts';
 
@@ -232,7 +233,7 @@ describe('helpers', () => {
     assert.equal(tint('#1D4ED8', 0), '#1D4ED8');
   });
   it('every preset theme has valid colours and readable text, also the dark ones', () => {
-    assert.equal(PRESET_THEMES.length, 12);
+    assert.equal(PRESET_THEMES.length, 13);
     for (const t of PRESET_THEMES) {
       assert.match(t.primary, /^#[0-9A-F]{6}$/);
       for (const type of ['heading', 'paragraph', 'question', 'answer', 'callout'] as const) {
@@ -351,6 +352,38 @@ describe('element styles (all H2, all questions…)', () => {
     assert.deepEqual(allBlocks(result.doc).map(b => b.type), ['question', 'option', 'option', 'option', 'option', 'table']);
     assert.equal(allBlocks(result.doc)[1].id, 't1');
     assert.equal(combinedOptionCount(result.doc), 0);
+  });
+
+  it('board exam paper: numbers hang in the margin, the translation and options line up, page codes move to header and footer', () => {
+    assert.deepEqual(questionParts({ text: 'Q12. किसने कहा?' }), { label: '12.', text: 'किसने कहा?' });
+    assert.deepEqual(questionParts({ text: '3) Who?' }), { label: '3.', text: 'Who?' });
+    assert.deepEqual(questionParts({ text: '# Who?' }, 7), { label: '7.', text: 'Who?' });
+    assert.deepEqual(questionParts({ text: 'Who?' }), { label: '', text: 'Who?' });
+    assert.deepEqual(optionParts('(A) France'), { label: '(A)', text: 'France' });
+    assert.deepEqual(optionParts('No label'), { label: '', text: 'No label' });
+
+    const page = (n: number) => `Q${n}. प्रश्न ${n}?\n(A) क\n(B) ख\n\nWho said this, paper ${n}?\n\n(A) a\n(B) b\n\n10/41/012★\n\nPage ${n} of 24\n\nA\n\n[ 111 ]\n\n`;
+    let doc = elementsToDesignDoc([{ type: 'text', content: 'A\n\nसामान्य निर्देश पढ़ें।\n\n' + [1, 2, 3, 4].map(page).join('') + 'एक निर्देश।\n\nदूसरा निर्देश।' } as ExtractedElement], 't');
+    const result = applyDesignOps(doc, examPaperOps(doc));
+    doc = result.doc;
+    assert.equal(result.skipped, 0);
+    assert.equal(doc.theme.name, 'Board Exam');
+    assert.deepEqual([doc.theme.header, doc.theme.headerRight, doc.theme.footer, doc.theme.runningStyle], ['A', '[ 111 ]', '10/41/012★', 'exam']);
+    assert.equal(optionColumnsOf(doc.theme), 2);
+    const texts = allBlocks(doc).map(b => b.text);
+    assert.equal(texts.filter(t => t === 'A').length, 1);                          // the set code on the cover stays
+    assert.ok(!texts.some(t => /^Page \d+ of 24$/.test(t || '') || t === '[ 111 ]' || t === '10/41/012★'));
+
+    const blocks = allBlocks(doc);
+    const roles = hangingRoles(blocks);
+    const roleOf = (text: string) => roles[blocks.find(b => b.text === text)!.id];
+    assert.equal(roleOf('Q1. प्रश्न 1?'), 'question');
+    assert.equal(roleOf('Who said this, paper 1?'), 'member');                      // the same question in the second language
+    assert.equal(blocks.filter(b => b.type === 'option').every(b => roles[b.id] === 'member'), true);
+    assert.equal(roleOf('सामान्य निर्देश पढ़ें।'), undefined);                          // before any question
+    assert.equal(roleOf('एक निर्देश।'), undefined);                                 // a second paragraph ends the question
+    assert.equal(roleOf('दूसरा निर्देश।'), undefined);
+    assert.equal(resolveStyle(doc.theme, { type: 'question' }).bold, false);
   });
 
   it('counts elements by kind and relabels a block', () => {

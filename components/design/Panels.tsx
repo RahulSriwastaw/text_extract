@@ -9,13 +9,13 @@
 import React, { useState } from 'react';
 import {
   Scissors, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, RotateCcw, ImagePlus, Search,
-  Type, Heading1, Heading2, Heading3, List, Table as TableIcon, Minus, HelpCircle, Square, Columns2, LayoutTemplate, Presentation,
+  FileText, Type, Heading1, Heading2, Heading3, List, Table as TableIcon, Minus, HelpCircle, Square, Columns2, LayoutTemplate, Presentation,
 } from 'lucide-react';
 import {
   type DesignDoc, type DesignOp, type DesignBlock, type BlockStyle, type ResolvedStyle, type StyleKey, type FontId, type Theme,
   type CalloutId, type BlockType, type Decoration, type SpacingId, type PageLayout,
   PRESET_THEMES, FONTS, FONT_IDS, STYLE_KEYS, STYLE_KEY_LABELS, HIGHLIGHTERS, HIGHLIGHTER_IDS, CALLOUTS, CALLOUT_IDS, DECORATIONS,
-  allBlocks, autoPaginate, elementCounts, resolveStyle, styleKey, plainText, optionColumnsOf, combinedOptionCount,
+  allBlocks, autoPaginate, elementCounts, resolveStyle, styleKey, plainText, optionColumnsOf, combinedOptionCount, examPaperOps,
 } from '../../services/designDoc';
 import type { OpResult } from './DesignCanvas';
 
@@ -159,6 +159,11 @@ export const ThemePanel: React.FC<{ doc: DesignDoc; applyOps: Apply; onReplace: 
             </button>
           ))}
         </div>
+        <button type="button" className="btn btn-secondary btn-sm w-full" title="Board Exam theme, options two per row, and page codes moved into the header and footer"
+          onClick={() => applyOps(examPaperOps(doc))}>
+          <FileText /> Make it a board exam paper
+        </button>
+        <p className="text-[11px] text-ink-3 leading-snug">Question numbers in the margin, options 2 × 2, centred section headings, set code and page code in boxes. Free, no tokens.</p>
       </Section>
 
       <Section title="Colours">
@@ -192,7 +197,7 @@ export const ThemePanel: React.FC<{ doc: DesignDoc; applyOps: Apply; onReplace: 
         <div><p className={label}>Headings</p>
           <Seg name="Headings" value={theme.headingStyle} onPick={headingStyle => setTheme({ headingStyle })} options={[['plain', 'Plain'], ['bar', 'Side bar'], ['banner', 'Banner']] as const} /></div>
         <div><p className={label}>Questions</p>
-          <Seg name="Questions" value={theme.questionStyle} onPick={questionStyle => setTheme({ questionStyle })} options={[['plain', 'Plain'], ['boxed', 'Boxed'], ['numbered-badge', 'Badge']] as const} /></div>
+          <Seg name="Questions" value={theme.questionStyle} onPick={questionStyle => setTheme({ questionStyle })} options={[['plain', 'Plain'], ['boxed', 'Boxed'], ['numbered-badge', 'Badge'], ['hanging', 'Exam', 'Exam paper: the number stands in the margin']] as const} /></div>
         <div><p className={label}>Options per row</p>
           <Seg name="Options per row" value={optionColumnsOf(theme)}
             onPick={columns => applyOps([{ op: 'setOptionsLayout', columns }])}
@@ -331,6 +336,15 @@ export const ElementsPanel: React.FC<{
               <input className={field} aria-label={highlightKey === 'header' ? 'Header text' : 'Footer text'}
                 placeholder={highlightKey === 'header' ? 'Header text, e.g. Class 7 · Science' : 'Footer text, e.g. school name'}
                 value={theme[highlightKey] || ''} onChange={e => applyOps([{ op: 'setTheme', patch: { [highlightKey]: e.target.value } }], 'theme:' + highlightKey)} />
+            )}
+            {highlightKey === 'header' && (
+              <input className={field} aria-label="Header text at the right" placeholder="Right side, e.g. [ 111 ] (subject code)"
+                value={theme.headerRight || ''} onChange={e => applyOps([{ op: 'setTheme', patch: { headerRight: e.target.value } }], 'theme:headerRight')} />
+            )}
+            {(highlightKey === 'header' || highlightKey === 'footer') && (
+              <div><p className={label}>Header and footer style</p>
+                <Seg name="Header and footer style" value={theme.runningStyle || 'plain'} onPick={runningStyle => applyOps([{ op: 'setTheme', patch: { runningStyle } }])}
+                  options={[['plain', 'Plain'], ['exam', 'Exam paper', 'Codes in boxes at the left, "Page 4 of 24" at the right']] as const} /></div>
             )}
             {highlightKey === 'footer' && (
               <label className="flex items-center gap-2 text-xs text-ink-2">

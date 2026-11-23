@@ -1,4 +1,5 @@
-import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT } from './figurePrompt';
+import { MCQ_PAGE_COVERAGE, MCQ_SHARED_CONTEXT, MCQ_BILINGUAL_LINES } from './figurePrompt';
+import { fixBilingualOptions } from './bilingualOptions';
 import { directModelFields, type DirectModel } from './claudeModels';
 import { readMcqFigures } from './mcqFigures';
 import { MockTestMcqItem, QuestionType, DifficultyLevel, ExtractedElement } from '../types';
@@ -777,7 +778,8 @@ export function autoRecoverItemOptionsFromStem(item: MockTestMcqItem): MockTestM
  */
 export function cleanMockTestItem(item: MockTestMcqItem): MockTestMcqItem {
   // First, auto-recover trailing options from stem if options are blank:
-  const recovered = autoRecoverItemOptionsFromStem(item);
+  // Then split "English / Hindi" option lines the AI copied whole into one language, and drop "(a)" labels.
+  const recovered = fixBilingualOptions(autoRecoverItemOptionsFromStem(item));
 
   const qHi = ensureHtmlParagraph(cleanMocktestText(recovered.question_hi));
   const qEn = ensureHtmlParagraph(cleanMocktestText(recovered.question_en));
@@ -1904,6 +1906,7 @@ ${HTML_LATEX_FORMAT_RULES}
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both question_hi and question_en (and their options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण, मुहावरे आदि): DO NOT translate into English! Both question_hi and question_en (and their options) MUST contain ONLY the original Hindi text.
    - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi (_hi) and English (_en). If document has only one, translate the counterpart.
+   - ${MCQ_BILINGUAL_LINES}
 4. COMPREHENSIVE SOLUTION: Provide an in-depth, step-by-step pedagogical explanation (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. NO EXAM BOILERPLATE: Strip exam dates, shifts, and book publisher watermarks.
 6. READING COMPREHENSION / PASSAGE SETS (CRITICAL):
@@ -2755,6 +2758,7 @@ ${HTML_LATEX_FORMAT_RULES}
    - For English Language tests (English Comprehension, Grammar, Vocab, etc.): DO NOT translate into Hindi! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original English text.
    - For Hindi Language tests (हिंदी गद्यांश, व्याकरण आदि): DO NOT translate into English! Both "question_hi" and "question_en" (and their options) MUST contain ONLY the original Hindi text.
    - For other general subjects (Maths, Reasoning, Science, GS): provide Hindi in _hi and English in _en.
+   - ${MCQ_BILINGUAL_LINES}
 4. Comprehensive Solutions: Provide an in-depth, step-by-step pedagogical solution (given data, LaTeX formula $...$, complete step-by-step calculations without skipping steps, or thorough factual background) so any level of student can understand easily. Do NOT start with 'हल:' or 'Solution:' and NEVER mention option letters ("Option A is correct").
 5. Correct Answer: Single letter "A", "B", "C", or "D".
 ${MCQ_SHARED_CONTEXT}

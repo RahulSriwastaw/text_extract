@@ -27,6 +27,7 @@ import {
 } from '../services/mocktestService';
 import { hasFigureImage, extractFigureUrls } from '../services/figureStorageService';
 import { downloadMcqAsDocx } from '../services/mcqDocxService';
+import { buildMasterBankRows, downloadMasterBankCsv } from '../services/mocktestService';
 
 interface MocktestStudioModalProps {
   isOpen: boolean;
@@ -242,6 +243,13 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
     downloadMockTestCsv(items, finalFileName, answerFormat);
   };
 
+  // The 68-field CSV for the Master Question Bank (exam, year and source are not known here, so those stay empty).
+  const handleDownloadMaster = () => {
+    const chosenName = (setName || 'mocktest').trim();
+    const safeBase = chosenName.replace(/[\\/:*?"<>|]+/g, '_').trim().replace(/\.csv$/i, '') || 'mocktest';
+    downloadMasterBankCsv(buildMasterBankRows(items), `${safeBase}_master_bank.csv`);
+  };
+
   const handleDownloadDocx = async () => {
     if (isGeneratingDocx || items.length === 0) return;
     setIsGeneratingDocx(true);
@@ -324,9 +332,20 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
               <button
                 onClick={handleDownload}
                 className="btn btn-primary btn-sm"
+                title="The 34-field CSV for the main app"
               >
                 <Download />
-                Download CSV ({items.length})
+                Main app CSV (34) · {items.length}
+              </button>
+
+              <button
+                onClick={handleDownloadMaster}
+                disabled={items.length === 0}
+                className="btn btn-secondary btn-sm"
+                title="The 68-field CSV for the Master Question Bank"
+              >
+                <Download />
+                Master QB CSV (68)
               </button>
 
               {/* DOCX Download with language selector */}
@@ -1142,9 +1161,19 @@ export const MocktestStudioModal: React.FC<MocktestStudioModalProps> = ({
               <button
                 onClick={handleDownload}
                 className="btn btn-primary btn-sm"
+                title="The 34-field CSV for the main app"
               >
                 <Download />
-                Export CSV
+                Main app CSV (34)
+              </button>
+              <button
+                onClick={handleDownloadMaster}
+                disabled={items.length === 0}
+                className="btn btn-secondary btn-sm"
+                title="The 68-field CSV for the Master Question Bank"
+              >
+                <Download />
+                Master QB CSV (68)
               </button>
               <button
                 onClick={handleDownloadDocx}

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MASTER_QB_HEADERS, MASTER_TRACKING_FIELDS, MASTER_APP_FIELDS, MASTER_FIELD_PROMPT_RULES,
-  buildMasterRow, masterGaps, normalizeIsoDate, normalizeMasterAnswer, normalizeQuestionReference, normalizeSourcePages,
+  buildMasterRow, masterGaps, masterSourceResolver, normalizeIsoDate, normalizeMasterAnswer, normalizeQuestionReference, normalizeSourcePages,
 } from '../services/masterQuestionBank';
 import {
   parseAiOutputToMockTestItems, buildMasterBankRows, serializeMasterBankCsv, buildMockTestBridgePrompt, buildMockTestDirectPrompt,
@@ -181,6 +181,27 @@ test('the Master CSV has 68 columns on every row, even with commas, quotes and l
   assert.equal(rows[1][MASTER_QB_HEADERS.indexOf('exam')], 'SSC CGL');
   assert.equal(rows[2][MASTER_QB_HEADERS.indexOf('question_r')], '17');
   assert.match(rows[1][MASTER_QB_HEADERS.indexOf('question_en')], /Say "hello", then/);
+});
+
+test('the source file and the page inside it come from the saved pages, also for a set loaded back from History', () => {
+  const pages = [
+    { id: 'p1', pageNumber: 1, sourceFile: 'First.pdf', filePage: 1 },
+    { id: 'p2', pageNumber: 2, sourceFile: 'First.pdf', filePage: 2 },
+    { id: 'p3', pageNumber: 3, sourceFile: 'Second.pdf', filePage: 1 },
+    { id: 'p4', pageNumber: 4, sourceFile: 'Second.pdf', filePage: 2 },
+    { id: 'p5', pageNumber: 5 }, // pasted text: no file
+  ];
+  const [one, merged, pasted] = parse([
+    { ...percentage, source_pages: '4' },
+    { ...percentage, question_r: 2, source_question_reference: 'Q.2', source_pages: '3, 4', question_hi: 'दूसरा प्रश्न', question_en: 'Second question' },
+    { ...percentage, question_r: 3, source_question_reference: 'Q.3', source_pages: '5', question_hi: 'तीसरा प्रश्न', question_en: 'Third question' },
+  ]);
+  const rows = buildMasterBankRows([{ ...one, pageId: 'p4' }, merged, pasted], { exam: 'SSC CGL' }, masterSourceResolver(pages));
+  assert.deepEqual(rows.map(row => [row.source_pdf, row.source_pages]), [['Second.pdf', '2'], ['Second.pdf', '1-2'], ['', '5']]);
+  assert.deepEqual(rows.map(row => row.source_file), ['Second.pdf', 'Second.pdf', '']);
+  // a set saved without pages (an older History entry) still exports; the file and page just stay as the AI reported them
+  const old = buildMasterBankRows([one], {}, masterSourceResolver(undefined));
+  assert.deepEqual([old[0].source_pdf, old[0].source_pages], ['', '4']);
 });
 
 test('extraction prompts ask for the Extractor fields and no longer ask for the reviewer and master fields', () => {

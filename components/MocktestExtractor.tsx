@@ -58,7 +58,7 @@ import {
   MocktestHistoryItem
 } from '../types';
 import { useCurrentUser } from '../services/authService';
-import { addMocktestHistoryItem } from '../services/historyService';
+import { addMocktestHistoryItem as persistMocktestHistoryItem } from '../services/historyService';
 import { saveItemBackup, restoreItemBackup, canUndoItem } from '../services/latexRepairService';
 import { 
   downloadMockTestCsv, 
@@ -90,7 +90,7 @@ import {
   serializeMasterBankCsv,
   downloadMasterBankCsv
 } from '../services/mocktestService';
-import type { MasterContext, MasterSource } from '../services/masterQuestionBank';
+import { masterSourceResolver, type MasterContext } from '../services/masterQuestionBank';
 import { MasterFieldsPanel } from './MasterFieldsPanel';
 import { cleanMocktestText } from '../services/textCleanService';
 import { 
@@ -254,6 +254,11 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
   // Master Question Bank (68-field) export: paper-level details the teacher enters once, and which CSV the CSV tab shows.
   const [masterContext, setMasterContext] = useState<MasterContext>({});
   const [csvView, setCsvView] = useState<'portal' | 'master'>('portal');
+  // Every saved set remembers its Master details, so its Master CSV can also be exported later from History.
+  const masterContextRef = React.useRef(masterContext);
+  masterContextRef.current = masterContext;
+  const addMocktestHistoryItem = React.useCallback((uid: string, item: MocktestHistoryItem) =>
+    persistMocktestHistoryItem(uid, { ...item, masterContext: masterContextRef.current }), []);
   const [user] = useCurrentUser();
   const [isSavedToHistory, setIsSavedToHistory] = useState(false);
   const currentSessionSetIdRef = useRef<string>('');
@@ -579,6 +584,7 @@ Rules:
         currentSessionSetIdRef.current = item.id;
       }
       setExtractedMcqs(item.questions);
+      setMasterContext(item.masterContext || {});
       if (item.setName) {
         setSetName(item.setName);
         setOutputFileName(item.setName);
@@ -602,7 +608,9 @@ Rules:
             pageChat: Array.isArray(p.pageChat) ? p.pageChat : [],
             rawTextContent: p.rawTextContent || '',
             sourceType: p.sourceType || (p.rawTextContent ? 'text' : 'image'),
-            fileName: p.fileName || item.setName || `Page ${p.pageNumber}`
+            fileName: p.fileName || item.setName || `Page ${p.pageNumber}`,
+            sourceFile: p.sourceFile || undefined,
+            filePage: p.filePage || undefined
           };
         });
         setPages(restoredPages);
@@ -2166,17 +2174,7 @@ Rules:
   };
 
   // Uploaded file and the page inside it, for the Master CSV's source_pdf / source_pages.
-  const masterSourceFor = React.useCallback((item: MockTestMcqItem): MasterSource => {
-    const page = pages.find(p => p.id === item.pageId) || pages.find(p => p.pageNumber === item.pageNumber);
-    const queuePages = String(item.source_pages ?? '').match(/\d+/g)?.map(Number) ?? [];
-    const sourcePages = queuePages.map(n => pages.find(p => p.pageNumber === n)).filter(p => p?.filePage);
-    return {
-      pdf: page?.sourceFile || sourcePages[0]?.sourceFile,
-      // A merged question reports every queue page it spans: translate them to page numbers inside the file.
-      page: sourcePages.length && sourcePages.length === queuePages.length
-        ? sourcePages.map(p => p!.filePage).join(', ') : page?.filePage ? String(page.filePage) : undefined,
-    };
-  }, [pages]);
+  const masterSourceFor = React.useMemo(() => masterSourceResolver(pages), [pages]);
   const buildMasterRows = () => buildMasterBankRows(extractedMcqs, masterContext, masterSourceFor);
 
   const handleDownloadMasterCsv = () => {
@@ -2835,7 +2833,7 @@ Rules:
                     onClick={() => { setOpenMenu(null); handleDownloadCsv(); }}
                   >
                     <Download />
-                    <span>Download 34-column CSV</span>
+                    <span>Download Main app CSV (34 fields)<span className="menu-item-desc">The CSV the main app / MockTest portal takes</span></span>
                   </button>
                   <button
                     type="button"
@@ -2845,7 +2843,7 @@ Rules:
                     onClick={() => { setOpenMenu(null); handleDownloadMasterCsv(); }}
                   >
                     <Download />
-                    <span>Download Master CSV (68 fields)<span className="menu-item-desc">Exam, year, chapter, quality flags: Master Question Bank format</span></span>
+                    <span>Download Master QB CSV (68 fields)<span className="menu-item-desc">The CSV the Master Question Bank takes: exam, year, chapter, quality flags</span></span>
                   </button>
                   <button
                     type="button"
@@ -5217,9 +5215,9 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                 <span>{csvView === 'master' && 'Master Question Bank CSV: 68 fields in the guide order, UTF-8 with BOM'}{csvView === 'portal' && <>RFC 4180 CSV with UTF-8 BOM (\uFEFF) • Ready for direct MockTest Portal Upload</>}</span>
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={() => setCsvView('portal')} aria-pressed={csvView === 'portal'}
-                    className={`btn btn-sm ${csvView === 'portal' ? 'btn-primary' : 'btn-secondary'}`}>Portal CSV (34)</button>
+                    className={`btn btn-sm ${csvView === 'portal' ? 'btn-primary' : 'btn-secondary'}`}>Main app CSV (34)</button>
                   <button type="button" onClick={() => setCsvView('master')} aria-pressed={csvView === 'master'}
-                    className={`btn btn-sm ${csvView === 'master' ? 'btn-primary' : 'btn-secondary'}`}>Master CSV (68)</button>
+                    className={`btn btn-sm ${csvView === 'master' ? 'btn-primary' : 'btn-secondary'}`}>Master QB CSV (68)</button>
                   <button
                     type="button"
                     onClick={handleCopyCsv}
@@ -5292,10 +5290,10 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                     onClick={handleDownloadCsv}
                     disabled={extractedMcqs.length === 0}
                     className="btn btn-primary btn-sm"
-                    title={`Download ${(outputFileName || setName || 'mocktest')}.csv`}
+                    title={`Download ${(outputFileName || setName || 'mocktest')}.csv: the 34-field CSV for the main app`}
                   >
                     <Download />
-                    <span>Export CSV</span>
+                    <span>Main app CSV (34)</span>
                   </button>
                   <button
                     type="button"
@@ -5305,7 +5303,7 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                     title="Master Question Bank CSV with all 68 fields (exam, year, chapter, quality flags ...)"
                   >
                     <Download />
-                    <span>Master CSV (68)</span>
+                    <span>Master QB CSV (68)</span>
                   </button>
                 </div>
               </div>

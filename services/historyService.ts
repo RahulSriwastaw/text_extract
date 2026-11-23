@@ -318,6 +318,7 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
     questionCount: item.questionCount || cleanQuestions.length,
     questions: cleanQuestions,
     pages: item.pages || [],
+    masterContext: item.masterContext,
   };
 
   // 1. Save full set (including PDF pages, images & content) to browser IndexedDB
@@ -336,6 +337,9 @@ export async function addMocktestHistoryItem(userId: string, item: MocktestHisto
       status: p.status || 'ready',
       mcqCount: p.mcqCount || 0,
       fileName: p.fileName || '',
+      // The uploaded file and the page inside it, for the Master CSV exported later from history.
+      sourceFile: p.sourceFile || '',
+      filePage: p.filePage || undefined,
       sourceType: p.sourceType || 'image',
       rawTextContent: typeof p.rawTextContent === 'string' ? p.rawTextContent.slice(0, 1500) : '',
       imageUrl: (typeof p.imageUrl === 'string' && p.imageUrl.length < 40000) ? p.imageUrl : '',

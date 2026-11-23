@@ -1,3 +1,5 @@
+import type { MasterContext } from './services/masterQuestionBank';
+
 export enum NumberingStyle {
   Q_DOT = 'Q_DOT',           // Q1.
   HASH = 'HASH',             // #1.
@@ -84,6 +86,8 @@ export interface MocktestHistoryItem {
   questionCount: number;
   questions: MockTestMcqItem[];
   pages?: any[];
+  /** Exam, year and source the teacher entered for this set, so its Master CSV can be exported later. */
+  masterContext?: MasterContext;
 }
 
 export type QuestionType = 'MCQ' | 'MSQ' | 'NAT';

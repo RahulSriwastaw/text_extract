@@ -53,6 +53,26 @@ export interface MasterContext {
 /** Where a question came from as the app knows it: the uploaded file and the page number inside that file. */
 export interface MasterSource { pdf?: string; page?: string }
 
+/** A page of the upload queue, as far as the Master CSV needs to know it. */
+export interface MasterSourcePage { id?: string; pageNumber?: number; sourceFile?: string; filePage?: number }
+
+/**
+ * Finds the uploaded file and the page inside it for a question. A question that spans pages reports every queue page
+ * it covers ("3, 4"): those are translated to page numbers inside the file.
+ */
+export function masterSourceResolver(pages: MasterSourcePage[] = []) {
+  return (item: MockTestMcqItem): MasterSource => {
+    const page = pages.find(p => p.id && p.id === item.pageId) || pages.find(p => p.pageNumber === item.pageNumber);
+    const queuePages = String(item.source_pages ?? '').match(/\d+/g)?.map(Number) ?? [];
+    const covered = queuePages.map(n => pages.find(p => p.pageNumber === n)).filter(p => p?.filePage);
+    return {
+      pdf: page?.sourceFile || covered[0]?.sourceFile,
+      page: covered.length && covered.length === queuePages.length
+        ? covered.map(p => p!.filePage).join(', ') : page?.filePage ? String(page.filePage) : undefined,
+    };
+  };
+}
+
 /** Fields the extractor must send for every row (the guide's "Minimum the extractor must send"). */
 export const MASTER_MINIMUM_FIELDS: MasterField[] = [
   'exam_category', 'exam', 'year', 'source_status', 'paper_or_set', 'question_r', 'question_hi', 'question_en',

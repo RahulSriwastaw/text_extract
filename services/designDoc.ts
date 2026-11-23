@@ -525,6 +525,46 @@ export function elementsToDesignDoc(elements: ExtractedElement[], title: string)
   return finish(doc, blocks);
 }
 
+/** One piece of an imported file, with the look it had there (services/docxImport.ts). */
+export interface ImportedItem {
+  kind: 'text' | 'heading' | 'list' | 'table' | 'image';
+  text?: string;
+  level?: 1 | 2 | 3;
+  style?: BlockStyle;
+  /** Image data URL. */
+  image?: string;
+}
+
+/**
+ * Imported pieces → a document. Text is still read line by line for questions, options and
+ * answers; every block it becomes keeps the piece's own style. `theme` carries the file's
+ * body font, size and colours.
+ */
+export function importedToDesignDoc(items: ImportedItem[], title: string, theme: Partial<Theme> = {}): DesignDoc {
+  const doc = emptyDoc(title);
+  const blocks: DesignBlock[] = [];
+  for (const item of items) {
+    const style = sanitizeStyle(item.style);
+    const styled = <T extends DesignBlock>(block: T): T => Object.keys(style).length ? { ...block, style: { ...style } } : block;
+    if (item.kind === 'image') {
+      if (!item.image || !/^data:image\/(png|jpe?g);base64,/.test(item.image)) continue;
+      const assetId = newId(doc, 'a');
+      doc.assets[assetId] = item.image;
+      blocks.push(styled({ id: newId(doc, 'b'), type: 'image', assetId }));
+    } else if (!item.text?.trim()) continue;
+    else if (item.kind === 'heading') blocks.push(styled({ id: newId(doc, 'b'), type: 'heading', text: item.text.trim(), level: item.level || 2 }));
+    else if (item.kind === 'list') blocks.push(styled({ id: newId(doc, 'b'), type: 'list', text: item.text }));
+    else if (item.kind === 'table') {
+      const options = optionsFromTable(item.text);
+      if (options) for (const option of options) blocks.push({ id: newId(doc, 'b'), type: 'option', text: option });
+      else blocks.push({ id: newId(doc, 'b'), type: 'table', text: item.text });
+    } else blocks.push(...textToBlocks(doc, item.text).map(styled));
+  }
+  const out = finish(doc, blocks);
+  out.theme = { ...out.theme, ...sanitizeThemePatch(theme), name: 'Custom' };
+  return out;
+}
+
 /**
  * HTML from an uploaded Word file (mammoth) → document. Only content survives:
  * the original colours/layout and Word equations are not in mammoth's output.

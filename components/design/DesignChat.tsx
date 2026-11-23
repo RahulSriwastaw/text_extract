@@ -41,6 +41,9 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
   const [showTemplates, setShowTemplates] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const stop = useRef(false);
+  const aborter = useRef<AbortController | null>(null);
+  /** Stop right now: the request that is running is cancelled, changes already made stay (and can be undone). */
+  const stopNow = () => { stop.current = true; aborter.current?.abort(); };
 
   // Follow the conversation; an empty chat shows the list of jobs from its top.
   useEffect(() => { if (messages.length) listRef.current?.scrollTo({ top: listRef.current.scrollHeight }); }, [messages, sending]);
@@ -50,6 +53,7 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, ...directModelFields(model) }),
+      signal: aborter.current?.signal,
     });
     const data: DesignChatResponse & { error?: string } = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
@@ -62,14 +66,18 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
     if (!request || sending) return;
     const before = getDoc();
     if (!before) return;
+    const scopePageId = !mode && scope === 'page' ? selectedPageId : undefined;
+    const how: TemplateMode | 'page' = scopePageId ? 'page' : mode || (scope === 'text' ? 'fullText' : 'design');
+    // Reading every word of a long document means one AI request per part: say so before any token is spent.
+    const parts = how === 'fullText' ? fullTextChunks(before).length : 1;
+    if (parts > 12 && !window.confirm(`This document is long: the AI will read it in ${parts} parts, and every part uses plan tokens.\n\nYou can press Stop at any time; the changes made until then are kept.\n\nStart?`)) return;
     setError(''); setDraft(''); setShowTemplates(false);
     stop.current = false;
+    aborter.current = new AbortController();
     const history = messages.map(({ role, text }) => ({ role, text })).slice(-12);
     const shown = request.length > 220 ? request.slice(0, 220) + '…' : request;
     setMessages(m => [...m, { id: 'u' + Date.now(), role: 'user', text: shown }]);
 
-    const scopePageId = !mode && scope === 'page' ? selectedPageId : undefined;
-    const how: TemplateMode | 'page' = scopePageId ? 'page' : mode || (scope === 'text' ? 'fullText' : 'design');
     let applied = 0, skipped = 0, unchanged = 0, reply = '', done = 0, failure = '', cutShort = 0;
     const common = () => { const current = getDoc()!; return { theme: current.theme, layout: current.layout, history, request }; };
 
@@ -114,13 +122,17 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
           const result = applyOps([{ op: 'paginate', breaks }]);
           applied += result.applied; skipped += result.skipped;
         }
-        if (stop.current) reply = `Stopped after part ${done}. ` + reply;
       }
     } catch (e: any) {
-      failure = e?.message || 'Design chat failed.';
+      if (!stop.current) failure = e?.message || 'Design chat failed.';   // a cancelled request is a stop, not an error
     }
+    aborter.current = null;
+    const stopped = stop.current;
+    if (stopped) reply = done ? `Stopped after part ${done} of ${parts}. The changes made so far are kept. ` + reply : '';
 
-    if (!done && failure) {
+    if (stopped && !applied) {
+      setMessages(m => [...m, { id: 'a' + Date.now(), role: 'assistant', text: 'Stopped. Nothing was changed.' }]);
+    } else if (!done && failure) {
       setError(failure);
       setMessages(m => m.slice(0, -1));   // take back the question so it can be re-sent
       setDraft(request);
@@ -185,9 +197,8 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
         {sending && (
           <p className="flex items-center gap-2 text-xs text-ink-3">
             <Loader2 size={13} className="animate-spin" /> {sending}
-            {sending.startsWith('Reading part') && (
-              <button type="button" onClick={() => { stop.current = true; }} className="inline-flex items-center gap-1 text-[11px] font-bold text-ink-2 hover:text-ink"><Square size={10} /> Stop after this part</button>
-            )}
+            <button type="button" onClick={stopNow} title="Stop the AI now. Changes already made are kept and can be undone."
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold text-rose-200 bg-rose-500/15 border border-rose-500/30 hover:bg-rose-500/25"><Square size={10} /> Stop</button>
           </p>
         )}
       </div>
@@ -215,9 +226,15 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
             placeholder="e.g. Sabhi H2 ko hara karo, definitions ko green highlight karo"
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(draft); } }}
             className="textarea flex-1 text-xs resize-none" />
-          <button type="submit" disabled={!!sending || !draft.trim()} className="btn btn-primary btn-icon" aria-label="Send" title="Send">
-            {sending ? <Loader2 className="animate-spin" /> : <Send />}
-          </button>
+          {sending ? (
+            <button type="button" onClick={stopNow} className="btn btn-icon text-rose-100 bg-rose-600 hover:bg-rose-500" aria-label="Stop the AI" title="Stop the AI now">
+              <Square />
+            </button>
+          ) : (
+            <button type="submit" disabled={!draft.trim()} className="btn btn-primary btn-icon" aria-label="Send" title="Send">
+              <Send />
+            </button>
+          )}
         </form>
         <p className="flex items-center gap-1 text-[10px] text-ink-3"><Sparkles size={11} /> Each AI message uses plan tokens. The Theme, Elements and Insert tabs are free.</p>
       </div>

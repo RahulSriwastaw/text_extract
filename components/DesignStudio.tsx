@@ -10,6 +10,7 @@ import {
   applyDesignOps, autoPaginate, elementsToDesignDoc, htmlToDesignDoc, insertImageBlock, allBlocks, planOverflowFix, plainText,
 } from '../services/designDoc';
 import { generateDesignDocx } from '../services/designDocx';
+import { docxToDesignDoc } from '../services/docxImport';
 import { saveDesignDoc, getDesignDocs, deleteDesignDoc } from '../services/aiDbService';
 import DesignCanvas, { measurePage } from './design/DesignCanvas';
 import DesignChat, { type ChatMessage } from './design/DesignChat';
@@ -223,11 +224,24 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
   const upload = async (file: File) => {
     setBusy('Reading Word file…'); setNotice('');
     try {
-      const { value } = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-      const next = htmlToDesignDoc(value, file.name.replace(/\.docx$/i, ''));
+      const data = await file.arrayBuffer();
+      const name = file.name.replace(/\.docx$/i, '');
+      let next: DesignDoc, notice: string;
+      try {
+        // Reads Word's own XML: colours, bold / italic, alignment, shading, sizes, fonts and equations come along.
+        const result = await docxToDesignDoc(data, name);
+        next = result.doc;
+        notice = `Word file loaded with its own look: text colours, bold and italic, alignment, shading, sizes and fonts${result.equations ? `, and ${result.equations} equation${result.equations === 1 ? '' : 's'}` : ''}. `
+          + 'Not imported: table cell colours, columns and page layout, and different colours inside one paragraph (its main colour is used).';
+      } catch (styledError) {
+        console.warn('Styled Word import failed, reading the content only:', styledError);
+        const { value } = await mammoth.convertToHtml({ arrayBuffer: data });
+        next = htmlToDesignDoc(value, name);
+        notice = 'Word file loaded. Only the content could be read from this file: its colours, layout and equations are not imported.';
+      }
       if (!allBlocks(next).length) throw new Error('No text was found in this file.');
       open(next);
-      setNotice('Word file loaded. Only the content is imported: the original colours, layout and Word equations are not.');
+      setNotice(notice);
     } catch (e: any) {
       setNotice(e?.message || 'Could not read this Word file.');
     } finally { setBusy(''); }

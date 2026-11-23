@@ -53,8 +53,13 @@ export interface BlockStyle {
   font?: FontId;
   /** Images only. */
   width?: 'sm' | 'md' | 'lg' | 'full';
+  /** "Every option" group style only: options per row. Unset = the theme's `optionColumns`. */
+  columns?: 1 | 2 | 4;
 }
-export const STYLE_PROPS = ['color', 'background', 'align', 'size', 'bold', 'italic', 'underline', 'border', 'borderColor', 'font', 'width'] as const;
+export const STYLE_PROPS = ['color', 'background', 'align', 'size', 'bold', 'italic', 'underline', 'border', 'borderColor', 'font', 'width', 'columns'] as const;
+
+/** How many options sit side by side: the "every option" choice, else the theme's. */
+export const optionColumnsOf = (theme: Pick<Theme, 'optionColumns' | 'styles'>): 1 | 2 | 4 => theme.styles?.option?.columns || theme.optionColumns;
 
 /**
  * Teaching boxes: a callout with a role. Each has a label (Hindi / English), an icon and a colour,
@@ -365,6 +370,47 @@ function labelLanguage(blocks: DesignBlock[]): 'hi' | 'en' {
   return hindi > latin ? 'hi' : 'en';
 }
 
+const OPTION_SEQUENCES = [
+  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], ['1', '2', '3', '4', '5', '6', '7', '8'],
+  ['i', 'ii', 'iii', 'iv', 'v', 'vi'], ['I', 'II', 'III', 'IV', 'V', 'VI'],
+  ['क', 'ख', 'ग', 'घ', 'ङ'], ['अ', 'ब', 'स', 'द', 'इ'],
+];
+
+/**
+ * "(A) हिगेल (B) कार्ल मार्क्स" → ["(A) हिगेल", "(B) कार्ल मार्क्स"]: one line that holds several
+ * options, as papers print them two or four to a row. Splits only at the NEXT label of the same
+ * series in the same bracket style ((A)→(B), a)→b), 1.→2., (क)→(ख)), never inside $math$.
+ * Returns null when the text holds a single option.
+ */
+export function splitOptionText(text: string): string[] | null {
+  const first = text.match(/^\s*(?:\*\*)?\s*([(\[]?)([A-Za-z]{1,3}|\d|[क-ह])([)\].])/);
+  if (!first) return null;
+  const [lead, open, label, close] = first;
+  const series = OPTION_SEQUENCES.find(s => s.includes(label));
+  if (!series) return null;
+  const math = [...text.matchAll(/\$\$[\s\S]*?\$\$|\$[^$\n]*\$/g)].map(m => [m.index!, m.index! + m[0].length]);
+  const cuts: number[] = [];
+  let from = lead.length;
+  for (let i = series.indexOf(label) + 1; i < series.length; i++) {
+    const marker = new RegExp(`(?<=\\s)(?:\\*\\*)?${escapeRegExp(open + series[i] + close)}${close === '.' ? '(?=\\s)' : ''}`, 'g');
+    marker.lastIndex = from;
+    let hit = marker.exec(text);
+    while (hit && math.some(([a, b]) => hit!.index > a && hit!.index < b)) hit = marker.exec(text);
+    if (!hit) break;
+    cuts.push(hit.index);
+    from = hit.index + hit[0].length;
+  }
+  if (!cuts.length) return null;
+  const parts = [0, ...cuts].map((start, i) => text.slice(start, cuts[i] ?? text.length).trim());
+  // A bold / highlight / math run that crosses two options would be torn in half: leave such a line alone.
+  const even = (part: string, token: string) => part.split(token).length % 2 === 1;
+  return parts.every(p => p && even(p, '**') && even(p, '==') && even(p, '$')) ? parts : null;
+}
+
+/** How many option blocks still hold several options in one line. */
+export const combinedOptionCount = (doc: DesignDoc): number =>
+  allBlocks(doc).filter(b => b.type === 'option' && splitOptionText(b.text || '')).length;
+
 /** Split Markdown text into typed blocks (question, option, heading, table…). */
 export function textToBlocks(doc: { nextId: number }, text: string): DesignBlock[] {
   const blocks: DesignBlock[] = [];
@@ -395,7 +441,7 @@ export function textToBlocks(doc: { nextId: number }, text: string): DesignBlock
     } else if (c.isMainQuestion) {
       push('question', line);
     } else if (c.isOption) {
-      push('option', line);
+      for (const part of splitOptionText(line) || [line]) push('option', part);   // one block per option, so any layout works
     } else if (c.isInstruction || c.isBlockquote) {
       push('callout', line.replace(/^>\s*/, ''));
     } else if (/^([-*•]|\d+\))\s+/.test(line) && !c.isMainQuestion) {
@@ -807,7 +853,11 @@ export type DesignOp =
   /** Change the default pen; `all` also makes every existing highlight use it. */
   | { op: 'setHighlighter'; color: HighlighterId; all?: boolean }
   | { op: 'findReplace'; find: string; replace: string; matchCase?: boolean }
-  | { op: 'splitBlock'; id: string };
+  | { op: 'splitBlock'; id: string }
+  /** Option blocks that hold several options ("(A) … (B) …") become one block per option. */
+  | { op: 'splitOptions'; ids?: string[]; pageId?: string }
+  /** Options per row for the whole document: splits combined option blocks, then sets the layout (and drops any "every option" override). */
+  | { op: 'setOptionsLayout'; columns: 1 | 2 | 4 };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const color = (v: unknown): string | undefined => {
@@ -834,6 +884,7 @@ export function sanitizeStyle(input: unknown): BlockStyle {
   set('border', oneOf(s.border, ['none', 'box', 'left-bar', 'underline'] as const));
   set('font', oneOf(s.font, FONT_IDS));
   set('width', oneOf(s.width, ['sm', 'md', 'lg', 'full'] as const));
+  if (s.columns != null) set('columns', oneOf(Number(s.columns), [1, 2, 4] as const));
   for (const key of ['bold', 'italic', 'underline'] as const) if (typeof s[key] === 'boolean') out[key] = s[key] as boolean;
   return out;
 }
@@ -948,13 +999,15 @@ export function autoPaginate(doc: DesignDoc, maxBlocks = 6): DesignDoc {
  * Apply AI (or UI) operations. Invalid ops are skipped, never thrown: an unknown
  * id, colour or enum simply does nothing. Returns a new doc; `doc` is not mutated.
  */
-export function applyDesignOps(doc: DesignDoc, ops: unknown): { doc: DesignDoc; applied: number; skipped: number } {
+export function applyDesignOps(doc: DesignDoc, ops: unknown): { doc: DesignDoc; applied: number; skipped: number; unchanged: number } {
   const next: DesignDoc = {
     ...doc,
     theme: { ...doc.theme, styles: { ...doc.theme.styles } },
     pages: doc.pages.map(p => ({ ...p, blocks: p.blocks.map(b => ({ ...b, style: b.style && { ...b.style } })) })),
   };
-  let applied = 0, skipped = 0;
+  let applied = 0, skipped = 0, unchanged = 0;
+  const signature = () => JSON.stringify([next.layout, next.theme, next.pages]);
+  let before = signature();
 
   /** Merge a style into one element group; optionally clear the same properties on its blocks. */
   const setGroupStyle = (target: StyleKey, style: BlockStyle, unset: (keyof BlockStyle)[], override: boolean) => {
@@ -1235,11 +1288,42 @@ export function applyDesignOps(doc: DesignDoc, ops: unknown): { doc: DesignDoc; 
         ok = true;
         break;
       }
+      case 'splitOptions':
+      case 'setOptionsLayout': {
+        if (o.op === 'setOptionsLayout') {
+          const columns = oneOf(Number(o.columns), [1, 2, 4] as const);
+          if (!columns) break;
+          const styles = { ...next.theme.styles };
+          if (styles.option) {
+            const { columns: _dropped, ...rest } = styles.option;
+            if (Object.keys(rest).length) styles.option = rest; else delete styles.option;
+          }
+          next.theme = { ...next.theme, optionColumns: columns, styles };
+          ok = true;
+        }
+        const ids = o.op === 'splitOptions' && Array.isArray(o.ids) ? new Set(o.ids.map(String)) : null;
+        for (const page of next.pages) {
+          if (o.op === 'splitOptions' && o.pageId && page.id !== o.pageId) continue;
+          for (let i = 0; i < page.blocks.length; i++) {
+            const block = page.blocks[i];
+            if (block.type !== 'option' || (ids && !ids.has(block.id))) continue;
+            const parts = splitOptionText(block.text || '');
+            if (!parts) continue;
+            page.blocks.splice(i, 1, ...parts.map((part, k) => ({ ...block, id: k ? newId(next, 'b') : block.id, text: part, style: block.style && { ...block.style } })));
+            i += parts.length - 1;
+            ok = true;
+          }
+        }
+        break;
+      }
     }
-    ok ? applied++ : skipped++;
+    // An operation that leaves the document exactly as it was is not a change: it must not be reported as one.
+    const after = ok ? signature() : before;
+    if (!ok) skipped++; else if (after === before) unchanged++; else applied++;
+    before = after;
   }
 
   next.pages = next.pages.filter((p, i, all) => p.blocks.length > 0 || all.length === 1);   // drop pages emptied by moves
   if (applied) next.updatedAt = Date.now();
-  return { doc: applied ? next : doc, applied, skipped };
+  return { doc: applied ? next : doc, applied, skipped, unchanged };
 }

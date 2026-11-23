@@ -8,14 +8,14 @@ import { normalizePreviewMath } from '../ProcessingList';
 import {
   type DesignDoc, type DesignBlock, type DesignPage, type DesignOp, type StyleKey, type StyleContext, type HighlighterId, type PageLayout,
   PAGE_SIZE, FONTS, HIGHLIGHTERS, HIGHLIGHTER_IDS, IMAGE_WIDTH, SPACING, PAGE_LAYOUTS,
-  displayText, questionNumbers, wordCount, emphasisToLinks, resolveStyle, pageFill, calloutInfo, styleKey, mix, legible,
+  displayText, questionNumbers, wordCount, emphasisToLinks, resolveStyle, pageFill, calloutInfo, styleKey, mix, legible, optionColumnsOf,
 } from '../../services/designDoc';
 
 const PT = 96 / 72;   // pt → CSS px
 const LINE_HEIGHT = { compact: 1.3, normal: 1.45, relaxed: 1.65 };
 const LAYOUT_LABEL: Record<PageLayout, string> = { content: 'Content', title: 'Cover / title', section: 'Section divider', 'two-column': 'Two columns' };
 
-export type OpResult = { applied: number; skipped: number };
+export type OpResult = { applied: number; skipped: number; unchanged?: number };
 
 /** Everything that makes a page editable. Without it (present mode, print) the page is read-only. */
 export interface CanvasActions {
@@ -81,7 +81,7 @@ function BlockView({ block, doc, page, number, actions, previousId, nextId, isTi
     borderRight: st.border === 'box' ? thin : none,
     borderLeft: st.border === 'box' ? thin : st.border === 'left-bar' ? `4px solid ${st.borderColor}` : none,
     borderBottom: st.border === 'box' ? thin : st.border === 'underline' ? `2px solid ${st.borderColor}` : none,
-    marginLeft: block.type === 'option' && theme.optionColumns === 1 ? 24 : undefined,
+    marginLeft: block.type === 'option' && optionColumnsOf(theme) === 1 ? 24 : undefined,
   };
 
   let body: React.ReactNode;
@@ -205,12 +205,13 @@ export function SlideFace({ doc, page, index, scale, actions, hideAnswers, selec
   );
   // Group consecutive options into a grid when the theme asks for columns.
   const rendered: React.ReactNode[] = [];
+  const optionColumns = optionColumnsOf(theme);
   for (let i = 0; i < blocks.length; i++) {
-    if (blocks[i].type === 'option' && theme.optionColumns > 1) {
+    if (blocks[i].type === 'option' && optionColumns > 1) {
       const start = i;
       while (i + 1 < blocks.length && blocks[i + 1].type === 'option') i++;
       rendered.push(
-        <div key={'grid' + blocks[start].id} style={{ display: 'grid', gridTemplateColumns: `repeat(${theme.optionColumns}, minmax(0, 1fr))`, columnGap: 16, breakInside: 'avoid' }}>
+        <div key={'grid' + blocks[start].id} style={{ display: 'grid', gridTemplateColumns: `repeat(${optionColumns}, minmax(0, 1fr))`, columnGap: 16, breakInside: 'avoid' }}>
           {blocks.slice(start, i + 1).map((b, k) => view(b, start + k))}
         </div>
       );

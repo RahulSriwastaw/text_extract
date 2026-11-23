@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   elementsToDesignDoc, applyDesignOps, outlineForAi, autoPaginate, allBlocks, sanitizeStyle, tint, PRESET_THEMES,
   emphasizeText, stripHighlight, splitBlockText, planOverflowFix, fullTextChunks, emphasisToLinks, balanceStars, plainText,
-  resolveStyle, styleKey, elementCounts, contrast, readableOn, highlightSegments, markSelection, unemphasizeText, calloutInfo, HIGHLIGHTERS,
+  resolveStyle, styleKey, elementCounts, contrast, readableOn, highlightSegments, markSelection, unemphasizeText, calloutInfo, HIGHLIGHTERS, optionColumnsOf, splitOptionText, combinedOptionCount,
 } from '../services/designDoc.ts';
 import type { ExtractedElement } from '../types.ts';
 
@@ -278,6 +278,60 @@ describe('element styles (all H2, all questions…)', () => {
     doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'h1', unset: ['color'] }]).doc;
     assert.deepEqual(doc.theme.styles?.h1, { align: 'center' });
     assert.equal(applyDesignOps(doc, [{ op: 'setElementStyle', target: 'h9', style: { color: '#111111' } }]).applied, 0);
+  });
+
+  it('options layout: "every option" overrides the theme, and unset / reset fall back to it', () => {
+    let doc = applyDesignOps(withHeadings(), [{ op: 'setTheme', patch: { optionColumns: 2 } }]).doc;
+    assert.equal(optionColumnsOf(doc.theme), 2);                                   // nothing set: the theme decides, as before
+    doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'option', style: { columns: 4, bold: true } }]).doc;
+    assert.equal(optionColumnsOf(doc.theme), 4);
+    assert.equal(doc.theme.optionColumns, 2);
+    doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'option', unset: ['columns'] }]).doc;
+    assert.equal(optionColumnsOf(doc.theme), 2);
+    assert.deepEqual(doc.theme.styles?.option, { bold: true });
+    doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'option', style: { columns: 1 } }, { op: 'setElementStyle', target: 'option', reset: true }]).doc;
+    assert.equal(optionColumnsOf(doc.theme), 2);
+    assert.deepEqual(sanitizeStyle({ columns: 3 }), {});
+    assert.deepEqual(sanitizeStyle({ columns: '2' }), { columns: 2 });
+  });
+
+  it('splits a line that holds several options, in Hindi and English, and leaves single options alone', () => {
+    assert.deepEqual(splitOptionText('(A) हिगेल (B) कार्ल मार्क्स'), ['(A) हिगेल', '(B) कार्ल मार्क्स']);
+    assert.deepEqual(splitOptionText('(a) Paris  (b) Rome (c) Berlin (d) None of these'), ['(a) Paris', '(b) Rome', '(c) Berlin', '(d) None of these']);
+    assert.deepEqual(splitOptionText('(क) गंगा (ख) यमुना'), ['(क) गंगा', '(ख) यमुना']);
+    assert.deepEqual(splitOptionText('1. 2.5 kg 2. 3 kg'), ['1. 2.5 kg', '2. 3 kg']);
+    assert.deepEqual(splitOptionText('A) x B) y'), ['A) x', 'B) y']);
+    assert.deepEqual(splitOptionText('(C) $f(x) = (D) + 1$ only (D) both'), ['(C) $f(x) = (D) + 1$ only', '(D) both']);
+    assert.equal(splitOptionText('(A) only one option (see part (C) above)'), null);       // (C) is not the next label
+    assert.equal(splitOptionText('(A) **bold (B) run** across'), null);                    // would tear the bold in half
+    assert.equal(splitOptionText('A plain sentence.'), null);
+  });
+
+  it('setOptionsLayout separates combined options and sets the layout; a repeat is not counted as a change', () => {
+    let doc = elementsToDesignDoc([{ type: 'text', content: 'Q1. किसने कहा?\n(A) हिगेल (B) कार्ल मार्क्स\n(C) मार्टिन लूथर (D) इनमें से सभी' } as ExtractedElement], 't');
+    assert.deepEqual(allBlocks(doc).filter(b => b.type === 'option').map(b => b.text), ['(A) हिगेल', '(B) कार्ल मार्क्स', '(C) मार्टिन लूथर', '(D) इनमें से सभी']);   // new imports
+
+    // A document saved before this: two options per block, with its own style.
+    const page = doc.pages[0];
+    doc = { ...doc, pages: [{ ...page, blocks: [page.blocks[0],
+      { id: 'x1', type: 'option', text: '(A) हिगेल (B) कार्ल मार्क्स', style: { bold: true } },
+      { id: 'x2', type: 'option', text: '(C) मार्टिन लूथर (D) इनमें से सभी' }] }] };
+    assert.equal(combinedOptionCount(doc), 2);
+    doc = applyDesignOps(doc, [{ op: 'setElementStyle', target: 'option', style: { columns: 4 } }]).doc;
+    const result = applyDesignOps(doc, [{ op: 'setOptionsLayout', columns: 2 }]);
+    doc = result.doc;
+    assert.equal(result.applied, 1);
+    const options = allBlocks(doc).filter(b => b.type === 'option');
+    assert.deepEqual(options.map(b => b.text), ['(A) हिगेल', '(B) कार्ल मार्क्स', '(C) मार्टिन लूथर', '(D) इनमें से सभी']);
+    assert.deepEqual(options.map(b => b.style), [{ bold: true }, { bold: true }, undefined, undefined]);
+    assert.equal(new Set(allBlocks(doc).map(b => b.id)).size, allBlocks(doc).length);
+    assert.equal(optionColumnsOf(doc.theme), 2);                                   // the "every option" override no longer hides it
+    assert.equal(combinedOptionCount(doc), 0);
+
+    const again = applyDesignOps(doc, [{ op: 'setOptionsLayout', columns: 2 }, { op: 'setTheme', patch: { spacing: doc.theme.spacing || 'normal' } }]);
+    assert.deepEqual([again.applied, again.unchanged, again.skipped], [0, 2, 0]);
+    assert.equal(again.doc, doc);
+    assert.equal(applyDesignOps(doc, [{ op: 'setOptionsLayout', columns: 3 }]).skipped, 1);
   });
 
   it('counts elements by kind and relabels a block', () => {

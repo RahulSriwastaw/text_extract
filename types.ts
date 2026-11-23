@@ -132,6 +132,19 @@ export interface MockTestMcqItem {
   passage_en?: string;
   pageNumber?: number;
   pageId?: string;
+  // Master Question Bank fields (see services/masterQuestionBank.ts). The extractor fills these;
+  // fields that only the master merge step can know are left out here and exported empty.
+  chapter_name?: string;
+  sub_topic?: string;
+  exam_category?: string;
+  exam?: string;
+  year?: string;
+  source_status?: string;
+  exam_tags?: string;
+  question_id?: string;
+  source_id?: string;
+  source_row?: string | number;
+  source_file?: string;
 }
 
 export interface McqFigure extends ExtractedElement {

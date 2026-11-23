@@ -85,8 +85,13 @@ import {
   reverifyMockTestItemWithImages,
   buildMockTestSimilarBridgePrompt,
   generateSimilarQuestionItem,
-  generateSimilarBatchFromItems
+  generateSimilarBatchFromItems,
+  buildMasterBankRows,
+  serializeMasterBankCsv,
+  downloadMasterBankCsv
 } from '../services/mocktestService';
+import type { MasterContext, MasterSource } from '../services/masterQuestionBank';
+import { MasterFieldsPanel } from './MasterFieldsPanel';
 import { cleanMocktestText } from '../services/textCleanService';
 import { 
   extractWithStudyAiBridge,
@@ -121,6 +126,9 @@ interface PageQueueItem {
   rawTextContent?: string;
   sourceType?: 'pdf' | 'image' | 'docx' | 'text';
   fileName?: string;
+  /** Uploaded file this page came from, and the page number inside that file (for the Master CSV). */
+  sourceFile?: string;
+  filePage?: number;
   expectedMarker?: string;
   /** Chat this page was extracted in. Recapture needs it once a run rotates to a fresh chat. */
   chatUrl?: string;
@@ -243,6 +251,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
   const [isRepairingAll, setIsRepairingAll] = useState(false);
   const [repairProgress, setRepairProgress] = useState<{ current: number; total: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  // Master Question Bank (68-field) export: paper-level details the teacher enters once, and which CSV the CSV tab shows.
+  const [masterContext, setMasterContext] = useState<MasterContext>({});
+  const [csvView, setCsvView] = useState<'portal' | 'master'>('portal');
   const [user] = useCurrentUser();
   const [isSavedToHistory, setIsSavedToHistory] = useState(false);
   const currentSessionSetIdRef = useRef<string>('');
@@ -679,7 +690,7 @@ Rules:
             });
           });
 
-          images.forEach(img => {
+          images.forEach((img, imgIdx) => {
             newQueueItems.push({
               id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
               pageNumber: 0,
@@ -687,7 +698,9 @@ Rules:
               status: 'pending',
               mcqCount: 0,
               isSelected: true,
-              items: []
+              items: [],
+              sourceFile: file.name,
+              filePage: imgIdx + 1
             });
           });
         } else if (file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(file.name)) {
@@ -706,7 +719,9 @@ Rules:
             isSelected: true,
             items: [],
             sourceType: 'image',
-            fileName: file.name
+            fileName: file.name,
+            sourceFile: file.name,
+            filePage: 1
           });
         } else if (file.name.toLowerCase().endsWith('.docx') || file.name.toLowerCase().endsWith('.doc') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
           // Word Document processing using mammoth
@@ -743,7 +758,8 @@ Rules:
               items: [],
               rawTextContent: chunk,
               sourceType: 'docx',
-              fileName: chunks.length > 1 ? `${file.name} (Part ${chunkIdx + 1}/${chunks.length})` : file.name
+              fileName: chunks.length > 1 ? `${file.name} (Part ${chunkIdx + 1}/${chunks.length})` : file.name,
+              sourceFile: file.name
             });
           });
         } else if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.md')) {
@@ -772,7 +788,8 @@ Rules:
               items: [],
               rawTextContent: chunk,
               sourceType: 'text',
-              fileName: chunks.length > 1 ? `${file.name} (Part ${chunkIdx + 1}/${chunks.length})` : file.name
+              fileName: chunks.length > 1 ? `${file.name} (Part ${chunkIdx + 1}/${chunks.length})` : file.name,
+              sourceFile: file.name
             });
           });
         }
@@ -2148,10 +2165,36 @@ Rules:
     }
   };
 
+  // Uploaded file and the page inside it, for the Master CSV's source_pdf / source_pages.
+  const masterSourceFor = React.useCallback((item: MockTestMcqItem): MasterSource => {
+    const page = pages.find(p => p.id === item.pageId) || pages.find(p => p.pageNumber === item.pageNumber);
+    const queuePages = String(item.source_pages ?? '').match(/\d+/g)?.map(Number) ?? [];
+    const sourcePages = queuePages.map(n => pages.find(p => p.pageNumber === n)).filter(p => p?.filePage);
+    return {
+      pdf: page?.sourceFile || sourcePages[0]?.sourceFile,
+      // A merged question reports every queue page it spans: translate them to page numbers inside the file.
+      page: sourcePages.length && sourcePages.length === queuePages.length
+        ? sourcePages.map(p => p!.filePage).join(', ') : page?.filePage ? String(page.filePage) : undefined,
+    };
+  }, [pages]);
+  const buildMasterRows = () => buildMasterBankRows(extractedMcqs, masterContext, masterSourceFor);
+
+  const handleDownloadMasterCsv = () => {
+    if (extractedMcqs.length === 0) {
+      alert('No MCQs to download yet. Extract some pages first!');
+      return;
+    }
+    const chosenName = (outputFileName || setName || 'mocktest').trim();
+    const safeBase = chosenName.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'mocktest';
+    downloadMasterBankCsv(buildMasterRows(), `${safeBase.replace(/\.csv$/i, '')}_master_bank.csv`);
+  };
+
   // Copy CSV to clipboard
   const handleCopyCsv = () => {
     if (extractedMcqs.length === 0) return;
-    const csv = serializeMockTestToCsv(extractedMcqs, answerFormat, mathFormat);
+    const csv = csvView === 'master'
+      ? serializeMasterBankCsv(buildMasterRows())
+      : serializeMockTestToCsv(extractedMcqs, answerFormat, mathFormat);
     navigator.clipboard.writeText(csv);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -2799,6 +2842,16 @@ Rules:
                     role="menuitem"
                     className="menu-item"
                     disabled={extractedMcqs.length === 0}
+                    onClick={() => { setOpenMenu(null); handleDownloadMasterCsv(); }}
+                  >
+                    <Download />
+                    <span>Download Master CSV (68 fields)<span className="menu-item-desc">Exam, year, chapter, quality flags: Master Question Bank format</span></span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    disabled={extractedMcqs.length === 0}
                     onClick={handleCopyCsv}
                   >
                     {copied ? <Check className="!text-emerald-400" /> : <Copy />}
@@ -3075,6 +3128,8 @@ Rules:
           </div>
         )}
       </section>
+
+      <MasterFieldsPanel items={extractedMcqs} context={masterContext} onChange={setMasterContext} sourceFor={masterSourceFor} />
 
       {/* Input: upload files or paste text */}
       <section className="space-y-3">
@@ -5159,18 +5214,24 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
           {activeTab === 'csv' && (
             <div className="card overflow-hidden p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-3">
-                <span>RFC 4180 CSV with UTF-8 BOM (\uFEFF) • Ready for direct MockTest Portal Upload</span>
-                <button
-                  type="button"
-                  onClick={handleCopyCsv}
-                  className="btn btn-secondary btn-sm"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copied ? 'Copied!' : 'Copy to Clipboard'}</span>
-                </button>
+                <span>{csvView === 'master' && 'Master Question Bank CSV: 68 fields in the guide order, UTF-8 with BOM'}{csvView === 'portal' && <>RFC 4180 CSV with UTF-8 BOM (\uFEFF) • Ready for direct MockTest Portal Upload</>}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => setCsvView('portal')} aria-pressed={csvView === 'portal'}
+                    className={`btn btn-sm ${csvView === 'portal' ? 'btn-primary' : 'btn-secondary'}`}>Portal CSV (34)</button>
+                  <button type="button" onClick={() => setCsvView('master')} aria-pressed={csvView === 'master'}
+                    className={`btn btn-sm ${csvView === 'master' ? 'btn-primary' : 'btn-secondary'}`}>Master CSV (68)</button>
+                  <button
+                    type="button"
+                    onClick={handleCopyCsv}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copied ? 'Copied!' : 'Copy to Clipboard'}</span>
+                  </button>
+                </div>
               </div>
               <pre className="p-4 bg-canvas rounded-lg border border-line text-xs text-ink-2 font-mono overflow-x-auto max-h-[60vh] whitespace-pre-wrap">
-                {serializeMockTestToCsv(extractedMcqs, answerFormat)}
+                {csvView === 'master' ? serializeMasterBankCsv(buildMasterRows()) : serializeMockTestToCsv(extractedMcqs, answerFormat)}
               </pre>
             </div>
           )}
@@ -5235,6 +5296,16 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                   >
                     <Download />
                     <span>Export CSV</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadMasterCsv}
+                    disabled={extractedMcqs.length === 0}
+                    className="btn btn-secondary btn-sm"
+                    title="Master Question Bank CSV with all 68 fields (exam, year, chapter, quality flags ...)"
+                  >
+                    <Download />
+                    <span>Master CSV (68)</span>
                   </button>
                 </div>
               </div>

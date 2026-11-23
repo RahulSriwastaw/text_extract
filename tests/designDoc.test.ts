@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   elementsToDesignDoc, applyDesignOps, outlineForAi, autoPaginate, allBlocks, sanitizeStyle, tint, PRESET_THEMES,
   emphasizeText, stripHighlight, splitBlockText, planOverflowFix, fullTextChunks, emphasisToLinks, balanceStars, plainText,
-  resolveStyle, styleKey, elementCounts, contrast, readableOn, highlightSegments, markSelection, unemphasizeText, calloutInfo, HIGHLIGHTERS, optionColumnsOf, splitOptionText, combinedOptionCount,
+  resolveStyle, styleKey, elementCounts, contrast, readableOn, highlightSegments, markSelection, unemphasizeText, calloutInfo, HIGHLIGHTERS, optionColumnsOf, splitOptionText, combinedOptionCount, optionsFromTable,
 } from '../services/designDoc.ts';
 import type { ExtractedElement } from '../types.ts';
 
@@ -332,6 +332,25 @@ describe('element styles (all H2, all questions…)', () => {
     assert.deepEqual([again.applied, again.unchanged, again.skipped], [0, 2, 0]);
     assert.equal(again.doc, doc);
     assert.equal(applyDesignOps(doc, [{ op: 'setOptionsLayout', columns: 3 }]).skipped, 1);
+  });
+
+  it('a table that is really a grid of options becomes option blocks; real tables stay', () => {
+    const grid = '| (A) फ्रांस (B) जर्मनी | (C) तुर्की (D) यूनान |  |  |\n| --- | --- | --- | --- |';
+    assert.deepEqual(optionsFromTable(grid), ['(A) फ्रांस', '(B) जर्मनी', '(C) तुर्की', '(D) यूनान']);
+    assert.deepEqual(optionsFromTable('| **(A) France** | (B) Germany |\n| --- | --- |\n| (C) Turkey | (D) Greece |'), ['(A) France', '(B) Germany', '(C) Turkey', '(D) Greece']);
+    assert.equal(optionsFromTable('| Column I | Column II |\n| --- | --- |\n| (a) Delhi | (1) India |'), null);
+    assert.equal(optionsFromTable('| (a) Delhi | (1) India |\n| --- | --- |\n| (b) Paris | (2) France |'), null);   // match the columns
+    assert.equal(optionsFromTable('| (B) x | (C) y |'), null);                                                    // does not start at A
+
+    let doc = elementsToDesignDoc([{ type: 'text', content: 'Q1. Who?' } as ExtractedElement], 't');
+    const page = doc.pages[0];
+    doc = { ...doc, pages: [{ ...page, blocks: [...page.blocks, { id: 't1', type: 'table', text: grid }, { id: 't2', type: 'table', text: '| Name | Age |\n| --- | --- |\n| A | 1 |' }] }] };
+    assert.equal(combinedOptionCount(doc), 1);
+    const result = applyDesignOps(doc, [{ op: 'setOptionsLayout', columns: 2 }]);
+    assert.equal(result.applied, 1);
+    assert.deepEqual(allBlocks(result.doc).map(b => b.type), ['question', 'option', 'option', 'option', 'option', 'table']);
+    assert.equal(allBlocks(result.doc)[1].id, 't1');
+    assert.equal(combinedOptionCount(result.doc), 0);
   });
 
   it('counts elements by kind and relabels a block', () => {

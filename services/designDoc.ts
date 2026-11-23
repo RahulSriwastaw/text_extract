@@ -407,9 +407,28 @@ export function splitOptionText(text: string): string[] | null {
   return parts.every(p => p && even(p, '**') && even(p, '==') && even(p, '$')) ? parts : null;
 }
 
-/** How many option blocks still hold several options in one line. */
+/**
+ * A table that is really a question's options laid out in a grid, as Word files (and this app's
+ * own Word export) hold them: "| (A) फ्रांस (B) जर्मनी | (C) तुर्की (D) यूनान |  |  |".
+ * Returns one text per option, or null for a real table. Every filled cell must hold options, and
+ * the labels must run A, B, C… from the first of a series, so a "match the columns" table is left alone.
+ */
+export function optionsFromTable(text: string): string[] | null {
+  const cells = text.split('\n').filter(line => line.trim() && !/^\|\s*[-:]+/.test(line.trim()))
+    .flatMap(line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|'))
+    .map(cell => cell.trim().replace(/^\*\*([^*]+)\*\*$/, '$1').trim()).filter(Boolean);
+  if (!cells.length) return null;
+  const options = cells.flatMap(cell => splitOptionText(cell) || [cell]);
+  const labels = options.map(option => option.match(/^([(\[]?)([A-Za-z]{1,3}|\d|[क-ह])([)\].])/));
+  if (options.length < 2 || labels.some(l => !l)) return null;
+  const series = OPTION_SEQUENCES.find(s => s[0] === labels[0]![2]);
+  const same = labels.every((l, i) => l![1] === labels[0]![1] && l![3] === labels[0]![3] && series?.[i] === l![2]);
+  return same ? options : null;
+}
+
+/** How many blocks still hold several options together: one line with "(A) … (B) …", or a table of options. */
 export const combinedOptionCount = (doc: DesignDoc): number =>
-  allBlocks(doc).filter(b => b.type === 'option' && splitOptionText(b.text || '')).length;
+  allBlocks(doc).filter(b => (b.type === 'option' && splitOptionText(b.text || '')) || (b.type === 'table' && optionsFromTable(b.text || ''))).length;
 
 /** Split Markdown text into typed blocks (question, option, heading, table…). */
 export function textToBlocks(doc: { nextId: number }, text: string): DesignBlock[] {
@@ -526,7 +545,10 @@ export function htmlToDesignDoc(html: string, title: string): DesignDoc {
     } else if (tag === 'TABLE') {
       const rows = Array.from(node.querySelectorAll('tr')).map(tr =>
         '| ' + Array.from(tr.children).map(cell => inline(cell).replace(/\s+/g, ' ').replace(/\|/g, '/').trim()).join(' | ') + ' |');
-      if (rows.length) {
+      const options = rows.length ? optionsFromTable(rows.join('\n')) : null;
+      if (options) {
+        for (const option of options) blocks.push({ id: newId(doc, 'b'), type: 'option', text: option });   // a grid of options, not a table
+      } else if (rows.length) {
         const columns = rows[0].split('|').length - 2;
         blocks.push({ id: newId(doc, 'b'), type: 'table', text: [rows[0], '|' + ' --- |'.repeat(columns), ...rows.slice(1)].join('\n') });
       }
@@ -1306,10 +1328,12 @@ export function applyDesignOps(doc: DesignDoc, ops: unknown): { doc: DesignDoc; 
           if (o.op === 'splitOptions' && o.pageId && page.id !== o.pageId) continue;
           for (let i = 0; i < page.blocks.length; i++) {
             const block = page.blocks[i];
-            if (block.type !== 'option' || (ids && !ids.has(block.id))) continue;
-            const parts = splitOptionText(block.text || '');
+            if ((block.type !== 'option' && block.type !== 'table') || (ids && !ids.has(block.id))) continue;
+            // A table of options (from a Word file) becomes plain option blocks; its table look is dropped.
+            const parts = block.type === 'table' ? optionsFromTable(block.text || '') : splitOptionText(block.text || '');
             if (!parts) continue;
-            page.blocks.splice(i, 1, ...parts.map((part, k) => ({ ...block, id: k ? newId(next, 'b') : block.id, text: part, style: block.style && { ...block.style } })));
+            const style = block.type === 'option' && block.style;
+            page.blocks.splice(i, 1, ...parts.map((part, k): DesignBlock => ({ id: k ? newId(next, 'b') : block.id, type: 'option', text: part, ...(style && { style: { ...style } }) })));
             i += parts.length - 1;
             ok = true;
           }

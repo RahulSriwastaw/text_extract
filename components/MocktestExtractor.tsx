@@ -91,6 +91,7 @@ import {
   downloadMasterBankCsv
 } from '../services/mocktestService';
 import { masterSourceResolver, type MasterContext } from '../services/masterQuestionBank';
+import { pagesForScope, primaryRun, replacedByRun, summarizeRun, type RunScope } from '../services/extractionRunPlan';
 import { MasterFieldsPanel } from './MasterFieldsPanel';
 import { cleanMocktestText } from '../services/textCleanService';
 import { 
@@ -203,6 +204,9 @@ export const MocktestExtractor: React.FC<MocktestExtractorProps> = ({ uid, initi
   const solveWithRunModel = (item: MockTestMcqItem) => generateDeepSolutionForItem(item,
     aiEngine === 'api' ? claudeModel : undefined, aiEngine === 'api');
   const [pages, setPages] = useState<PageQueueItem[]>([]);
+  // The latest pages for code that runs later (timers, a long extraction loop), where `pages` would be out of date.
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
   const [isProcessingAll, setIsProcessingAll] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isProofreading, setIsProofreading] = useState(false);
@@ -1397,41 +1401,33 @@ Rules:
   };
 
   // Multi-Page Sequential Extraction Loop with Carry-Over Context
-  const handleStartExtraction = async (targetMode?: 'exact' | 'similar', forceAll: boolean = false) => {
+  // Runs the extraction over the pages `scope` picks (see services/extractionRunPlan.ts). The default is only the pages
+  // that are not done yet, so starting again never redoes finished pages unless the teacher explicitly asks for it.
+  const handleStartExtraction = async (targetMode?: 'exact' | 'similar', scope: RunScope = 'remaining') => {
     const mode = targetMode || extractionMode;
     if (targetMode) updateSetting('extractionMode', targetMode);
 
-    let selectedPages = pages.filter(p => p.isSelected);
+    // Read the latest pages: this is also called from a timer right after pages were added.
+    const allPages = pagesRef.current;
+    const selectedPages = pagesForScope(allPages, scope);
     if (selectedPages.length === 0) {
-      alert('No pages selected for extraction. Please select at least one page.');
+      setLiveStatusText(
+        allPages.length === 0 ? 'Add pages first.'
+          : scope === 'failed' ? 'No failed pages to retry.'
+          : summarizeRun(allPages).selected === 0 ? 'No page is selected. Tick the pages you want to extract.'
+          : 'Every selected page is already extracted. Use the arrow next to the Run button to re-run pages.'
+      );
       return;
     }
 
-    if (!forceAll) {
-      const pendingOrError = selectedPages.filter(p => p.status !== 'ready');
-      if (pendingOrError.length === 0) {
-        const confirmAll = confirm(
-          `All ${selectedPages.length} selected pages have already been processed.\n\n` +
-          `Would you like to ${mode === 'similar' ? 'GENERATE NEW SIMILAR MCQs for' : 'RE-EXTRACT'} all ${selectedPages.length} selected pages from scratch?`
-        );
-        if (!confirmAll) return;
-        setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
-      } else if (pendingOrError.length < selectedPages.length) {
-        const reExtractAll = confirm(
-          `${pendingOrError.length} page(s) need processing, and ${selectedPages.length - pendingOrError.length} are already ready.\n\n` +
-          `Click OK to process ALL ${selectedPages.length} selected pages,\nor Cancel to process ONLY the ${pendingOrError.length} pending/failed page(s).`
-        );
-        if (reExtractAll) {
-          setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
-        } else {
-          selectedPages = pendingOrError;
-        }
-      } else {
-        selectedPages = pendingOrError;
-      }
-    } else {
-      setPages(prev => prev.map(p => p.isSelected ? { ...p, status: 'pending', errorMessage: undefined } : p));
+    // Re-running finished pages replaces their questions, so say how much is replaced and ask first.
+    const replaced = replacedByRun(selectedPages);
+    if (replaced.pages > 0) {
+      const action = mode === 'similar' ? 'Generate new similar MCQs for' : 'Re-run';
+      if (!confirm(`${action} ${selectedPages.length} page(s)?\n\n${replaced.questions} MCQ(s) already extracted from ${replaced.pages} of them will be replaced.`)) return;
     }
+    const runIds = new Set(selectedPages.map(p => p.id));
+    setPages(prev => prev.map(p => runIds.has(p.id) ? { ...p, isSelected: true, status: 'pending', errorMessage: undefined } : p));
 
     let activeEngine = aiEngine;
     if (activeEngine === 'bridge') {
@@ -1452,18 +1448,19 @@ Rules:
     setIsPaused(false);
 
     try {
-      let carriedPendingContext: PendingMcqContext | null = null;
-      const firstIndex = pages.findIndex(p => p.id === selectedPages[0].id);
-      const previousPage = firstIndex > 0 ? pages[firstIndex - 1] : null;
-      if (previousPage?.items?.length && previousPage.pageNumber + 1 === selectedPages[0].pageNumber) {
-        const incomplete = previousPage.items.filter(item => {
+      // A page right after one that is already done (and not part of this run) can finish that page's last question.
+      const carryFromPreviousPage = (page: PageQueueItem): PendingMcqContext | null => {
+        const index = allPages.findIndex(p => p.id === page.id);
+        const previous = index > 0 ? allPages[index - 1] : null;
+        if (!previous || runIds.has(previous.id) || !previous.items?.length || previous.pageNumber + 1 !== page.pageNumber) return null;
+        const incomplete = previous.items.filter(item => {
           const issues = detectItemFieldIssues(item);
           return issues.hasMissingOptions || issues.hasEmptyQuestion;
         });
-        if (incomplete.length) carriedPendingContext = {
-          sourcePageNumber: previousPage.pageNumber, sourcePageId: previousPage.id, pendingItems: incomplete,
-        };
-      }
+        return incomplete.length ? { sourcePageNumber: previous.pageNumber, sourcePageId: previous.id, pendingItems: incomplete } : null;
+      };
+      let carriedPendingContext: PendingMcqContext | null = null;
+      let donePages = 0, failedPages = 0, consecutiveFailures = 0;
 
       // Bridge batch mode: up to `pagesPerRequest` consecutive image pages travel in one request.
       // Text pages, non-consecutive pages and "similar" mode always go one page at a time.
@@ -1471,12 +1468,13 @@ Rules:
       let requestIndex = 0;
       for (let i = 0; i < selectedPages.length;) {
         if (pauseRef.current) {
-          setLiveStatusText('Processing paused by user.');
+          setLiveStatusText('Paused. Finished pages are saved: press Continue to extract the pages that are left.');
           return;
         }
 
         const page = selectedPages[i];
         if (carriedPendingContext && carriedPendingContext.sourcePageNumber + 1 !== page.pageNumber) carriedPendingContext = null;
+        if (!carriedPendingContext) carriedPendingContext = carryFromPreviousPage(page);
         const batch: PageQueueItem[] = [page];
         while (perRequest > 1 && batch.length < perRequest && i + batch.length < selectedPages.length) {
           const next = selectedPages[i + batch.length];
@@ -1485,7 +1483,9 @@ Rules:
           if (next.pageNumber !== prevInBatch.pageNumber + 1) break;
           batch.push(next);
         }
-        const isLast = (i + batch.length >= selectedPages.length);
+        // Only a following page that is part of this run can finish this page's last question.
+        const following = selectedPages[i + batch.length];
+        const isLast = !(following && following.pageNumber === batch[batch.length - 1].pageNumber + 1);
 
         const carryInfo = carriedPendingContext && carriedPendingContext.pendingItems.length > 0
           ? ` (Carrying ${carriedPendingContext.pendingItems.length} pending MCQ from P.${carriedPendingContext.sourcePageNumber})`
@@ -1523,16 +1523,27 @@ Rules:
           }
           i += batch.length;
           requestIndex++;
+          donePages += batch.length;
+          consecutiveFailures = 0;
         } catch (pageErr: any) {
           const isAborted = pageErr?.name === 'AbortError' || pageErr?.message?.includes('stopped by user') || pageErr?.message?.includes('aborted');
           if (isAborted) {
             console.log(`Page ${page.pageNumber} extraction stopped.`);
-            setLiveStatusText("Extraction stopped. Completed pages are saved; resume remaining pages when ready.");
+            setLiveStatusText('Stopped. Finished pages are saved: press Continue to extract the pages that are left.');
             return;
-          } else {
-            console.error(`Error processing page ${page.pageNumber}:`, pageErr);
-            throw new Error(`Page ${page.pageNumber} failed: ${pageErr.message || pageErr}. Completed pages are saved. Retry this page before continuing.`);
           }
+          console.error(`Error processing page ${page.pageNumber}:`, pageErr);
+          // Quota, plan and block errors repeat on every page, so they end the run at once. Any other failure marks the
+          // page as failed and the run carries on with the next one, unless two in a row fail (the AI is probably down).
+          const fatal = ['ApiPlanError', 'ApiLimitError', 'ApiBlockedError'].includes(pageErr?.name);
+          failedPages += batch.length;
+          consecutiveFailures++;
+          if (fatal || consecutiveFailures >= 2) {
+            throw new Error(`Page ${page.pageNumber} failed: ${pageErr?.message || pageErr}. Finished pages are saved. Press Retry failed or Continue once it is fixed.`);
+          }
+          carriedPendingContext = null;
+          i += batch.length;
+          requestIndex++;
         }
 
         // Fast pacing delay between sequential pages (keys rotate automatically across pool)
@@ -1540,9 +1551,11 @@ Rules:
       }
 
       setLiveStatusText(
-        mode === 'similar'
-          ? '✓ All selected pages processed: Brand-new similar practice MCQs generated successfully!'
-          : 'All selected pages sequentially processed with carry-over context!'
+        failedPages > 0
+          ? `${donePages} page(s) done, ${failedPages} failed. Press Retry failed to try the failed ones again.`
+          : mode === 'similar'
+            ? `✓ ${donePages} page(s) done: brand-new similar practice MCQs generated.`
+            : `✓ ${donePages} page(s) extracted.`
       );
     } catch (err: any) {
       console.error('Sequential extraction error:', err);
@@ -1576,22 +1589,6 @@ Rules:
         });
       }, 50);
     }
-  };
-
-  // Dedicated full re-extraction from scratch
-  const handleReExtractAll = async (targetMode?: 'exact' | 'similar') => {
-    if (pages.length === 0) return;
-    const mode = targetMode || extractionMode;
-    const actionLabel = mode === 'similar' ? 'generate BRAND-NEW SIMILAR MCQs for' : 'RE-EXTRACT';
-    const confirmAll = confirm(`Are you sure you want to ${actionLabel} ALL ${pages.length} pages sequentially from scratch?`);
-    if (!confirmAll) return;
-    setPages(prev => prev.map(p => ({ ...p, isSelected: true, status: 'pending', errorMessage: undefined })));
-    setIsProcessingAll(false);
-    setIsPaused(false);
-    pauseRef.current = false;
-    setTimeout(() => {
-      handleStartExtraction(mode, true);
-    }, 150);
   };
 
   // Re-verify single item with missing fields using actual page images
@@ -2175,6 +2172,10 @@ Rules:
 
   // Uploaded file and the page inside it, for the Master CSV's source_pdf / source_pages.
   const masterSourceFor = React.useMemo(() => masterSourceResolver(pages), [pages]);
+
+  // What the Run button should offer for the current state of the page queue.
+  const runSummary = React.useMemo(() => summarizeRun(pages), [pages]);
+  const runMain = primaryRun(runSummary);
   const buildMasterRows = () => buildMasterBankRows(extractedMcqs, masterContext, masterSourceFor);
 
   const handleDownloadMasterCsv = () => {
@@ -3329,12 +3330,13 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                       <div className="btn-group">
                         <button
                           type="button"
-                          onClick={() => handleStartExtraction('exact')}
+                          disabled={!runMain.scope}
+                          onClick={() => runMain.scope && handleStartExtraction(undefined, runMain.scope)}
                           className="btn btn-primary"
-                          title="Extract exact questions directly as written in the PDF"
+                          title={`${runMain.hint} Mode: ${extractionMode === 'similar' ? 'reference (new similar MCQs)' : 'exact PDF'}.`}
                         >
-                          <Play />
-                          <span>Start extraction</span>
+                          {runMain.kind === 'done' ? <CheckCheck /> : runMain.kind === 'retry' ? <RotateCw /> : <Play />}
+                          <span>{runMain.label}{runMain.count > 0 ? ` (${runMain.kind === 'continue' ? `${runMain.count} left` : runMain.count})` : ''}</span>
                         </button>
                         <button
                           type="button"
@@ -3349,28 +3351,86 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                       </div>
                       {openMenu === 'runs' && (
                         <div className="menu left-0 mt-1.5 w-80 animate-fadeIn" role="menu">
+                          <p className="menu-label">Mode for the next run</p>
+                          <div className="px-2.5 pb-2">
+                            <div className="seg seg-sm w-full" role="group" aria-label="Extraction mode">
+                              {([['exact', 'Exact PDF'], ['similar', 'Ref mode (new MCQs)']] as const).map(([value, label]) => (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  aria-pressed={extractionMode === value}
+                                  onClick={() => updateSetting('extractionMode', value)}
+                                  title={value === 'exact' ? 'Extract the questions exactly as written in the PDF' : 'Use the pages only as a reference and create brand-new similar MCQs'}
+                                  className="seg-item flex-1"
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="menu-divider" />
+                          <p className="menu-label">Pages that are left</p>
                           <button
                             type="button"
                             role="menuitem"
                             className="menu-item"
-                            onClick={() => { setOpenMenu(null); handleStartExtraction('similar'); }}
-                            title="PDF questions act strictly as conceptual reference/blueprint. Generates brand-new similar MCQs (strictly no verbatim duplicates)!"
+                            disabled={runSummary.selectedRemaining === 0}
+                            onClick={() => { setOpenMenu(null); handleStartExtraction(undefined, 'remaining'); }}
                           >
-                            <Sparkles />
-                            <span>Generate similar MCQs (ref mode)<span className="menu-item-desc">Use pages as reference and create brand-new questions</span></span>
+                            <Play />
+                            <span>Continue pages not done ({runSummary.selectedRemaining})<span className="menu-item-desc">Selected pages that are new, stopped or failed. Finished pages are left alone.</span></span>
                           </button>
                           <button
                             type="button"
                             role="menuitem"
                             className="menu-item"
-                            onClick={() => { setOpenMenu(null); handleReExtractAll(extractionMode); }}
+                            disabled={runSummary.selectedFailed === 0}
+                            onClick={() => { setOpenMenu(null); handleStartExtraction(undefined, 'failed'); }}
                           >
                             <RotateCw />
-                            <span>Re-run all pages<span className="menu-item-desc">Extract every page again from scratch ({extractionMode === 'exact' ? 'exact PDF' : 'ref mode'})</span></span>
+                            <span>Retry failed pages ({runSummary.selectedFailed})<span className="menu-item-desc">Only the pages whose last attempt failed</span></span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="menu-item"
+                            disabled={runSummary.unselectedRemaining === 0}
+                            onClick={() => { setOpenMenu(null); handleStartExtraction(undefined, 'rest'); }}
+                          >
+                            <Plus />
+                            <span>Also extract unselected pages ({runSummary.unselectedRemaining})<span className="menu-item-desc">Select them and extract every page that is not done</span></span>
+                          </button>
+                          <div className="menu-divider" />
+                          <p className="menu-label">Run again: replaces extracted MCQs</p>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="menu-item"
+                            disabled={runSummary.selected === 0}
+                            onClick={() => { setOpenMenu(null); handleStartExtraction(undefined, 'selected'); }}
+                          >
+                            {extractionMode === 'similar' ? <Sparkles /> : <RotateCw />}
+                            <span>{extractionMode === 'similar' ? 'Generate similar MCQs for selected pages' : 'Re-run selected pages'} ({runSummary.selected})<span className="menu-item-desc">Asks first, because finished pages get new results</span></span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="menu-item"
+                            onClick={() => { setOpenMenu(null); handleStartExtraction(undefined, 'all'); }}
+                          >
+                            {extractionMode === 'similar' ? <Sparkles /> : <RotateCw />}
+                            <span>{extractionMode === 'similar' ? 'Generate similar MCQs for all pages' : 'Re-run all pages'} ({runSummary.total})<span className="menu-item-desc">Selects every page and starts again from scratch. Asks first.</span></span>
                           </button>
                         </div>
                       )}
                     </div>
+                    {runSummary.total > 0 && (
+                      <div className="flex flex-wrap items-center gap-1" aria-label="Extraction progress">
+                        {runSummary.done > 0 && <span className="badge badge-success h-6" title="Pages already extracted"><Check /><span>{runSummary.done} done</span></span>}
+                        {runSummary.total - runSummary.done > 0 && <span className="badge badge-neutral h-6" title="Pages not extracted yet">{runSummary.total - runSummary.done} left</span>}
+                        {runSummary.failed > 0 && <span className="badge badge-danger h-6" title="Pages whose last attempt failed"><AlertTriangle /><span>{runSummary.failed} failed</span></span>}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -3395,13 +3455,14 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                 )}
 
                 {/* Status / selection */}
-                {liveStatusText ? (
+                {liveStatusText && (
                   <span className={`badge h-7 max-w-[18rem] sm:max-w-md ${isProcessingAll ? 'badge-accent' : 'badge-neutral'}`} role="status">
                     {isProcessingAll ? <Loader2 className="animate-spin" /> : <span className="dot text-ink-3" />}
-                    <span className="truncate">{liveStatusText}</span>
+                    <span className="truncate" title={liveStatusText}>{liveStatusText}</span>
                   </span>
-                ) : (
-                  <div className="flex items-center gap-1 text-xs text-ink-3">
+                )}
+                {!isProcessingAll && (
+                  <div className="flex flex-wrap items-center gap-1 text-xs text-ink-3">
                     <button
                       type="button"
                       onClick={() => {
@@ -3412,7 +3473,17 @@ Explanation: The Indian National Congress was founded in December 1885 at Bombay
                     >
                       {pages.every(p => p.isSelected) ? 'Deselect all' : 'Select all'}
                     </button>
-                    <span>{pages.filter(p => p.isSelected).length}/{pages.length} selected</span>
+                    {runSummary.done > 0 && runSummary.total - runSummary.done > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPages(prev => prev.map(p => ({ ...p, isSelected: p.status !== 'ready' })))}
+                        className="btn btn-ghost btn-xs"
+                        title="Tick only the pages that are not extracted yet"
+                      >
+                        Select remaining
+                      </button>
+                    )}
+                    <span>{runSummary.selected}/{runSummary.total} selected</span>
                   </div>
                 )}
               </div>

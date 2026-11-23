@@ -155,8 +155,20 @@ Use updateBlock with only "type", "level" and "variant".`,
     request: 'Set a bright, friendly classroom theme: banner headings, a strong primary colour with a matching accent, boxed questions, dark readable text on a white page, a page decoration, and style heading level 2 and 3 so the three heading levels look clearly different (setElementStyle).',
   },
   {
+    group: 'Look & layout', mode: 'design', label: 'Options: one per line',
+    request: 'Put every option on its own line: setOptionsLayout with columns 1. Change nothing else.',
+  },
+  {
+    group: 'Look & layout', mode: 'design', label: 'Options: 2 × 2 grid',
+    request: 'Arrange the options of every question two per row (2 × 2): setOptionsLayout with columns 2. Change nothing else.',
+  },
+  {
+    group: 'Look & layout', mode: 'design', label: 'Options: all in one row',
+    request: 'Put all options of a question in one row: setOptionsLayout with columns 4. Change nothing else.',
+  },
+  {
     group: 'Look & layout', mode: 'design', label: 'Black & white exam paper',
-    request: 'Set a plain black and white exam-paper style: serif font, plain headings, plain questions, options in 4 columns, no decoration, document layout.',
+    request: 'Set a plain black and white exam-paper style: serif font, plain headings, plain questions, all options in one row (setOptionsLayout 4), no decoration, document layout.',
   },
 ];
 
@@ -174,10 +186,13 @@ Reply with ONE JSON object and nothing else:
 
 OPERATIONS (use only these, with exactly these field names):
 Look
-- {"op":"setTheme","patch":{...}}  Theme fields: primary, accent, text, pageBackground (colors "#RRGGBB"); font ${FONT_IDS.map(id => `"${id}"`).join('|')} (hindi, mangal, kokila, aparajita, utsaah are Hindi fonts); baseSize 9-18 (pt); headingStyle "plain"|"bar"|"banner"; questionStyle "plain"|"boxed"|"numbered-badge"; optionColumns 1|2|4; decoration "none"|"top-bar"|"bottom-bar"|"left-bar"|"frame"; spacing "compact"|"normal"|"relaxed"; highlight (default pen) ${PENS.map(p => `"${p}"`).join('|')}; labelLang "hi"|"en"; header, footer (short text); showPageNumbers true|false.
+- {"op":"setTheme","patch":{...}}  Theme fields: primary, accent, text, pageBackground (colors "#RRGGBB"); font ${FONT_IDS.map(id => `"${id}"`).join('|')} (hindi, mangal, kokila, aparajita, utsaah are Hindi fonts); baseSize 9-18 (pt); headingStyle "plain"|"bar"|"banner"; questionStyle "plain"|"boxed"|"numbered-badge"; decoration "none"|"top-bar"|"bottom-bar"|"left-bar"|"frame"; spacing "compact"|"normal"|"relaxed"; highlight (default pen) ${PENS.map(p => `"${p}"`).join('|')}; labelLang "hi"|"en"; header, footer (short text); showPageNumbers true|false.
 - {"op":"setElementStyle","target":"<kind>","style":{...}}  styles EVERY element of one kind, now and later. Kinds: ${STYLE_KEYS.map(k => `"${k}"`).join(', ')} ("title" = slide titles).
 - {"op":"styleBlocks","ids":["b3","b7"],"style":{...}}  styles only these blocks.
   Style fields: color, background, borderColor ("#RRGGBB"); align "left"|"center"|"right"; size "sm"|"md"|"lg"|"xl"; bold, italic, underline (true|false); border "none"|"box"|"left-bar"|"underline"; font (a font id).
+Options of a question (MCQ)
+- {"op":"setOptionsLayout","columns":1|2|4}  arranges the options of EVERY question: 1 = each option on its own line (4 rows), 2 = two per row (2×2), 4 = all in one row (1×4). It also separates lines that hold several options, such as "(A) … (B) …", into one option each. This is the ONLY way to separate, spread out or rearrange options.
+- {"op":"splitOptions"}  only separates lines that hold several options into one option block each, keeping the current layout. Optional "pageId" or "ids".
 Words
 - {"op":"emphasize","id":"b3","phrases":["exact words","another phrase"],"mark":"bold"|"highlight"|"both","color":"<pen>"}  marks words INSIDE a block without rewriting it. Each phrase must be copied exactly, character for character, from that block's text. "both" = bold + highlight. "color" is optional (a pen: ${PENS.join(', ')}); leave it out for the default pen. This is the only way to bold or highlight words.
 - {"op":"setHighlighter","color":"<pen>","all":true}  changes the default pen ("all": true also recolours every existing highlight).
@@ -196,6 +211,8 @@ Pages
 
 RULES:
 - Prefer setTheme and setElementStyle: one operation restyles the whole document. Use styleBlocks only for a few specific blocks.
+- Options: when the user wants options separated, apart, on separate lines, one below another, in 2 columns / 2×2, in one row, or "like tabs" ("options alag karo", "ek line me ek option", "विकल्प अलग करो"), use setOptionsLayout. Spacing, borders, backgrounds, alignment or updateBlock text cannot separate options: never use them for this, and never retype option text.
+- Say in "reply" only what your operations really do. If no operation can do what was asked, return "ops": [] and say so plainly; do not make a different change and call it done.
 - Keep text readable: dark text on light backgrounds, light text only on dark backgrounds. Boxes use light tints.
 - OVERFLOW IS HANDLED BY THE APP: after your operations it automatically moves extra blocks to a new slide, splits long tables and paragraphs, and shrinks text if needed. So never rewrite, shorten or split a block's text to make it fit, and never reduce the font size for that reason. Just choose sensible slide starts with paginate.
 - For slides: setLayout "slides", then ONE paginate listing every slide start for the whole document (or for the part you are shown). Group by topic: a heading starts a slide; keep a question with its options, answer and figure.

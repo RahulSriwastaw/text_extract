@@ -146,7 +146,7 @@ const DesignStudio: React.FC<Props> = ({ input, onClearInput, onOpenTextTool }) 
     if (!current) return { applied: 0, skipped: 0 };
     const result = applyDesignOps(current, ops);
     commit(result.doc, coalesce);
-    return { applied: result.applied, skipped: result.skipped };
+    return { applied: result.applied, skipped: result.skipped, unchanged: result.unchanged };
   }, [commit]);
 
   /**

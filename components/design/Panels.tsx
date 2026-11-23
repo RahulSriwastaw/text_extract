@@ -15,7 +15,7 @@ import {
   type DesignDoc, type DesignOp, type DesignBlock, type BlockStyle, type ResolvedStyle, type StyleKey, type FontId, type Theme,
   type CalloutId, type BlockType, type Decoration, type SpacingId, type PageLayout,
   PRESET_THEMES, FONTS, FONT_IDS, STYLE_KEYS, STYLE_KEY_LABELS, HIGHLIGHTERS, HIGHLIGHTER_IDS, CALLOUTS, CALLOUT_IDS, DECORATIONS,
-  allBlocks, autoPaginate, elementCounts, resolveStyle, styleKey, plainText,
+  allBlocks, autoPaginate, elementCounts, resolveStyle, styleKey, plainText, optionColumnsOf, combinedOptionCount,
 } from '../../services/designDoc';
 import type { OpResult } from './DesignCanvas';
 
@@ -45,6 +45,19 @@ function Seg<T extends string | number>({ value, options, onPick, name }: { valu
     </div>
   );
 }
+
+/** A tiny picture of four options laid out in `columns` columns. */
+const OptionGlyph: React.FC<{ columns: 1 | 2 | 4 }> = ({ columns }) => (
+  <span aria-hidden="true" style={{ display: 'inline-grid', gridTemplateColumns: `repeat(${columns}, 1fr)`, gap: 2, width: 26, verticalAlign: 'middle' }}>
+    {[0, 1, 2, 3].map(i => <span key={i} style={{ height: columns === 4 ? 8 : 3, borderRadius: 1, background: 'currentColor' }} />)}
+  </span>
+);
+const OPTION_LAYOUTS = [
+  [1, <OptionGlyph columns={1} />, 'One option per row (4 rows)'],
+  [2, <OptionGlyph columns={2} />, 'Two per row (2 × 2)'],
+  [4, <OptionGlyph columns={4} />, 'All four in one row (1 × 4)'],
+] as const;
+const OPTION_LAYOUT_NAMES: Record<number, string> = { 1: 'one per row', 2: 'two per row (2 × 2)', 4: 'all in one row (1 × 4)' };
 
 // ---------------------------------------------------------------------------
 // Style controls shared by "this element" and "every element of this kind"
@@ -181,7 +194,9 @@ export const ThemePanel: React.FC<{ doc: DesignDoc; applyOps: Apply; onReplace: 
         <div><p className={label}>Questions</p>
           <Seg name="Questions" value={theme.questionStyle} onPick={questionStyle => setTheme({ questionStyle })} options={[['plain', 'Plain'], ['boxed', 'Boxed'], ['numbered-badge', 'Badge']] as const} /></div>
         <div><p className={label}>Options per row</p>
-          <Seg name="Options per row" value={theme.optionColumns} onPick={optionColumns => setTheme({ optionColumns })} options={[[1, '1'], [2, '2'], [4, '4']] as const} /></div>
+          <Seg name="Options per row" value={optionColumnsOf(theme)}
+            onPick={columns => applyOps([{ op: 'setOptionsLayout', columns }])}
+            options={[[1, '1'], [2, '2'], [4, '4']] as const} /></div>
       </Section>
 
       <Section title="Page decoration">
@@ -231,6 +246,7 @@ export const ElementsPanel: React.FC<{
   const page = doc.pages.find(p => p.blocks.some(b => b.id === selectedBlockId));
   const block: DesignBlock | undefined = page?.blocks.find(b => b.id === selectedBlockId);
   const counts = elementCounts(doc);
+  const combined = highlightKey === 'option' ? combinedOptionCount(doc) : 0;
   const ctxOf = (key?: StyleKey) => ({ layout: doc.layout, pageLayout: page?.layout, pageBackground: page?.background, pageScale: page?.scale, ...(key && { key }) });
   const marks = allBlocks(doc).reduce((n, b) => n + ((b.text || '').match(/==[^=\n]+==/g) || []).length, 0);
 
@@ -320,6 +336,24 @@ export const ElementsPanel: React.FC<{
               <label className="flex items-center gap-2 text-xs text-ink-2">
                 <input type="checkbox" checked={theme.showPageNumbers} onChange={e => applyOps([{ op: 'setTheme', patch: { showPageNumbers: e.target.checked } }])} /> Show page numbers
               </label>
+            )}
+            {highlightKey === 'option' && (
+              <div>
+                <p className={label + ' flex justify-between'}>Options layout
+                  <span className="font-medium">{theme.styles?.option?.columns ? OPTION_LAYOUT_NAMES[theme.styles.option.columns] : `Auto: ${OPTION_LAYOUT_NAMES[theme.optionColumns]}`}</span></p>
+                <Seg<number> name="Options layout" value={theme.styles?.option?.columns || 0}
+                  onPick={columns => applyOps(columns
+                    // Lines that hold two options ("(A) … (B) …") are separated first, or no layout could move them.
+                    ? [{ op: 'splitOptions' }, { op: 'setElementStyle', target: 'option', style: { columns: columns as 1 | 2 | 4 } }]
+                    : [{ op: 'setElementStyle', target: 'option', unset: ['columns'] }])}
+                  options={[[0, 'Auto', "Follow the theme's layout"], ...OPTION_LAYOUTS]} />
+                {combined > 0 && (
+                  <p className="text-[11px] text-ink-3 leading-snug mt-1.5">
+                    {combined} line{combined === 1 ? ' holds' : 's hold'} several options together, e.g. "(A) … (B) …".{' '}
+                    <button type="button" className="font-bold text-accent-light hover:underline" onClick={() => applyOps([{ op: 'splitOptions' }])}>Separate them</button>
+                  </p>
+                )}
+              </div>
             )}
             {highlightKey !== 'table' && (
               <StyleControls id={'group:' + highlightKey} image={highlightKey === 'image'} own={theme.styles?.[highlightKey] || {}}

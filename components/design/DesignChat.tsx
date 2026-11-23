@@ -28,7 +28,7 @@ interface Props {
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   /** Apply the AI's operations; returns how many were applied and skipped. */
-  applyOps: (ops: unknown[]) => { applied: number; skipped: number };
+  applyOps: (ops: unknown[]) => { applied: number; skipped: number; unchanged?: number };
   restore: (doc: DesignDoc) => void;
 }
 
@@ -70,7 +70,7 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
 
     const scopePageId = !mode && scope === 'page' ? selectedPageId : undefined;
     const how: TemplateMode | 'page' = scopePageId ? 'page' : mode || (scope === 'text' ? 'fullText' : 'design');
-    let applied = 0, skipped = 0, reply = '', done = 0, failure = '', cutShort = 0;
+    let applied = 0, skipped = 0, unchanged = 0, reply = '', done = 0, failure = '', cutShort = 0;
     const common = () => { const current = getDoc()!; return { theme: current.theme, layout: current.layout, history, request }; };
 
     try {
@@ -83,7 +83,7 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
             : how === 'lesson' ? { outline: outlineForAi(current, { maxChars: LESSON_CHARS }), lesson: true }
             : { outline: outlineForAi(current, { fill }) }),
         });
-        ({ applied, skipped } = applyOps(data.ops || []));
+        ({ applied, skipped, unchanged = 0 } = applyOps(data.ops || []));
         reply = data.reply;
         if (data.truncated) cutShort++;
         done = 1;
@@ -105,7 +105,7 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
             return false;
           });
           const result = applyOps(ops);
-          applied += result.applied; skipped += result.skipped;
+          applied += result.applied; skipped += result.skipped; unchanged += result.unchanged || 0;
           reply = data.reply || reply;
           if (data.truncated) cutShort++;
           done++;
@@ -131,7 +131,8 @@ const DesignChat: React.FC<Props> = ({ getDoc, fill, selectedPageId, messages, s
         text: reply || (applied ? 'Done.' : 'I could not find a change to make for that.'),
         ...(applied > 0 && { undoTo: before }),
         note: [
-          applied ? `${applied} change${applied === 1 ? '' : 's'} applied${skipped ? `, ${skipped} skipped` : ''}` : skipped ? `${skipped} invalid change${skipped === 1 ? '' : 's'} skipped` : '',
+          applied ? `${applied} change${applied === 1 ? '' : 's'} applied${skipped ? `, ${skipped} skipped` : ''}`
+            : skipped || unchanged ? 'Nothing changed in the document' + (unchanged ? ': it was already like that' : `: ${skipped} invalid change${skipped === 1 ? '' : 's'} skipped`) : '',
           cutShort ? `${cutShort} AI repl${cutShort === 1 ? 'y was' : 'ies were'} cut short; send the request again to finish the rest` : '',
         ].filter(Boolean).join(' · ') || undefined,
       }]);

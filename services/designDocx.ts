@@ -18,7 +18,7 @@ import { parseLineToChildren, type DocxRunStyle } from './docxService';
 import {
   type DesignDoc, type DesignBlock, type DesignPage, type StyleContext, type ResolvedStyle,
   FONTS, PAGE_SIZE, SPACING, IMAGE_WIDTH, HIGHLIGHT_TEXT,
-  resolveStyle, pageFill, calloutInfo, mix, legible, questionNumbers, displayText, balanceStars, highlightSegments, plainText,
+  resolveStyle, pageFill, calloutInfo, mix, legible, questionNumbers, displayText, balanceStars, highlightSegments, plainText, optionColumnsOf,
 } from './designDoc';
 
 export interface DesignDocxOptions {
@@ -117,12 +117,12 @@ export async function generateDesignDocx(doc: DesignDoc, options: DesignDocxOpti
     for (let i = 0; i < blocks.length; i++) {
       const block = blocks[i];
 
-      if (block.type === 'option' && theme.optionColumns > 1) {
+      if (block.type === 'option' && optionColumnsOf(theme) > 1) {
         // Consecutive options share one borderless grid.
         const group: DesignBlock[] = [];
         while (i < blocks.length && blocks[i].type === 'option') group.push(blocks[i++]);
         i--;
-        const columns = theme.optionColumns;
+        const columns = optionColumnsOf(theme);
         const rows: TableRow[] = [];
         for (let r = 0; r < group.length; r += columns) {
           rows.push(new TableRow({

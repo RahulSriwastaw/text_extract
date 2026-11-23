@@ -24,6 +24,9 @@ import { Loader2, CheckCircle2, AlertCircle, Edit2, Copy, Save, X, Check, Refres
 import { formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 import GeminiExplanationPanel from './GeminiExplanationPanel';
 
+// Loaded only when an output template is on (it brings the Design Studio page renderer with it).
+const PaperPreview = React.lazy(() => import('./PaperPreview'));
+
 interface ProcessingListProps {
   pages: ScannedPage[];
   onApplyFigure: (pageId: string, figure: ExtractedElement, image: string, bbox?: BoundingBox, extra?: FigureCrop[]) => void;
@@ -38,6 +41,8 @@ interface ProcessingListProps {
   numberingStyle?: NumberingStyle;
   optionArrangement: OptionArrangement;
   mcqMode?: boolean;
+  /** Output template id; 'board-exam' previews each page as the printed paper it will become. */
+  template?: string;
 }
 
 const processTextForDisplay = (
@@ -113,8 +118,12 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
   showMcqNumbers = true,
   numberingStyle = NumberingStyle.QUESTION_DOT,
   optionArrangement,
-  mcqMode = false
+  mcqMode = false,
+  template = 'none'
 }) => {
+  const paperTemplate = template === 'board-exam';
+  /** With a template on: show the page as the paper it will become (true) or as plain text (false). */
+  const [paperView, setPaperView] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -275,6 +284,12 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                             </>
                         ) : (
                             <>
+                                {paperTemplate && (
+                                    <button onClick={() => setPaperView(v => !v)} aria-pressed={paperView} className="btn btn-ghost btn-sm"
+                                        title={paperView ? 'Show the plain extracted text' : 'Show how the exam paper will look'}>
+                                        <FileText /> {paperView ? 'Plain text' : 'Paper view'}
+                                    </button>
+                                )}
                                 <button onClick={() => handleEditClick(page)} className="btn btn-secondary btn-sm" title="Edit text">
                                     <Edit2 /> Edit
                                 </button>
@@ -361,6 +376,11 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                    <div>
                       {page.status === 'done' && page.extractedText ? (
                           <>
+                            {paperTemplate && paperView ? (
+                              <React.Suspense fallback={<p className="text-sm text-ink-3">Drawing the paper…</p>}>
+                                <PaperPreview text={processedPagesMap.get(page.id) || page.extractedText} />
+                              </React.Suspense>
+                            ) : (
                             <div className={`markdown-body max-w-none text-sm leading-relaxed ${optionArrangement === OptionArrangement.VERTICAL ? '[&_p]:whitespace-pre-line' : ''}`}>
                                 <ReactMarkdown
                                   remarkPlugins={[remarkGfm, remarkMath]}
@@ -370,6 +390,7 @@ const ProcessingList: React.FC<ProcessingListProps> = ({
                                   {svgBlocksToMarkdown(normalizePreviewMath(processedPagesMap.get(page.id) || page.extractedText))}
                                 </ReactMarkdown>
                             </div>
+                            )}
 
                             {/* Inline Gemini AI Assistant for Extracted Page */}
                             {aiPanelOpenId === page.id && (

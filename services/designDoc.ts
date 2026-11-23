@@ -442,6 +442,18 @@ export function optionsFromTable(text: string): string[] | null {
 export const combinedOptionCount = (doc: DesignDoc): number =>
   allBlocks(doc).filter(b => (b.type === 'option' && splitOptionText(b.text || '')) || (b.type === 'table' && optionsFromTable(b.text || ''))).length;
 
+/**
+ * Text written to an output template has one unit per line: a question, an option, the same
+ * question in English. Without a blank line `textToBlocks` reads a plain line after an option as
+ * the rest of that option, so "(D) यूनान" would swallow the English question below it. This puts
+ * the blank lines in; table rows and list items stay together.
+ */
+export function oneBlockPerLine(text: string): string {
+  const lines = text.replace(/\r/g, '').split('\n').filter(line => line.trim());
+  const kind = (line: string) => /^\s*\|/.test(line) ? 'table' : /^\s*[-*•]\s+/.test(line) ? 'list' : '';
+  return lines.map((line, i) => line + (i === lines.length - 1 ? '' : kind(line) && kind(line) === kind(lines[i + 1]) ? '\n' : '\n\n')).join('');
+}
+
 /** Split Markdown text into typed blocks (question, option, heading, table…). */
 export function textToBlocks(doc: { nextId: number }, text: string): DesignBlock[] {
   const blocks: DesignBlock[] = [];

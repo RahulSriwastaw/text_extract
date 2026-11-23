@@ -19,6 +19,7 @@ import type { FigureMode, BoundingBox } from '../types';
 import { convertPdfToImages, readFileAsBase64 } from '../services/pdfUtils';
 import { extractLayoutFromImage } from '../services/geminiService';
 import { EXTRACT_TEMPLATES, EXTRACT_TEMPLATE_IDS, type ExtractTemplateId } from '../services/extractTemplates';
+import { oneBlockPerLine } from '../services/designDoc';
 import { generateDocx, formatQuestionPrefix, renumberQuestionInLine } from '../services/docxService';
 import { convertElementsToMockTestItems } from '../services/mocktestService';
 import GeminiConnectModal from './GeminiConnectModal';
@@ -1515,7 +1516,11 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                                     {bank && <DriveDocument key={uid + bank.documents} name={fileName || 'document'} disabled={!readyExport.pageCount} generate={()=>generateDocx(readyExport.elements, optionArrangement, showMcqNumbers, numberingStyle, showAnswers, mcqMode)} />}
                                     {onSendToDesign && (
                                         <button
-                                            onClick={() => onSendToDesign(readyExport.elements, fileName || 'Document')}
+                                            onClick={() => onSendToDesign(
+                                              // Template text has one unit per line; Design Studio needs them as separate blocks.
+                                              extractTemplate === 'none' ? readyExport.elements
+                                                : readyExport.elements.map(el => el.type === 'text' && el.content ? { ...el, content: oneBlockPerLine(el.content) } : el),
+                                              fileName || 'Document')}
                                             disabled={!readyExport.pageCount}
                                             title="Open this content in Design Studio to style it with AI and themes"
                                             className="btn btn-secondary"
@@ -1696,6 +1701,7 @@ const PdfConverter: React.FC<PdfConverterProps> = ({ uid, initialImages, onClear
                     showMcqNumbers={showMcqNumbers}
                     numberingStyle={numberingStyle}
                     mcqMode={mcqMode}
+                    template={extractTemplate}
                 />
              </motion.div>
            )}
